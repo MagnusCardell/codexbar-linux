@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "unsupported_source",
+    "message": "source web is not supported on Linux",
+    "provider": "all",
+    "source": "web"
+  }
+}

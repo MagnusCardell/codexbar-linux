@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "timeout",
+    "message": "codexbar command exceeded its timeout",
+    "timeoutSeconds": 30
+  }
+}

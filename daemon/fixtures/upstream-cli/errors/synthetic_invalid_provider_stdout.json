@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_provider",
+    "message": "Unknown provider: __codexbar_linux_invalid_provider__",
+    "provider": "__codexbar_linux_invalid_provider__"
+  }
+}

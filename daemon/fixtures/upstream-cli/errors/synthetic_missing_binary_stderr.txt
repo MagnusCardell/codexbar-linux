@@ -1,0 +1,1 @@
+Unable to locate codexbar. Install with Linuxbrew or set CODEXBAR_CLI.

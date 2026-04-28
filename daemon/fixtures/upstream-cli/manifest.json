@@ -1,0 +1,338 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "upstream-cli-p02a",
+  "generatedAt": "2026-04-28T00:00:00Z",
+  "upstreamVersion": "no local binary available; doc-derived and synthetic corpus",
+  "platform": {
+    "os": "Linux",
+    "kernel": "doc-derived-or-synthetic",
+    "arch": "doc-derived-or-synthetic"
+  },
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "Committed corpus contains redacted doc-derived and synthetic samples only.",
+      "No raw live upstream CLI output is committed."
+    ]
+  },
+  "testExpectations": {
+    "usage_success": "stdout is parseable upstream usage JSON and may include redacted raw upstream identity field names",
+    "usage_error": "stdout or stderr captures a redacted nonzero usage failure",
+    "cost_success": "stdout is parseable upstream cost JSON array/object",
+    "unsupported_source": "Linux web source rejection is captured and redacted",
+    "invalid_provider": "invalid provider command is captured and redacted",
+    "missing_binary": "missing codexbar binary is captured as a synthetic dependency failure",
+    "timeout_synthetic": "timeout handling has a parseable synthetic error payload",
+    "parse_error_synthetic": "malformed stdout is stored as text and explicitly categorized"
+  },
+  "fixtures": [
+    {
+      "fixtureId": "doc_usage_all",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "doc-derived from steipete/CodexBar docs/cli.md main",
+      "platform": {
+        "os": "Linux",
+        "kernel": "doc-derived",
+        "arch": "doc-derived"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "usage/doc_usage_all_stdout.json",
+      "stderrPath": "usage/doc_usage_all_stderr.txt",
+      "metadataPath": "usage/doc_usage_all_metadata.json",
+      "expectedCategory": "usage_success",
+      "synthetic": false,
+      "docDerived": true,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "identity-bearing values redacted while preserving upstream field names"
+        ]
+      }
+    },
+    {
+      "fixtureId": "doc_status_all",
+      "command": "status",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--status"
+      ],
+      "upstreamVersion": "doc-derived from steipete/CodexBar docs/cli.md main",
+      "platform": {
+        "os": "Linux",
+        "kernel": "doc-derived",
+        "arch": "doc-derived"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "status/doc_status_all_stdout.json",
+      "stderrPath": "status/doc_status_all_stderr.txt",
+      "metadataPath": "status/doc_status_all_metadata.json",
+      "expectedCategory": "usage_success",
+      "synthetic": false,
+      "docDerived": true,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "status-bearing usage shape, not a normalized daemon snapshot"
+        ]
+      }
+    },
+    {
+      "fixtureId": "doc_cost_all",
+      "command": "cost",
+      "argv": [
+        "codexbar",
+        "cost",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "doc-derived from steipete/CodexBar docs/cli.md main",
+      "platform": {
+        "os": "Linux",
+        "kernel": "doc-derived",
+        "arch": "doc-derived"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "cost/doc_cost_all_stdout.json",
+      "stderrPath": "cost/doc_cost_all_stderr.txt",
+      "metadataPath": "cost/doc_cost_all_metadata.json",
+      "expectedCategory": "cost_success",
+      "synthetic": false,
+      "docDerived": true,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "cost shape from upstream CLI docs; no identity-bearing values present"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_unsupported_source",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "web"
+      ],
+      "upstreamVersion": "synthetic; no local codexbar binary available",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 1,
+      "timedOut": false,
+      "stdoutPath": "errors/synthetic_unsupported_source_stdout.json",
+      "stderrPath": "errors/synthetic_unsupported_source_stderr.txt",
+      "metadataPath": "errors/synthetic_unsupported_source_metadata.json",
+      "expectedCategory": "unsupported_source",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "Linux unsupported source behavior is documented upstream but not locally observed"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_invalid_provider",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "__codexbar_linux_invalid_provider__"
+      ],
+      "upstreamVersion": "synthetic; no local codexbar binary available",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 2,
+      "timedOut": false,
+      "stdoutPath": "errors/synthetic_invalid_provider_stdout.json",
+      "stderrPath": "errors/synthetic_invalid_provider_stderr.txt",
+      "metadataPath": "errors/synthetic_invalid_provider_metadata.json",
+      "expectedCategory": "invalid_provider",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "invalid provider id is intentionally non-sensitive"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_missing_binary",
+      "command": "version",
+      "argv": [
+        "codexbar",
+        "--version"
+      ],
+      "upstreamVersion": "missing",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 127,
+      "timedOut": false,
+      "stdoutPath": "errors/synthetic_missing_binary_stdout.json",
+      "stderrPath": "errors/synthetic_missing_binary_stderr.txt",
+      "metadataPath": "errors/synthetic_missing_binary_metadata.json",
+      "expectedCategory": "missing_binary",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "covers capture harness and future runner missing dependency behavior"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_timeout",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "usage",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "synthetic; no local codexbar binary available",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 124,
+      "timedOut": true,
+      "stdoutPath": "errors/synthetic_timeout_stdout.json",
+      "stderrPath": "errors/synthetic_timeout_stderr.txt",
+      "metadataPath": "errors/synthetic_timeout_metadata.json",
+      "expectedCategory": "timeout_synthetic",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "synthetic timeout fixture; no child process is run in CI"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_parse_error",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "synthetic; no local codexbar binary available",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "errors/synthetic_parse_error_stdout.txt",
+      "stderrPath": "errors/synthetic_parse_error_stderr.txt",
+      "metadataPath": "errors/synthetic_parse_error_metadata.json",
+      "expectedCategory": "parse_error_synthetic",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "malformed stdout intentionally uses .txt to keep JSON fixture validation strict"
+        ]
+      }
+    },
+    {
+      "fixtureId": "synthetic_redacted_stderr",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "synthetic; no local codexbar binary available",
+      "platform": {
+        "os": "Linux",
+        "kernel": "synthetic",
+        "arch": "synthetic"
+      },
+      "capturedAt": "2026-04-28T00:00:00Z",
+      "exitCode": 1,
+      "timedOut": false,
+      "stdoutPath": "errors/synthetic_redacted_stderr_stdout.json",
+      "stderrPath": "errors/synthetic_redacted_stderr_stderr.txt",
+      "metadataPath": "errors/synthetic_redacted_stderr_metadata.json",
+      "expectedCategory": "usage_error",
+      "synthetic": true,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "redacted stderr stress fixture with token, email, and home-path placeholders"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "missing_binary",
+    "message": "codexbar executable was not found",
+    "action": "Install upstream CodexBar CLI or set CODEXBAR_CLI"
+  }
+}

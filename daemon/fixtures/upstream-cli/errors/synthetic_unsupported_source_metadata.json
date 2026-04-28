@@ -1,0 +1,35 @@
+{
+  "fixtureId": "synthetic_unsupported_source",
+  "synthetic": true,
+  "docDerived": false,
+  "command": "usage",
+  "argv": [
+    "codexbar",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "all",
+    "--source",
+    "web"
+  ],
+  "upstreamVersion": "synthetic; no local codexbar binary available",
+  "platform": {
+    "os": "Linux",
+    "kernel": "synthetic",
+    "arch": "synthetic"
+  },
+  "capturedAt": "2026-04-28T00:00:00Z",
+  "exitCode": 1,
+  "timedOut": false,
+  "durationMs": 0,
+  "stdoutBytes": 0,
+  "stderrBytes": 0,
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "synthetic Linux unsupported web-source error based on upstream CLI documentation"
+    ]
+  }
+}

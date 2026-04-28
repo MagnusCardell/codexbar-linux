@@ -1,0 +1,29 @@
+{
+  "fixtureId": "synthetic_missing_binary",
+  "synthetic": true,
+  "docDerived": false,
+  "command": "version",
+  "argv": [
+    "codexbar",
+    "--version"
+  ],
+  "upstreamVersion": "missing",
+  "platform": {
+    "os": "Linux",
+    "kernel": "synthetic",
+    "arch": "synthetic"
+  },
+  "capturedAt": "2026-04-28T00:00:00Z",
+  "exitCode": 127,
+  "timedOut": false,
+  "durationMs": 0,
+  "stdoutBytes": 0,
+  "stderrBytes": 0,
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "synthetic missing-binary fixture; capture harness exits clearly when this occurs"
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+provider stderr redacted credential=[REDACTED_TOKEN] account=[REDACTED_EMAIL] home=<redacted:path>

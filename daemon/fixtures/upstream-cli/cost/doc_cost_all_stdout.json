@@ -1,0 +1,39 @@
+[
+  {
+    "provider": "codex",
+    "source": "local",
+    "updatedAt": "2025-12-04T18:10:22Z",
+    "sessionTokens": 12000,
+    "sessionCostUSD": 1.23,
+    "last30DaysTokens": 340000,
+    "last30DaysCostUSD": 42.5,
+    "daily": [
+      {
+        "date": "2025-12-04",
+        "inputTokens": 10000,
+        "outputTokens": 2000,
+        "cacheReadTokens": 3000,
+        "cacheCreationTokens": 400,
+        "totalTokens": 15400,
+        "totalCost": 1.23,
+        "modelsUsed": [
+          "gpt-5-codex"
+        ],
+        "modelBreakdowns": [
+          {
+            "modelName": "gpt-5-codex",
+            "cost": 1.23
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "inputTokens": 210000,
+      "outputTokens": 130000,
+      "cacheReadTokens": 50000,
+      "cacheCreationTokens": 7000,
+      "totalTokens": 397000,
+      "totalCost": 42.5
+    }
+  }
+]

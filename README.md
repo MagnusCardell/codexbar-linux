@@ -26,7 +26,7 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 01 daemon D-Bus/cache vertical slice** status.
+This repository is at **Task 02A upstream CLI fixture corpus** status.
 
 Present:
 
@@ -38,6 +38,8 @@ Present:
 - Normalized snapshot cache at `${XDG_CACHE_HOME:-~/.cache}/codexbar-linux/snapshot.json`; no raw provider payloads are cached.
 - Daemon-owned settings at `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json`.
 - Contract, schema-payload, cache, settings, redaction, browser-import stub, and D-Bus runtime tests.
+- Redacted upstream CLI fixture corpus under `daemon/fixtures/upstream-cli/`.
+- Local-only upstream CLI capture harness and fixture validator.
 - GNOME Shell extension skeleton under `extension/`.
 - Preferences skeleton that exposes only the GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
@@ -45,9 +47,9 @@ Present:
 - Local install/uninstall bootstrap scripts.
 - Validation scripts and GitHub Actions check workflow.
 
-Not implemented in Task 01:
+Not implemented after Task 02A:
 
-- upstream `codexbar` CLI adapter, which remains Task 02;
+- upstream `codexbar` CLI adapter/runtime integration, which remains Task 02B+;
 - browser-cookie import, beyond the schema-valid `not_implemented` test stub;
 - provider network calls or Linux web adapters;
 - provider scraping;
