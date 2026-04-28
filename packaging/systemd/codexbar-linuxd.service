@@ -1,0 +1,11 @@
+[Unit]
+Description=CodexBar Linux bootstrap user daemon
+Documentation=https://codexbar.dev
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/codexbar-linuxd
+Restart=no
+
+[Install]
+WantedBy=default.target

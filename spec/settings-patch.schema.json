@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/settings-patch.schema.json",
+  "title": "CodexBar Linux Daemon Settings Patch",
+  "description": "Partial update accepted by SetSettingsPatch(patch_json). Omitted fields are unchanged. This is not RFC 7396 JSON Merge Patch; null does not delete or reset fields unless explicitly allowed here. The daemon must validate the post-patch settings object against settings.schema.json.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intervalSeconds": { "type": "integer", "minimum": 30, "maximum": 86400 },
+        "startupRefresh": { "type": "boolean" },
+        "allowStaleCacheFallback": { "type": "boolean" }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "preferredSourceAdapter": { "type": "string", "enum": ["auto", "upstream_cli", "linux_web", "off"] },
+          "allowBrowserImport": { "type": "boolean" },
+          "allowCliFallback": { "type": "boolean" }
+        }
+      }
+    },
+    "browserImport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"] },
+        "profileIdAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Opaque browser profile id or local hash. Must not be an absolute profile path.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "domainAllowlistMode": { "type": "string", "enum": ["provider_required_only"] }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verbosity": { "type": "string", "enum": ["normal", "verbose"] },
+        "keepRedactedArtifacts": { "type": "boolean" }
+      }
+    }
+  }
+}

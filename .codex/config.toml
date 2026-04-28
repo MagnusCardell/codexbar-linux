@@ -1,0 +1,6 @@
+[agents]
+max_threads = 6
+max_depth = 1
+
+# Keep default sandbox/approval settings inherited from the operator unless overridden interactively.
+# Project-scoped custom agents live in .codex/agents/.

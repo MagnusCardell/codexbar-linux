@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-27T12:00:00Z",
+  "stale": true,
+  "selectedProvider": "codex",
+  "daemon": {
+    "version": "0.0.0-dev",
+    "state": "degraded",
+    "lastRefreshId": "fixture-refresh-stale",
+    "lastRefreshStartedAt": "2026-04-27T12:10:00Z",
+    "lastRefreshFinishedAt": "2026-04-27T12:10:05Z",
+    "upstreamCli": {
+      "path": "/usr/bin/codexbar",
+      "version": "fixture",
+      "available": true,
+      "diagnosticCode": "fixture_stale_cache"
+    }
+  },
+  "providers": [
+    {
+      "provider": "codex",
+      "displayName": "Codex",
+      "version": null,
+      "source": "unknown",
+      "sourceAdapter": "cache",
+      "state": "stale",
+      "updatedAt": "2026-04-27T12:00:00Z",
+      "staleSince": "2026-04-27T12:10:05Z",
+      "usage": {
+        "primary": {
+          "usedPercent": 48.0,
+          "remainingPercent": 52.0,
+          "windowMinutes": 300,
+          "resetsAt": "2026-04-27T15:00:00Z",
+          "label": "Session",
+          "detail": "Cached"
+        },
+        "secondary": null,
+        "tertiary": null
+      },
+      "credits": null,
+      "identity": null,
+      "status": {
+        "indicator": "stale",
+        "description": "Fixture data is stale",
+        "updatedAt": "2026-04-27T12:10:05Z",
+        "url": null
+      },
+      "cost": null,
+      "dashboardUrl": null,
+      "diagnosticsSummary": "Fixture stale cache fallback",
+      "diagnosticCodes": ["fixture_stale_cache"]
+    }
+  ]
+}

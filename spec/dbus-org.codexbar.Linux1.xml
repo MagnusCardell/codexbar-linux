@@ -1,0 +1,51 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node name="/org/codexbar/Linux1">
+  <interface name="org.codexbar.Linux1">
+    <method name="GetSnapshot">
+      <arg name="snapshot_json" type="s" direction="out"/>
+    </method>
+
+    <method name="Refresh">
+      <arg name="options_json" type="s" direction="in"/>
+      <arg name="refresh_id" type="s" direction="out"/>
+    </method>
+
+    <method name="GetDiagnostics">
+      <arg name="provider_id" type="s" direction="in"/>
+      <arg name="diagnostics_json" type="s" direction="out"/>
+    </method>
+
+    <method name="GetDaemonInfo">
+      <arg name="daemon_info_json" type="s" direction="out"/>
+    </method>
+
+    <method name="SetSettingsPatch">
+      <arg name="patch_json" type="s" direction="in"/>
+      <arg name="settings_json" type="s" direction="out"/>
+    </method>
+
+    <method name="TestBrowserImport">
+      <arg name="options_json" type="s" direction="in"/>
+      <arg name="result_json" type="s" direction="out"/>
+    </method>
+
+    <signal name="SnapshotChanged">
+      <arg name="snapshot_json" type="s"/>
+    </signal>
+
+    <signal name="RefreshStarted">
+      <arg name="refresh_id" type="s"/>
+    </signal>
+
+    <signal name="RefreshFinished">
+      <arg name="refresh_id" type="s"/>
+      <arg name="result_json" type="s"/>
+    </signal>
+
+    <signal name="ProviderChanged">
+      <arg name="provider_id" type="s"/>
+      <arg name="provider_event_json" type="s"/>
+    </signal>
+  </interface>
+</node>

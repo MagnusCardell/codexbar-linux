@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/daemon-info.schema.json",
+  "title": "CodexBar Linux Daemon Info",
+  "type": "object",
+  "required": ["schemaVersion", "version", "pid", "startedAt", "state", "capabilities", "paths", "upstreamCli"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "version": { "type": "string" },
+    "pid": { "type": "integer", "minimum": 1 },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "uptimeSeconds": { "type": "integer", "minimum": 0 },
+    "state": { "type": "string", "enum": ["starting", "ok", "refreshing", "degraded", "error"] },
+    "dbus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "busName": { "type": "string" },
+        "objectPath": { "type": "string" },
+        "interface": { "type": "string" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["upstreamCli", "browserImport", "linuxWebAdapters", "cost", "settingsPatch"],
+      "additionalProperties": false,
+      "properties": {
+        "upstreamCli": { "type": "boolean" },
+        "browserImport": { "type": "boolean" },
+        "linuxWebAdapters": { "type": "boolean" },
+        "cost": { "type": "boolean" },
+        "settingsPatch": { "type": "boolean" }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "required": ["configFile", "cacheFile"],
+      "additionalProperties": false,
+      "properties": {
+        "configFile": { "type": ["string", "null"] },
+        "cacheFile": { "type": ["string", "null"] },
+        "upstreamConfigFile": { "type": ["string", "null"] }
+      }
+    },
+    "upstreamCli": {
+      "type": "object",
+      "required": ["available"],
+      "additionalProperties": false,
+      "properties": {
+        "available": { "type": "boolean" },
+        "path": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "diagnosticCode": { "type": ["string", "null"] }
+      }
+    },
+    "build": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "gitSha": { "type": ["string", "null"] },
+        "target": { "type": ["string", "null"] },
+        "profile": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

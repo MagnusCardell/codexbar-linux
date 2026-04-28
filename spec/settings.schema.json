@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/settings.schema.json",
+  "title": "CodexBar Linux Daemon Settings",
+  "description": "Daemon-owned settings only. Shell UI preferences are owned by GSettings and documented in docs/CONTRACTS.md.",
+  "type": "object",
+  "required": ["schemaVersion", "refresh", "providers", "browserImport", "diagnostics"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "refresh": {
+      "type": "object",
+      "required": ["intervalSeconds", "startupRefresh"],
+      "additionalProperties": false,
+      "properties": {
+        "intervalSeconds": { "type": "integer", "minimum": 30, "maximum": 86400, "default": 120 },
+        "startupRefresh": { "type": "boolean", "default": true },
+        "allowStaleCacheFallback": { "type": "boolean", "default": true }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["enabled", "preferredSourceAdapter"],
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "preferredSourceAdapter": { "type": "string", "enum": ["auto", "upstream_cli", "linux_web", "off"], "default": "auto" },
+          "allowBrowserImport": { "type": "boolean", "default": true },
+          "allowCliFallback": { "type": "boolean", "default": true }
+        }
+      },
+      "default": {}
+    },
+    "browserImport": {
+      "type": "object",
+      "required": ["enabled", "policy", "profileIdAllowlist"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"], "default": "auto" },
+        "profileIdAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Opaque browser profile id or local hash. Must not be an absolute profile path.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "default": []
+        },
+        "domainAllowlistMode": { "type": "string", "enum": ["provider_required_only"], "default": "provider_required_only" }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": ["verbosity", "keepRedactedArtifacts"],
+      "additionalProperties": false,
+      "properties": {
+        "verbosity": { "type": "string", "enum": ["normal", "verbose"], "default": "normal" },
+        "keepRedactedArtifacts": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

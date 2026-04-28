@@ -1,0 +1,5 @@
+codexbar-linux (0.0.0-1) unstable; urgency=medium
+
+  * Bootstrap packaging skeleton. Task 08 wires real Debian package builds.
+
+ -- CodexBar GNOME Maintainers <maintainers@example.invalid>  Mon, 27 Apr 2026 12:00:00 +0000

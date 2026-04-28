@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.codexbar.Linux1
+Exec=/usr/bin/codexbar-linuxd
+SystemdService=codexbar-linuxd.service

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/provider-event.schema.json",
+  "title": "CodexBar Linux Provider Event",
+  "description": "Payload carried by ProviderChanged(provider_id, provider_event_json). The provider object must be a full normalized provider from snapshot.schema.json, not a partial patch.",
+  "type": "object",
+  "required": ["schemaVersion", "eventId", "emittedAt", "reason", "providerId", "provider"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "eventId": { "type": "string" },
+    "emittedAt": { "type": "string", "format": "date-time" },
+    "reason": { "type": "string", "enum": ["refresh_started", "refresh_progress", "refresh_finished", "settings_changed", "cache_loaded", "error"] },
+    "providerId": { "type": "string" },
+    "provider": {
+      "$ref": "snapshot.schema.json#/$defs/provider",
+      "description": "Full Snapshot.$defs.provider object. Do not emit partial provider patches in v1."
+    },
+    "diagnosticCodes": { "type": "array", "items": { "type": "string" }, "default": [] }
+  }
+}

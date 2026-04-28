@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-27T12:00:00Z",
+  "stale": false,
+  "selectedProvider": "codex",
+  "daemon": {
+    "version": "0.0.0-dev",
+    "state": "degraded",
+    "lastRefreshId": "fixture-refresh-timeout",
+    "lastRefreshStartedAt": "2026-04-27T11:59:58Z",
+    "lastRefreshFinishedAt": "2026-04-27T12:00:00Z",
+    "upstreamCli": {
+      "path": "/usr/bin/codexbar",
+      "version": "fixture",
+      "available": true,
+      "diagnosticCode": "fixture_timeout"
+    }
+  },
+  "providers": [
+    {
+      "provider": "codex",
+      "displayName": "Codex",
+      "version": null,
+      "source": "unknown",
+      "sourceAdapter": "upstream_cli",
+      "state": "timeout",
+      "updatedAt": "2026-04-27T12:00:00Z",
+      "staleSince": null,
+      "usage": {
+        "primary": null,
+        "secondary": null,
+        "tertiary": null
+      },
+      "credits": null,
+      "identity": null,
+      "status": {
+        "indicator": "timeout",
+        "description": "Fixture refresh timed out",
+        "updatedAt": "2026-04-27T12:00:00Z",
+        "url": null
+      },
+      "cost": null,
+      "dashboardUrl": null,
+      "diagnosticsSummary": "Fixture timeout state",
+      "diagnosticCodes": ["fixture_timeout"]
+    }
+  ]
+}

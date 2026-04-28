@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/browser-import-options.schema.json",
+  "title": "CodexBar Linux Browser Import Test Options",
+  "description": "Input accepted by TestBrowserImport(options_json). Task 00 and Task 01 stubs may validate this payload and return a safe not_implemented result without touching browsers, keyrings, cookies, or provider endpoints.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"], "default": "auto" },
+    "providers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "profileIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Opaque browser profile id or local hash. Must not be an absolute profile path.",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "includeDiagnostics": { "type": "boolean", "default": true }
+  }
+}

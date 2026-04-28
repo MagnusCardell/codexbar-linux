@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-27T12:00:00Z",
+  "stale": false,
+  "selectedProvider": "codex",
+  "daemon": {
+    "version": "0.0.0-dev",
+    "state": "degraded",
+    "lastRefreshId": "fixture-refresh-cookie-rejected",
+    "lastRefreshStartedAt": "2026-04-27T11:59:58Z",
+    "lastRefreshFinishedAt": "2026-04-27T12:00:00Z",
+    "upstreamCli": {
+      "path": null,
+      "version": null,
+      "available": false,
+      "diagnosticCode": "fixture_cookie_rejected"
+    }
+  },
+  "providers": [
+    {
+      "provider": "codex",
+      "displayName": "Codex",
+      "version": null,
+      "source": "web",
+      "sourceAdapter": "linux_web",
+      "state": "cookie_rejected",
+      "updatedAt": "2026-04-27T12:00:00Z",
+      "staleSince": null,
+      "usage": {
+        "primary": null,
+        "secondary": null,
+        "tertiary": null
+      },
+      "credits": null,
+      "identity": null,
+      "status": {
+        "indicator": "auth",
+        "description": "Fixture browser session was rejected",
+        "updatedAt": "2026-04-27T12:00:00Z",
+        "url": null
+      },
+      "cost": null,
+      "dashboardUrl": "https://example.invalid/codex",
+      "diagnosticsSummary": "Fixture rejected browser session",
+      "diagnosticCodes": ["fixture_cookie_rejected"]
+    }
+  ]
+}

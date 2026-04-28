@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/refresh-options.schema.json",
+  "title": "CodexBar Linux Refresh Options",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "reason": { "type": "string", "enum": ["manual", "scheduled", "startup", "settings_changed", "retry", "test"], "default": "manual" },
+    "force": { "type": "boolean", "default": false },
+    "providers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "busyBehavior": {
+      "type": "string",
+      "enum": ["return_existing", "reject"],
+      "default": "return_existing"
+    },
+    "sourceAdapterPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["auto", "prefer", "only", "exclude"], "default": "auto" },
+        "adapters": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["upstream_cli", "linux_web", "fixture"] },
+          "uniqueItems": true,
+          "default": []
+        },
+        "allowStaleCacheFallback": { "type": "boolean", "default": true }
+      },
+      "default": { "mode": "auto", "adapters": [], "allowStaleCacheFallback": true }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-27T12:00:00Z",
+  "stale": false,
+  "selectedProvider": "codex",
+  "daemon": {
+    "version": "0.0.0-dev",
+    "state": "refreshing",
+    "lastRefreshId": "fixture-refresh-loading",
+    "lastRefreshStartedAt": "2026-04-27T12:00:00Z",
+    "lastRefreshFinishedAt": null,
+    "upstreamCli": {
+      "path": null,
+      "version": null,
+      "available": false,
+      "diagnosticCode": null
+    }
+  },
+  "providers": [
+    {
+      "provider": "codex",
+      "displayName": "Codex",
+      "version": null,
+      "source": "unknown",
+      "sourceAdapter": "none",
+      "state": "loading",
+      "updatedAt": null,
+      "staleSince": null,
+      "usage": {
+        "primary": null,
+        "secondary": null,
+        "tertiary": null
+      },
+      "credits": null,
+      "identity": null,
+      "status": {
+        "indicator": "loading",
+        "description": "Fixture refresh in progress",
+        "updatedAt": null,
+        "url": null
+      },
+      "cost": null,
+      "dashboardUrl": null,
+      "diagnosticsSummary": "Fixture refresh is in progress",
+      "diagnosticCodes": []
+    }
+  ]
+}

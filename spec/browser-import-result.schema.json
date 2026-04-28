@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/browser-import-result.schema.json",
+  "title": "CodexBar Linux Browser Import Result",
+  "type": "object",
+  "required": ["schemaVersion", "testedAt", "status", "policy", "profiles", "providers", "diagnosticCodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "testedAt": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["success", "partial", "failure", "unavailable", "not_implemented"] },
+    "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"] },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["browserFamily", "profileId", "profileDisplayName", "available", "keyringState"],
+        "additionalProperties": false,
+        "properties": {
+          "browserFamily": { "type": "string", "enum": ["chrome", "chromium", "brave", "firefox", "unknown"] },
+          "profileId": {
+            "type": "string",
+            "description": "Opaque browser profile id or local hash. Must not be an absolute profile path.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "profileDisplayName": {
+            "type": "string",
+            "description": "Safe display label. Must not be an absolute browser profile path.",
+            "not": { "pattern": "(^/|^~|[A-Za-z]:\\\\|/|\\\\|\\.config|Cookies|Login Data)" }
+          },
+          "available": { "type": "boolean" },
+          "keyringState": { "type": "string", "enum": ["unlocked", "locked", "unavailable", "not_required", "unknown"] },
+          "cookiesFound": { "type": ["integer", "null"], "minimum": 0 },
+          "diagnosticCodes": { "type": "array", "items": { "type": "string" }, "default": [] }
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["provider", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "provider": { "type": "string" },
+          "status": { "type": "string", "enum": ["success", "unauthenticated", "cookie_rejected", "missing_dependency", "provider_unavailable", "timeout", "parse_error", "error", "not_implemented"] },
+          "sourceAdapter": { "type": "string", "enum": ["linux_web", "none"] },
+          "diagnosticCodes": { "type": "array", "items": { "type": "string" }, "default": [] }
+        }
+      }
+    },
+    "diagnosticCodes": { "type": "array", "items": { "type": "string" }, "default": [] }
+  }
+}

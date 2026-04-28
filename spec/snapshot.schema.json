@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codexbar.dev/schemas/codexbar-linux/snapshot.schema.json",
+  "title": "CodexBar Linux Snapshot",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "stale", "daemon", "providers"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "stale": { "type": "boolean" },
+    "selectedProvider": { "type": ["string", "null"] },
+    "daemon": {
+      "type": "object",
+      "required": ["version", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "state": { "type": "string", "enum": ["starting", "ok", "refreshing", "degraded", "error"] },
+        "lastRefreshId": { "type": ["string", "null"] },
+        "lastRefreshStartedAt": { "type": ["string", "null"], "format": "date-time" },
+        "lastRefreshFinishedAt": { "type": ["string", "null"], "format": "date-time" },
+        "upstreamCli": {
+          "type": ["object", "null"],
+          "required": ["available"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": ["string", "null"] },
+            "version": { "type": ["string", "null"] },
+            "available": { "type": "boolean" },
+            "diagnosticCode": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/provider" }
+    }
+  },
+  "$defs": {
+    "providerState": {
+      "type": "string",
+      "enum": [
+        "loading",
+        "ok",
+        "stale",
+        "unauthenticated",
+        "cookie_rejected",
+        "missing_dependency",
+        "provider_unavailable",
+        "parse_error",
+        "timeout",
+        "error"
+      ]
+    },
+    "semanticSource": {
+      "type": "string",
+      "enum": ["api", "local", "web", "unknown"]
+    },
+    "sourceAdapter": {
+      "type": "string",
+      "enum": ["upstream_cli", "linux_web", "cache", "fixture", "synthetic", "none"]
+    },
+    "meter": {
+      "type": ["object", "null"],
+      "required": ["usedPercent", "remainingPercent", "windowMinutes", "resetsAt", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "usedPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "remainingPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "windowMinutes": { "type": ["integer", "null"], "minimum": 0 },
+        "resetsAt": { "type": ["string", "null"], "format": "date-time" },
+        "label": { "type": ["string", "null"] },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "identity": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "providerAccountIdHash": { "type": ["string", "null"] },
+            "accountEmailDisplay": { "type": ["string", "null"] },
+            "accountEmailHash": { "type": ["string", "null"] },
+            "accountOrganizationDisplay": { "type": ["string", "null"] },
+            "accountOrganizationHash": { "type": ["string", "null"] },
+            "loginMethod": { "type": ["string", "null"] }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["accountEmail"] },
+              { "required": ["email"] },
+              { "required": ["accountOrganization"] },
+              { "required": ["organization"] },
+              { "required": ["providerID"] }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "type": ["object", "null"],
+      "required": ["indicator", "description", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "indicator": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "costSummary": {
+      "type": ["object", "null"],
+      "description": "Redacted cost summary normalized from upstream CLI. It must not contain raw provider payloads, identity, tokens, cookies, headers, or browser profile paths.",
+      "required": ["updatedAt", "currency", "total", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "currency": { "type": ["string", "null"] },
+        "total": { "type": ["number", "null"] },
+        "periodStartAt": { "type": ["string", "null"], "format": "date-time" },
+        "periodEndAt": { "type": ["string", "null"], "format": "date-time" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "amount", "currency"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "amount": { "type": ["number", "null"] },
+              "currency": { "type": ["string", "null"] },
+              "detail": { "type": ["string", "null"] }
+            }
+          },
+          "default": []
+        },
+        "diagnosticCodes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "required": ["provider", "displayName", "state", "source", "sourceAdapter", "updatedAt", "usage"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "displayName": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "source": { "$ref": "#/$defs/semanticSource" },
+        "sourceAdapter": { "$ref": "#/$defs/sourceAdapter" },
+        "state": { "$ref": "#/$defs/providerState" },
+        "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "staleSince": { "type": ["string", "null"], "format": "date-time" },
+        "usage": {
+          "type": "object",
+          "required": ["primary", "secondary", "tertiary"],
+          "additionalProperties": false,
+          "properties": {
+            "primary": { "$ref": "#/$defs/meter" },
+            "secondary": { "$ref": "#/$defs/meter" },
+            "tertiary": { "$ref": "#/$defs/meter" }
+          }
+        },
+        "credits": {
+          "type": ["object", "null"],
+          "required": ["remaining", "remainingPercent", "updatedAt"],
+          "additionalProperties": false,
+          "properties": {
+            "remaining": { "type": ["number", "null"] },
+            "remainingPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+            "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+            "unit": { "type": ["string", "null"] }
+          }
+        },
+        "identity": { "$ref": "#/$defs/identity" },
+        "status": { "$ref": "#/$defs/status" },
+        "cost": { "$ref": "#/$defs/costSummary" },
+        "dashboardUrl": { "type": ["string", "null"] },
+        "diagnosticsSummary": { "type": ["string", "null"] },
+        "diagnosticCodes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["accountEmail"] },
+          { "required": ["email"] },
+          { "required": ["raw"] },
+          { "required": ["rawResponse"] },
+          { "required": ["cookies"] },
+          { "required": ["headers"] }
+        ]
+      }
+    }
+  }
+}

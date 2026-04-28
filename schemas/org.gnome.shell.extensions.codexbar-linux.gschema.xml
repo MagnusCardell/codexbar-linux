@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.codexbar-linux" path="/org/gnome/shell/extensions/codexbar-linux/">
+    <key name="start-daemon-on-login" type="b">
+      <default>true</default>
+      <summary>Start daemon on login</summary>
+      <description>Whether preferences should configure the user-scoped daemon to start on login. Task 00 does not apply systemd policy.</description>
+    </key>
+    <key name="panel-mode" type="s">
+      <choices>
+        <choice value="merged"/>
+        <choice value="provider"/>
+        <choice value="minimal"/>
+      </choices>
+      <default>'merged'</default>
+      <summary>Panel mode</summary>
+      <description>Presentation mode for the GNOME Shell panel item.</description>
+    </key>
+    <key name="reset-time-format" type="s">
+      <choices>
+        <choice value="countdown"/>
+        <choice value="absolute"/>
+        <choice value="both"/>
+      </choices>
+      <default>'countdown'</default>
+      <summary>Reset time format</summary>
+      <description>Default is countdown to keep the panel and popover compact in the initial GNOME UI.</description>
+    </key>
+    <key name="theme" type="s">
+      <choices>
+        <choice value="system"/>
+        <choice value="compact"/>
+        <choice value="high_contrast"/>
+      </choices>
+      <default>'system'</default>
+      <summary>Theme</summary>
+      <description>Presentation theme for the Shell UI.</description>
+    </key>
+    <key name="selected-provider" type="s">
+      <default>''</default>
+      <summary>Selected provider</summary>
+      <description>Optional provider id preferred for merged panel mode. Empty string means automatic selection.</description>
+    </key>
+  </schema>
+</schemalist>
