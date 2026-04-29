@@ -1,0 +1,41 @@
+{
+  "fixtureId": "unsupported_web_source",
+  "synthetic": false,
+  "docDerived": false,
+  "command": "usage",
+  "expectedCategory": "unsupported_source",
+  "timeoutSeconds": 30,
+  "exitCode": 1,
+  "timedOut": false,
+  "durationMs": 39,
+  "stdoutBytes": 160,
+  "stderrBytes": 0,
+  "stdoutPath": "errors/live_20260429T181010Z_unsupported_web_source_stdout.json",
+  "stderrPath": "errors/live_20260429T181010Z_unsupported_web_source_stderr.txt",
+  "metadataPath": "errors/live_20260429T181010Z_unsupported_web_source_metadata.json",
+  "upstreamVersion": "CodexBar",
+  "capturedAt": "2026-04-29T18:10:10Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "6.8.0-110-generic",
+    "arch": "x86_64"
+  },
+  "codexbarCliPath": "[REDACTED_PATH]",
+  "argv": [
+    "codexbar",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "all",
+    "--source",
+    "web"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "live output redacted before fixture write"
+    ]
+  }
+}

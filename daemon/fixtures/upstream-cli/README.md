@@ -22,6 +22,11 @@ Committed samples use a sidecar triplet format:
 - `*_stdout.json` or `*_stdout.txt`
 - `*_stderr.txt`
 
+Use `*_stdout.json` only when stdout is one valid JSON document. Use
+`*_stdout.txt` for empty output, malformed output, human text, or JSON-looking
+streams that contain multiple documents. For example, the promoted live invalid
+provider sample is `.txt` because it contains two newline-separated JSON arrays.
+
 The fixture contract deliberately preserves upstream-looking stdout separately
 from capture metadata instead of defining the upstream CLI schema. The future
 normalizer should read these files as evidence and add typed normalization tests
@@ -30,9 +35,9 @@ without treating them as daemon output.
 ## Redaction rules
 
 Committed upstream CLI fixtures must not contain raw emails, organization names,
-provider account IDs, cookies, Authorization headers, Set-Cookie headers, bearer
-tokens, API keys, browser profile paths, upstream config secrets, or raw provider
-payload dumps.
+provider account IDs, cookie or auth header values, bearer-style tokens, API
+keys, browser profile paths, upstream config secrets, or raw provider payload
+dumps.
 
 Use `scripts/redact-upstream-cli-sample.py` for capture-time redaction of new
 live samples. The capture helper writes command envelopes under the requested
@@ -109,4 +114,5 @@ Promotion is deliberate:
 
 Do not commit raw capture files or raw terminal output. Live upstream output may
 contain raw `accountEmail` values, nested `identity.accountEmail` values, home
-paths, `~/.local/share/...` paths, or `auth.json` paths before redaction.
+paths, tilde-local-share paths, or upstream auth JSON path names before
+redaction.

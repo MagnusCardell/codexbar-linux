@@ -1,0 +1,39 @@
+{
+  "fixtureId": "invalid_provider",
+  "synthetic": false,
+  "docDerived": false,
+  "command": "usage",
+  "expectedCategory": "invalid_provider",
+  "timeoutSeconds": 30,
+  "exitCode": 1,
+  "timedOut": false,
+  "durationMs": 35,
+  "stdoutBytes": 254,
+  "stderrBytes": 0,
+  "stdoutPath": "errors/live_20260429T181010Z_invalid_provider_stdout.txt",
+  "stderrPath": "errors/live_20260429T181010Z_invalid_provider_stderr.txt",
+  "metadataPath": "errors/live_20260429T181010Z_invalid_provider_metadata.json",
+  "upstreamVersion": "CodexBar",
+  "capturedAt": "2026-04-29T18:10:10Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "6.8.0-110-generic",
+    "arch": "x86_64"
+  },
+  "codexbarCliPath": "[REDACTED_PATH]",
+  "argv": [
+    "codexbar",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "__codexbar_linux_invalid_provider__"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "live output redacted before fixture write"
+    ]
+  }
+}

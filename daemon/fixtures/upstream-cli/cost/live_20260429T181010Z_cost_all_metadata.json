@@ -1,0 +1,40 @@
+{
+  "fixtureId": "cost_all",
+  "synthetic": false,
+  "docDerived": false,
+  "command": "cost",
+  "expectedCategory": "cost_success",
+  "timeoutSeconds": 20,
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 5537,
+  "stdoutBytes": 8415,
+  "stderrBytes": 0,
+  "stdoutPath": "cost/live_20260429T181010Z_cost_all_stdout.json",
+  "stderrPath": "cost/live_20260429T181010Z_cost_all_stderr.txt",
+  "metadataPath": "cost/live_20260429T181010Z_cost_all_metadata.json",
+  "upstreamVersion": "CodexBar",
+  "capturedAt": "2026-04-29T18:10:10Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "6.8.0-110-generic",
+    "arch": "x86_64"
+  },
+  "codexbarCliPath": "[REDACTED_PATH]",
+  "argv": [
+    "codexbar",
+    "cost",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "all"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "live output redacted before fixture write"
+    ]
+  }
+}

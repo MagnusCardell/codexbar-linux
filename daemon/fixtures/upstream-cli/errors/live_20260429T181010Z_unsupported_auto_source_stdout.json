@@ -1,0 +1,11 @@
+[
+  {
+    "source": "cli",
+    "error": {
+      "message": "Error: selected source requires web support and is only supported on macOS.",
+      "kind": "runtime",
+      "code": 1
+    },
+    "provider": "cli"
+  }
+]

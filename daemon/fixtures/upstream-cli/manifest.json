@@ -1,27 +1,30 @@
 {
   "schemaVersion": 1,
   "fixtureSet": "upstream-cli-p02a",
-  "generatedAt": "2026-04-28T00:00:00Z",
-  "upstreamVersion": "no local binary available; doc-derived and synthetic corpus",
+  "generatedAt": "2026-04-29T18:10:10Z",
+  "upstreamVersion": "mixed: live Linux CodexBar capture plus doc-derived and synthetic corpus",
   "platform": {
     "os": "Linux",
-    "kernel": "doc-derived-or-synthetic",
-    "arch": "doc-derived-or-synthetic"
+    "kernel": "mixed: live 6.8.0-110-generic plus doc-derived/synthetic",
+    "arch": "mixed: live x86_64 plus doc-derived/synthetic"
   },
   "redaction": {
     "applied": true,
     "policyVersion": 1,
     "notes": [
-      "Committed corpus contains redacted doc-derived and synthetic samples only.",
-      "No raw live upstream CLI output is committed."
+      "Committed corpus contains redacted doc-derived, synthetic, and reviewed live Linux samples.",
+      "Live samples were promoted from /tmp/codexbar-upstream-cli-provider-cli after capture validation.",
+      "Raw live upstream CLI output is not committed."
     ]
   },
   "testExpectations": {
+    "version": "stdout is non-JSON version text from codexbar --version",
+    "config_validate": "stdout is parseable JSON config-validation output; an empty array means no validation issues",
     "usage_success": "stdout is parseable upstream usage JSON and may include redacted raw upstream identity field names",
-    "usage_error": "stdout or stderr captures a redacted nonzero usage failure",
+    "usage_error": "stdout/stderr/metadata captures a redacted nonzero or timed-out usage/status failure",
     "cost_success": "stdout is parseable upstream cost JSON array/object",
     "unsupported_source": "Linux web source rejection is captured and redacted",
-    "invalid_provider": "invalid provider command is captured and redacted",
+    "invalid_provider": "invalid provider command is captured and redacted; stdout may be text containing multiple JSON documents",
     "missing_binary": "missing codexbar binary is captured as a synthetic dependency failure",
     "timeout_synthetic": "timeout handling has a parseable synthetic error payload",
     "parse_error_synthetic": "malformed stdout is stored as text and explicitly categorized"
@@ -128,6 +131,321 @@
         "policyVersion": 1,
         "notes": [
           "cost shape from upstream CLI docs; no identity-bearing values present"
+        ]
+      }
+    },
+    {
+      "fixtureId": "version",
+      "command": "version",
+      "argv": [
+        "codexbar",
+        "--version"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "status/live_20260429T181010Z_version_stdout.txt",
+      "stderrPath": "status/live_20260429T181010Z_version_stderr.txt",
+      "metadataPath": "status/live_20260429T181010Z_version_metadata.json",
+      "expectedCategory": "version",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "config_validate",
+      "command": "config_validate",
+      "argv": [
+        "codexbar",
+        "config",
+        "validate",
+        "--format",
+        "json",
+        "--json-only"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "status/live_20260429T181010Z_config_validate_stdout.json",
+      "stderrPath": "status/live_20260429T181010Z_config_validate_stderr.txt",
+      "metadataPath": "status/live_20260429T181010Z_config_validate_metadata.json",
+      "expectedCategory": "config_validate",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "usage_default_all",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "cli"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 124,
+      "timedOut": true,
+      "stdoutPath": "usage/live_20260429T181010Z_usage_default_all_stdout.txt",
+      "stderrPath": "usage/live_20260429T181010Z_usage_default_all_stderr.txt",
+      "metadataPath": "usage/live_20260429T181010Z_usage_default_all_metadata.json",
+      "expectedCategory": "usage_error",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "usage_subcommand_all",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "usage",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "cli"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 124,
+      "timedOut": true,
+      "stdoutPath": "usage/live_20260429T181010Z_usage_subcommand_all_stdout.txt",
+      "stderrPath": "usage/live_20260429T181010Z_usage_subcommand_all_stderr.txt",
+      "metadataPath": "usage/live_20260429T181010Z_usage_subcommand_all_metadata.json",
+      "expectedCategory": "usage_error",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "cost_all",
+      "command": "cost",
+      "argv": [
+        "codexbar",
+        "cost",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "cost/live_20260429T181010Z_cost_all_stdout.json",
+      "stderrPath": "cost/live_20260429T181010Z_cost_all_stderr.txt",
+      "metadataPath": "cost/live_20260429T181010Z_cost_all_metadata.json",
+      "expectedCategory": "cost_success",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "status_all",
+      "command": "status",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "cli",
+        "--status"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 124,
+      "timedOut": true,
+      "stdoutPath": "status/live_20260429T181010Z_status_all_stdout.txt",
+      "stderrPath": "status/live_20260429T181010Z_status_all_stderr.txt",
+      "metadataPath": "status/live_20260429T181010Z_status_all_metadata.json",
+      "expectedCategory": "usage_error",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "unsupported_web_source",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "web"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 1,
+      "timedOut": false,
+      "stdoutPath": "errors/live_20260429T181010Z_unsupported_web_source_stdout.json",
+      "stderrPath": "errors/live_20260429T181010Z_unsupported_web_source_stderr.txt",
+      "metadataPath": "errors/live_20260429T181010Z_unsupported_web_source_metadata.json",
+      "expectedCategory": "unsupported_source",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "unsupported_auto_source",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "all",
+        "--source",
+        "auto"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 1,
+      "timedOut": false,
+      "stdoutPath": "errors/live_20260429T181010Z_unsupported_auto_source_stdout.json",
+      "stderrPath": "errors/live_20260429T181010Z_unsupported_auto_source_stderr.txt",
+      "metadataPath": "errors/live_20260429T181010Z_unsupported_auto_source_metadata.json",
+      "expectedCategory": "unsupported_source",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "invalid_provider",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "__codexbar_linux_invalid_provider__"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T18:10:10Z",
+      "exitCode": 1,
+      "timedOut": false,
+      "stdoutPath": "errors/live_20260429T181010Z_invalid_provider_stdout.txt",
+      "stderrPath": "errors/live_20260429T181010Z_invalid_provider_stderr.txt",
+      "metadataPath": "errors/live_20260429T181010Z_invalid_provider_metadata.json",
+      "expectedCategory": "invalid_provider",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
         ]
       }
     },

@@ -1,0 +1,39 @@
+{
+  "fixtureId": "config_validate",
+  "synthetic": false,
+  "docDerived": false,
+  "command": "config_validate",
+  "expectedCategory": "config_validate",
+  "timeoutSeconds": 10,
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 20,
+  "stdoutBytes": 3,
+  "stderrBytes": 0,
+  "stdoutPath": "status/live_20260429T181010Z_config_validate_stdout.json",
+  "stderrPath": "status/live_20260429T181010Z_config_validate_stderr.txt",
+  "metadataPath": "status/live_20260429T181010Z_config_validate_metadata.json",
+  "upstreamVersion": "CodexBar",
+  "capturedAt": "2026-04-29T18:10:10Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "6.8.0-110-generic",
+    "arch": "x86_64"
+  },
+  "codexbarCliPath": "[REDACTED_PATH]",
+  "argv": [
+    "codexbar",
+    "config",
+    "validate",
+    "--format",
+    "json",
+    "--json-only"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "live output redacted before fixture write"
+    ]
+  }
+}

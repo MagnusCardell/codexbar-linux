@@ -1,0 +1,2 @@
+[{"provider":"codex","error":{"kind":"runtime","code":1,"message":"Error: selected source requires web support and is only supported on macOS."},"source":"auto"}]
+[{"provider":"cli","source":"cli","error":{"message":"Error","code":1,"kind":"provider"}}]

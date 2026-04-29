@@ -1,9 +1,9 @@
 # Upstream CLI Observations
 
 Task 02A records upstream `codexbar` CLI evidence without implementing the
-production adapter. The current committed corpus is a safe baseline only:
-doc-derived samples from upstream public docs plus synthetic error samples. No
-reviewed live Linux capture has been promoted into this corpus yet.
+production adapter. The current committed corpus includes a safe baseline of
+doc-derived samples from upstream public docs, synthetic error samples, and a
+reviewed redacted live Linux capture from 2026-04-29.
 
 ## Sources Inspected
 
@@ -14,14 +14,17 @@ reviewed live Linux capture has been promoted into this corpus yet.
 
 ## Version Observed
 
-- Local upstream CLI path: available in the Task 02A.2 environment but not
-  promoted into this committed corpus by the harness patch.
-- Local upstream CLI version: not captured in the committed corpus.
+- Local upstream CLI path: captured only as `[REDACTED_PATH]` in committed
+  metadata.
+- Local upstream CLI version: `codexbar --version` returned `CodexBar` with no
+  semantic version string in the promoted live capture.
 - Documentation sample version fields include provider-level examples such as
   `0.6.0`; that is not a verified Linux binary version.
 
-Task 02B remains blocked on reviewed real redacted Linux samples from an
-installed upstream `codexbar` binary.
+Task 02B has reviewed live evidence for config validation, cost output,
+unsupported-source errors, invalid-provider errors, and timeout behavior. It
+still lacks a successful live Linux usage/status payload because the promoted
+`--source cli` usage and status probes timed out with empty stdout/stderr.
 
 ## Capture Harness Scope
 
@@ -89,9 +92,19 @@ Manual Linux testing for Task 02A.2 additionally showed:
   `/home/...`, `~/.local/share/...`, and `auth.json` paths before redaction.
 
 This repository has a synthetic `unsupported_source` fixture for `--source web`.
-`--source auto` is part of the live capture harness error-probe matrix. Reviewed
-redacted live fixtures are still required before Task 02B relies on exact
-exit-code, stdout, or stderr behavior.
+The 2026-04-29 live capture also promoted reviewed fixtures for both
+`--source web` and `--source auto`; both exited 1 and emitted a single JSON
+array on stdout with the macOS-only web-support runtime error.
+
+The same live capture showed:
+
+- `codexbar config validate --format json --json-only` exits 0 and emits `[]`.
+- `codexbar cost --format json --json-only --provider all` exits 0 and emits a
+  JSON array of provider cost payloads with `source: "local"`.
+- default usage, `usage` subcommand, and status probes with `--source cli`
+  timed out after 30 seconds with empty stdout/stderr.
+- invalid provider probing exited 1 and emitted `.txt` stdout containing two
+  newline-separated JSON arrays, not one parseable JSON document.
 
 ## Usage JSON Shape Summary
 
@@ -127,18 +140,21 @@ Task 02B must map this into the bounded `cost` summary in
 
 ## Error Shape Summary
 
-Current committed error samples are synthetic because no local binary was
-available:
+The committed error corpus now combines synthetic dependency/parser coverage
+with reviewed live Linux upstream failures:
 
 - `missing_binary`: capture harness cannot locate `codexbar`.
 - `timeout_synthetic`: command exceeded a bounded timeout.
 - `parse_error_synthetic`: stdout was not parseable JSON.
-- `unsupported_source`: Linux web source request failed.
-- `invalid_provider`: invalid provider id failed.
-- `usage_error`: stderr redaction stress sample.
+- `unsupported_source`: synthetic web-source failure plus live web/auto
+  failures, both with exit code 1 and JSON-array stdout.
+- `invalid_provider`: synthetic invalid provider failure plus live failure with
+  exit code 1 and `.txt` stdout containing multiple JSON documents.
+- `usage_error`: synthetic stderr redaction stress sample plus live usage/status
+  timeout metadata with empty stdout/stderr.
 
-Real Linux samples must confirm exact upstream exit codes, stdout/stderr JSON
-shape, and whether unsupported `auto` behaves identically to unsupported `web`.
+The live invalid-provider stdout is intentionally stored as `.txt`: each line is
+JSON-looking, but the file as a whole is not valid single-document JSON.
 
 ## Harness Validation
 
@@ -172,10 +188,14 @@ Allowed normalized identity is limited to the frozen fields in
 ## Open Questions For Task 02B
 
 - What exact JSON shape does `--provider all` emit when multiple providers are
-  enabled on Linux: one object, an array, or an envelope?
-- What exact exit codes and JSON error payloads are emitted for unsupported
-  `--source web`, unsupported `--source auto`, and invalid provider ids?
-- Does Linux `--json-only` always produce JSON on stderr/stdout for failures?
+  enabled on Linux for successful usage/status: one object, an array, or an
+  envelope?
+- Does `--provider all --source cli` usage/status complete under a longer
+  timeout or different upstream configuration? The promoted run timed out at 30
+  seconds with no stdout/stderr.
+- Which Linux `--json-only` failures emit single JSON, multiple JSON documents,
+  or no output? Unsupported web/auto emitted single JSON arrays, invalid
+  provider emitted multiple JSON documents, and timeouts emitted no output.
 - Which upstream `source` labels should map to semantic `api`, `local`, `web`,
   or `unknown`?
 - Which provider-specific extras are safe and useful enough to normalize, and
