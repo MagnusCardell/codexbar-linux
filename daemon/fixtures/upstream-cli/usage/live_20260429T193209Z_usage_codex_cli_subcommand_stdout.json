@@ -1,0 +1,35 @@
+[
+  {
+    "version": "0.125.0",
+    "credits": {
+      "remaining": 0,
+      "events": [],
+      "updatedAt": "2026-04-29T19:32:17Z"
+    },
+    "source": "codex-cli",
+    "provider": "codex",
+    "usage": {
+      "updatedAt": "2026-04-29T19:32:15Z",
+      "identity": {
+        "accountEmail": "[REDACTED_EMAIL]",
+        "loginMethod": "prolite",
+        "providerID": "[REDACTED_ACCOUNT_ID]"
+      },
+      "tertiary": null,
+      "primary": {
+        "resetDescription": "tomorrow, 12:36\u202fAM",
+        "windowMinutes": 300,
+        "resetsAt": "2026-04-29T22:36:14Z",
+        "usedPercent": 34
+      },
+      "loginMethod": "prolite",
+      "accountEmail": "[REDACTED_EMAIL]",
+      "secondary": {
+        "windowMinutes": 10080,
+        "resetsAt": "2026-05-05T06:15:41Z",
+        "resetDescription": "5 May 2026 at 8:15\u202fAM",
+        "usedPercent": 19
+      }
+    }
+  }
+]

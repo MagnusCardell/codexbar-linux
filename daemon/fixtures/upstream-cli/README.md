@@ -36,8 +36,8 @@ without treating them as daemon output.
 
 Committed upstream CLI fixtures must not contain raw emails, organization names,
 provider account IDs, cookie or auth header values, bearer-style tokens, API
-keys, browser profile paths, upstream config secrets, or raw provider payload
-dumps.
+keys, browser profile paths, upstream config secrets, raw provider payload
+dumps, or raw provider payload field names.
 
 Use `scripts/redact-upstream-cli-sample.py` for capture-time redaction of new
 live samples. The capture helper writes command envelopes under the requested
@@ -84,16 +84,25 @@ without provider-network probes:
 Usage, cost, and provider status commands may contact providers through the
 upstream CLI. Capture them only with explicit opt-in. Linux provider success
 captures default to `--provider-source cli`; this adds `--source cli` to usage
-and status probes. `auto` and `web` are Linux unsupported-source probe values,
-not expected success paths. The cost probe intentionally uses `--json-only` but
-does not receive `--source` unless upstream support for that flag is verified.
+and status probes. Use `--providers LIST` to target one or more provider ids
+for usage/default/status probes; when omitted, the provider target is `all`.
+Targeted usage/default/subcommand/status fixture ids include both provider and
+source, for example `usage_codex_cli_default` or `status_claude_cli`. `auto`
+and `web` are Linux unsupported-source probe values, not expected success
+paths. The cost probe intentionally uses `--json-only`, always captures
+`--provider all`, and does not receive `--source` unless upstream support for
+that flag is verified.
 
 ```bash
 ./scripts/capture-upstream-cli-samples.sh \
   --live \
   --include-config-validate \
   --allow-provider-network \
+  --providers codex,claude \
   --provider-source cli \
+  --usage-timeout 60 \
+  --cost-timeout 30 \
+  --version-timeout 5 \
   --include-error-probes \
   --output /tmp/codexbar-upstream-cli
 ```

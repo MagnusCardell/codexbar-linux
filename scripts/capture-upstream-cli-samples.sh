@@ -13,7 +13,12 @@ INCLUDE_ERROR_PROBES=0
 INCLUDE_CONFIG_VALIDATE=0
 INCLUDE_CONFIG_DUMP=0
 UNDERSTAND_CONFIG_DUMP=0
+PROVIDERS="all"
+PROVIDERS_WAS_SET=0
 PROVIDER_SOURCE="cli"
+VERSION_TIMEOUT=5
+USAGE_TIMEOUT=30
+COST_TIMEOUT=20
 
 usage() {
   cat <<'USAGE'
@@ -38,10 +43,20 @@ Options:
   --allow-provider-network
       Also run usage/cost/status commands that may contact provider endpoints
       through the upstream codexbar CLI.
+  --providers LIST
+      Comma-separated provider ids for usage/default/status success probes when
+      --allow-provider-network is set. Defaults to all. The cost probe always
+      captures --provider all and intentionally does not receive --source.
   --provider-source SOURCE
       Source for provider success probes when --allow-provider-network is set.
       Allowed values: cli, auto, web. Defaults to cli, which is the expected
       Linux success source. auto and web are Linux error-probe sources.
+  --version-timeout SECONDS
+      Timeout for codexbar --version. Defaults to 5.
+  --usage-timeout SECONDS
+      Timeout for usage/default/status provider probes. Defaults to 30.
+  --cost-timeout SECONDS
+      Timeout for codexbar cost. Defaults to 20.
   --include-error-probes
       Also run unsupported-source and invalid-provider probes. This requires
       --allow-provider-network, because provider-oriented CLI entry points must
@@ -90,8 +105,25 @@ while [[ $# -gt 0 ]]; do
       ALLOW_PROVIDER_NETWORK=1
       shift
       ;;
+    --providers)
+      PROVIDERS="${2:?missing value for --providers}"
+      PROVIDERS_WAS_SET=1
+      shift 2
+      ;;
     --provider-source)
       PROVIDER_SOURCE="${2:?missing value for --provider-source}"
+      shift 2
+      ;;
+    --version-timeout)
+      VERSION_TIMEOUT="${2:?missing value for --version-timeout}"
+      shift 2
+      ;;
+    --usage-timeout)
+      USAGE_TIMEOUT="${2:?missing value for --usage-timeout}"
+      shift 2
+      ;;
+    --cost-timeout)
+      COST_TIMEOUT="${2:?missing value for --cost-timeout}"
       shift 2
       ;;
     --include-error-probes)
@@ -144,11 +176,54 @@ case "$PROVIDER_SOURCE" in
     ;;
 esac
 
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "$name must be a positive integer number of seconds" >&2
+    exit 2
+  fi
+}
+
+validate_positive_integer "--usage-timeout" "$USAGE_TIMEOUT"
+validate_positive_integer "--cost-timeout" "$COST_TIMEOUT"
+validate_positive_integer "--version-timeout" "$VERSION_TIMEOUT"
+
+IFS=',' read -r -a PROVIDER_LIST <<<"$PROVIDERS"
+if [[ "${#PROVIDER_LIST[@]}" -eq 0 ]]; then
+  echo "--providers must include at least one provider id" >&2
+  exit 2
+fi
+seen_providers=","
+has_all_provider=0
+for provider in "${PROVIDER_LIST[@]}"; do
+  if [[ ! "$provider" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "--providers contains an invalid provider id: $provider" >&2
+    exit 2
+  fi
+  if [[ "$seen_providers" == *",$provider,"* ]]; then
+    echo "--providers contains duplicate provider id: $provider" >&2
+    exit 2
+  fi
+  if [[ "$provider" == "all" ]]; then
+    has_all_provider=1
+  fi
+  seen_providers+="$provider,"
+done
+if [[ "$has_all_provider" -eq 1 && "${#PROVIDER_LIST[@]}" -gt 1 ]]; then
+  echo "--providers all cannot be combined with other provider ids" >&2
+  exit 2
+fi
 if [[ "$METADATA_ONLY" -eq 1 ]]; then
-  if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 || "$INCLUDE_ERROR_PROBES" -eq 1 || "$INCLUDE_CONFIG_VALIDATE" -eq 1 || "$INCLUDE_CONFIG_DUMP" -eq 1 ]]; then
+  if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 || "$INCLUDE_ERROR_PROBES" -eq 1 || "$INCLUDE_CONFIG_VALIDATE" -eq 1 || "$INCLUDE_CONFIG_DUMP" -eq 1 || "$PROVIDERS_WAS_SET" -eq 1 ]]; then
     echo "--metadata-only cannot be combined with provider, error-probe, or config capture flags" >&2
     exit 2
   fi
+fi
+
+if [[ "$PROVIDERS_WAS_SET" -eq 1 && "$ALLOW_PROVIDER_NETWORK" -ne 1 ]]; then
+  echo "--providers requires --allow-provider-network" >&2
+  exit 2
 fi
 
 if [[ "$INCLUDE_ERROR_PROBES" -eq 1 && "$ALLOW_PROVIDER_NETWORK" -ne 1 ]]; then
@@ -485,7 +560,7 @@ PLATFORM_ARCH="$(uname -m)"
 
 UPSTREAM_VERSION="unknown"
 
-run_capture "version" "status" "version" "version" 5 --version
+run_capture "version" "status" "version" "version" "$VERSION_TIMEOUT" --version
 
 if [[ "$INCLUDE_CONFIG_VALIDATE" -eq 1 ]]; then
   run_capture "config_validate" "status" "config_validate" "config_validate" 10 config validate --format json --json-only
@@ -500,16 +575,18 @@ EOF
 fi
 
 if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 ]]; then
-  run_capture "usage_default_all" "usage" "usage" "usage_success" 30 --format json --json-only --provider all --source "$PROVIDER_SOURCE"
-  run_capture "usage_subcommand_all" "usage" "usage" "usage_success" 30 usage --format json --json-only --provider all --source "$PROVIDER_SOURCE"
-  run_capture "cost_all" "cost" "cost" "cost_success" 20 cost --format json --json-only --provider all
-  run_capture "status_all" "status" "status" "usage_success" 30 --format json --json-only --provider all --source "$PROVIDER_SOURCE" --status
+  for provider in "${PROVIDER_LIST[@]}"; do
+    run_capture "usage_${provider}_${PROVIDER_SOURCE}_default" "usage" "usage" "usage_success" "$USAGE_TIMEOUT" --format json --json-only --provider "$provider" --source "$PROVIDER_SOURCE"
+    run_capture "usage_${provider}_${PROVIDER_SOURCE}_subcommand" "usage" "usage" "usage_success" "$USAGE_TIMEOUT" usage --format json --json-only --provider "$provider" --source "$PROVIDER_SOURCE"
+    run_capture "status_${provider}_${PROVIDER_SOURCE}" "status" "status" "usage_success" "$USAGE_TIMEOUT" --format json --json-only --provider "$provider" --source "$PROVIDER_SOURCE" --status
+  done
+  run_capture "cost_all" "cost" "cost" "cost_success" "$COST_TIMEOUT" cost --format json --json-only --provider all
 fi
 
 if [[ "$INCLUDE_ERROR_PROBES" -eq 1 ]]; then
-  run_capture "unsupported_web_source" "errors" "usage" "unsupported_source" 30 --format json --json-only --provider all --source web
-  run_capture "unsupported_auto_source" "errors" "usage" "unsupported_source" 30 --format json --json-only --provider all --source auto
-  run_capture "invalid_provider" "errors" "usage" "invalid_provider" 30 --format json --json-only --provider __codexbar_linux_invalid_provider__
+  run_capture "unsupported_web_source" "errors" "usage" "unsupported_source" "$USAGE_TIMEOUT" --format json --json-only --provider all --source web
+  run_capture "unsupported_auto_source" "errors" "usage" "unsupported_source" "$USAGE_TIMEOUT" --format json --json-only --provider all --source auto
+  run_capture "invalid_provider" "errors" "usage" "invalid_provider" "$USAGE_TIMEOUT" --format json --json-only --provider __codexbar_linux_invalid_provider__
 fi
 
 python3 - "$ENTRY_FILE" "$MANIFEST_OUT" "$CAPTURED_AT" "$UPSTREAM_VERSION" "$PLATFORM_OS" "$PLATFORM_KERNEL" "$PLATFORM_ARCH" <<'PY'

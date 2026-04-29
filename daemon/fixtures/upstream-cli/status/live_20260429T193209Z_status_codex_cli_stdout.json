@@ -1,0 +1,41 @@
+[
+  {
+    "usage": {
+      "updatedAt": "2026-04-29T19:32:19Z",
+      "secondary": {
+        "resetDescription": "5 May 2026 at 8:15\u202fAM",
+        "windowMinutes": 10080,
+        "usedPercent": 19,
+        "resetsAt": "2026-05-05T06:15:41Z"
+      },
+      "tertiary": null,
+      "accountEmail": "[REDACTED_EMAIL]",
+      "loginMethod": "prolite",
+      "primary": {
+        "resetDescription": "tomorrow, 12:36\u202fAM",
+        "windowMinutes": 300,
+        "usedPercent": 34,
+        "resetsAt": "2026-04-29T22:36:14Z"
+      },
+      "identity": {
+        "loginMethod": "prolite",
+        "providerID": "[REDACTED_ACCOUNT_ID]",
+        "accountEmail": "[REDACTED_EMAIL]"
+      }
+    },
+    "credits": {
+      "updatedAt": "2026-04-29T19:32:20Z",
+      "remaining": 0,
+      "events": []
+    },
+    "version": "0.125.0",
+    "status": {
+      "updatedAt": "2026-04-27T15:52:49Z",
+      "indicator": "none",
+      "description": "All Systems Operational",
+      "url": "https://status.openai.com/"
+    },
+    "provider": "codex",
+    "source": "codex-cli"
+  }
+]

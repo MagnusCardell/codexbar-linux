@@ -29,6 +29,12 @@ case "$*" in
   "--format json --json-only --provider all --source cli"|"usage --format json --json-only --provider all --source cli"|"--format json --json-only --provider all --source cli --status")
     printf '{"provider":"codex","accountEmail":"dev@example.com","usage":{"identity":{"accountEmail":"nested@example.com","authPath":"~/.local/share/codexbar/auth.json"},"primary":{"usedPercent":12}},"diagnosticsPath":"/home/person/.local/share/codexbar/auth.json"}\n'
     ;;
+  "--format json --json-only --provider codex --source cli"|"usage --format json --json-only --provider codex --source cli"|"--format json --json-only --provider codex --source cli --status")
+    printf '{"provider":"codex","providerID":"acct_live_raw","accountEmail":"dev@example.com","accountOrganization":"Secret Org","usage":{"identity":{"accountEmail":"nested@example.com","authPath":"~/.local/share/codexbar/auth.json","providerID":"nested_acct_raw"},"primary":{"usedPercent":12}},"diagnosticsPath":"/home/person/.local/share/codexbar/auth.json","rawResponse":{"accountEmail":"raw-response@example.com","token":"raw-response-token"},"rawPayload":"Authorization: Bearer raw-payload-token"}\n'
+    ;;
+  "--format json --json-only --provider claude --source cli"|"usage --format json --json-only --provider claude --source cli"|"--format json --json-only --provider claude --source cli --status")
+    printf '{"provider":"claude","accountEmail":"claude@example.com","usage":{"identity":{"accountEmail":"claude-nested@example.com"},"primary":{"usedPercent":45}}}\n'
+    ;;
   *"--source web"*)
     printf '{"error":{"code":"unsupported_source","message":"web unsupported"}}\n'
     exit 1
@@ -38,7 +44,8 @@ case "$*" in
     exit 1
     ;;
   *"__codexbar_linux_invalid_provider__"*)
-    printf '{"error":{"code":"invalid_provider","provider":"__codexbar_linux_invalid_provider__"}}\n'
+    printf '{"error":{"code":"invalid_provider","provider":"__codexbar_linux_invalid_provider__","providerID":"acct_text_raw","accountEmail":"opaque_user"}}\n'
+    printf '{"identity":{"accountEmail":"opaque_nested","providerID":"nested_text_raw","accountOrganization":"Stream Org"}}\n'
     exit 2
     ;;
   "cost --format json --json-only --provider all")
@@ -185,6 +192,97 @@ if grep -R -E 'dev@example.com|nested@example.com|/home/person|~/.local/share|au
   echo "provider capture retained an unredacted fake identity or path" >&2
   exit 1
 fi
+for expected_id in \
+  '"fixtureId": "usage_all_cli_default"' \
+  '"fixtureId": "usage_all_cli_subcommand"' \
+  '"fixtureId": "status_all_cli"'
+do
+  grep -R -F -- "$expected_id" "$TMP/provider" >/dev/null || {
+    echo "missing provider/source fixture id in default provider capture: $expected_id" >&2
+    exit 1
+  }
+done
+
+: >"$LOG"
+run_capture "$TMP/provider-targeted" --allow-provider-network --providers codex,claude --provider-source cli --usage-timeout 7 --cost-timeout 9 --version-timeout 3
+for expected in \
+  "--version" \
+  "--format json --json-only --provider codex --source cli" \
+  "usage --format json --json-only --provider codex --source cli" \
+  "--format json --json-only --provider codex --source cli --status" \
+  "--format json --json-only --provider claude --source cli" \
+  "usage --format json --json-only --provider claude --source cli" \
+  "--format json --json-only --provider claude --source cli --status" \
+  "cost --format json --json-only --provider all"
+do
+  grep -Fx -- "$expected" "$LOG" >/dev/null || {
+    echo "missing targeted provider capture invocation: $expected" >&2
+    cat "$LOG" >&2
+    exit 1
+  }
+done
+if grep -E '^cost .*--source' "$LOG" >/dev/null; then
+  echo "targeted cost capture should not receive --source" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+for expected_id in \
+  '"fixtureId": "usage_codex_cli_default"' \
+  '"fixtureId": "usage_codex_cli_subcommand"' \
+  '"fixtureId": "status_codex_cli"' \
+  '"fixtureId": "usage_claude_cli_default"' \
+  '"fixtureId": "usage_claude_cli_subcommand"' \
+  '"fixtureId": "status_claude_cli"'
+do
+  grep -R -F -- "$expected_id" "$TMP/provider-targeted" >/dev/null || {
+    echo "missing provider/source fixture id in targeted provider capture: $expected_id" >&2
+    exit 1
+  }
+done
+grep -R -F -- '"timeoutSeconds": 3' "$TMP/provider-targeted/status" >/dev/null || {
+  echo "version timeout was not recorded in targeted capture metadata" >&2
+  exit 1
+}
+grep -R -F -- '"timeoutSeconds": 7' "$TMP/provider-targeted/usage" >/dev/null || {
+  echo "usage timeout was not recorded in targeted capture metadata" >&2
+  exit 1
+}
+grep -R -F -- '"timeoutSeconds": 9' "$TMP/provider-targeted/cost" >/dev/null || {
+  echo "cost timeout was not recorded in targeted capture metadata" >&2
+  exit 1
+}
+
+: >"$LOG"
+set +e
+TMPDIR="$TMP" CODEXBAR_FAKE_LOG="$LOG" CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI="$FAKE" \
+  "$ROOT/scripts/capture-upstream-cli-samples.sh" --output "$TMP/providers-without-network" --providers codex >"$TMP/providers-without-network.out" 2>"$TMP/providers-without-network.err"
+status=$?
+set -e
+if [[ "$status" -ne 2 ]]; then
+  echo "expected --providers without --allow-provider-network to exit 2, got $status" >&2
+  exit 1
+fi
+if [[ -s "$LOG" ]]; then
+  echo "--providers without network refusal should not invoke fake codexbar" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+
+: >"$LOG"
+set +e
+TMPDIR="$TMP" CODEXBAR_FAKE_LOG="$LOG" CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI="$FAKE" \
+  "$ROOT/scripts/capture-upstream-cli-samples.sh" --output "$TMP/providers-all-mixed" --allow-provider-network --providers all,codex >"$TMP/providers-all-mixed.out" 2>"$TMP/providers-all-mixed.err"
+status=$?
+set -e
+if [[ "$status" -ne 2 ]]; then
+  echo "expected --providers all,codex to exit 2, got $status" >&2
+  exit 1
+fi
+if [[ -s "$LOG" ]]; then
+  echo "--providers all,codex refusal should not invoke fake codexbar" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
 
 : >"$LOG"
 run_capture "$TMP/provider-cli-flag" --allow-provider-network --provider-source cli
@@ -193,6 +291,76 @@ grep -Fx -- "usage --format json --json-only --provider all --source cli" "$LOG"
   cat "$LOG" >&2
   exit 1
 }
+
+: >"$LOG"
+run_capture "$TMP/provider-codex" --allow-provider-network --providers codex --usage-timeout 90
+for expected in \
+  "--version" \
+  "--format json --json-only --provider codex --source cli" \
+  "usage --format json --json-only --provider codex --source cli" \
+  "--format json --json-only --provider codex --source cli --status" \
+  "cost --format json --json-only --provider all"
+do
+  grep -Fx -- "$expected" "$LOG" >/dev/null || {
+    echo "missing targeted provider capture invocation: $expected" >&2
+    cat "$LOG" >&2
+    exit 1
+  }
+done
+if grep -Fx -- "--format json --json-only --provider all --source cli" "$LOG" >/dev/null || \
+   grep -Fx -- "usage --format json --json-only --provider all --source cli" "$LOG" >/dev/null || \
+   grep -Fx -- "--format json --json-only --provider all --source cli --status" "$LOG" >/dev/null; then
+  echo "targeted provider capture should not run all-provider usage/status probes" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+if grep -E '^cost .*--source' "$LOG" >/dev/null; then
+  echo "targeted provider cost capture should not receive --source" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+python3 - "$TMP/provider-codex" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest_path, = Path(sys.argv[1]).glob("manifest.live-*.json")
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+entries = {entry["fixtureId"]: entry for entry in manifest["fixtures"]}
+for fixture_id in [
+    "usage_codex_cli_default",
+    "usage_codex_cli_subcommand",
+    "status_codex_cli",
+]:
+    entry = entries[fixture_id]
+    metadata = json.loads((manifest_path.parent / entry["metadataPath"]).read_text(encoding="utf-8"))
+    if metadata["timeoutSeconds"] != 90:
+        raise SystemExit(f"{fixture_id} timeoutSeconds was {metadata['timeoutSeconds']}, expected 90")
+if entries["cost_all"]["argv"] != ["codexbar", "cost", "--format", "json", "--json-only", "--provider", "all"]:
+    raise SystemExit("targeted capture cost argv changed unexpectedly")
+PY
+if grep -R -E 'dev@example.com|nested@example.com|raw-response@example.com|acct_live_raw|nested_acct_raw|Secret Org|rawResponse|rawPayload|raw-response-token|raw-payload-token|/home/person|~/.local/share|auth\.json' "$TMP/provider-codex" >/dev/null; then
+  echo "targeted provider capture retained an unredacted fake identity, raw payload, or path" >&2
+  exit 1
+fi
+
+: >"$LOG"
+run_capture "$TMP/provider-codex-claude" --allow-provider-network --providers codex,claude
+for expected in \
+  "--format json --json-only --provider codex --source cli" \
+  "usage --format json --json-only --provider codex --source cli" \
+  "--format json --json-only --provider codex --source cli --status" \
+  "--format json --json-only --provider claude --source cli" \
+  "usage --format json --json-only --provider claude --source cli" \
+  "--format json --json-only --provider claude --source cli --status" \
+  "cost --format json --json-only --provider all"
+do
+  grep -Fx -- "$expected" "$LOG" >/dev/null || {
+    echo "missing multi-provider targeted invocation: $expected" >&2
+    cat "$LOG" >&2
+    exit 1
+  }
+done
 
 : >"$LOG"
 set +e
@@ -238,6 +406,10 @@ do
     exit 1
   }
 done
+if grep -R -E 'acct_text_raw|opaque_user|opaque_nested|nested_text_raw|Stream Org' "$TMP/error-probes" >/dev/null; then
+  echo "error probe JSON-stream text retained an unredacted fake identity" >&2
+  exit 1
+fi
 
 : >"$LOG"
 set +e

@@ -1,18 +1,18 @@
 {
-  "fixtureId": "status_all",
+  "fixtureId": "usage_all_cli_default",
   "synthetic": false,
   "docDerived": false,
-  "command": "status",
+  "command": "usage",
   "expectedCategory": "usage_error",
   "timeoutSeconds": 30,
   "exitCode": 124,
   "timedOut": true,
-  "durationMs": 30008,
+  "durationMs": 30007,
   "stdoutBytes": 0,
   "stderrBytes": 0,
-  "stdoutPath": "status/live_20260429T181010Z_status_all_stdout.txt",
-  "stderrPath": "status/live_20260429T181010Z_status_all_stderr.txt",
-  "metadataPath": "status/live_20260429T181010Z_status_all_metadata.json",
+  "stdoutPath": "usage/live_20260429T181010Z_usage_all_cli_default_stdout.txt",
+  "stderrPath": "usage/live_20260429T181010Z_usage_all_cli_default_stderr.txt",
+  "metadataPath": "usage/live_20260429T181010Z_usage_all_cli_default_metadata.json",
   "upstreamVersion": "CodexBar",
   "capturedAt": "2026-04-29T18:10:10Z",
   "platform": {
@@ -29,8 +29,7 @@
     "--provider",
     "all",
     "--source",
-    "cli",
-    "--status"
+    "cli"
   ],
   "redaction": {
     "applied": true,

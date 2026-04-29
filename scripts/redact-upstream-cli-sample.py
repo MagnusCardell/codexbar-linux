@@ -19,6 +19,7 @@ SENSITIVE_KEY = re.compile(
     r"(authorization|cookie|secret|token|password|api.?key|sessionkey|session[_-]?key|headers|profile.*path|auth.*path|raw)",
     re.IGNORECASE,
 )
+RAW_PAYLOAD_KEY = re.compile(r"^raw(?:[_-]?(?:response|payload))?$", re.IGNORECASE)
 EMAIL_KEY = re.compile(r"(^|[_-])(?:account)?email$", re.IGNORECASE)
 ACCOUNT_KEY = re.compile(r"(account.*id|provider.*id|user.*id|customer.*id|team.*id|workspace.*id)$", re.IGNORECASE)
 ORG_KEY = re.compile(r"(organization|org|workspace|team)(name)?$", re.IGNORECASE)
@@ -109,16 +110,58 @@ def redact_text(text: str) -> str:
     text = SECRET_ASSIGNMENT.sub("[REDACTED_SECRET]", text)
     text = LOCAL_SHARE_PATH.sub("[REDACTED_PATH]", text)
     text = AUTH_JSON_PATH.sub("[REDACTED_PATH]", text)
-    text = HOME_PATH.sub("/home/[REDACTED_USER]/...", text)
+    text = HOME_PATH.sub("[REDACTED_PATH]", text)
     text = EMAIL.sub(mask_email, text)
     return text
+
+
+def redact_json_stream_text(text: str) -> str | None:
+    """Redact newline/multi-document JSON streams while preserving text output."""
+    decoder = json.JSONDecoder()
+    index = 0
+    parts: list[str] = []
+    decoded_any = False
+
+    while index < len(text):
+        whitespace = re.match(r"\s+", text[index:])
+        if whitespace:
+            end = index + whitespace.end()
+            parts.append(text[index:end])
+            index = end
+            continue
+
+        try:
+            value, end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            candidates = [
+                position
+                for position in (text.find("{", index + 1), text.find("[", index + 1))
+                if position != -1
+            ]
+            if not candidates:
+                parts.append(redact_text(text[index:]))
+                break
+            next_index = min(candidates)
+            parts.append(redact_text(text[index:next_index]))
+            index = next_index
+            continue
+
+        parts.append(json.dumps(redact_value(value), separators=(",", ":"), sort_keys=False))
+        decoded_any = True
+        index = end
+
+    if not decoded_any:
+        return None
+    return "".join(parts)
 
 
 def redact_value(value: Any) -> Any:
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         for key, child in value.items():
-            if SENSITIVE_KEY.search(key):
+            if RAW_PAYLOAD_KEY.search(key):
+                redacted[_next_available_key(redacted, "redactedRawField")] = "[REDACTED_SECRET]"
+            elif SENSITIVE_KEY.search(key):
                 redacted[key] = "[REDACTED_SECRET]"
             elif EMAIL_KEY.search(key):
                 redacted[key] = None if child is None else "[REDACTED_EMAIL]"
@@ -136,6 +179,15 @@ def redact_value(value: Any) -> Any:
     return value
 
 
+def _next_available_key(value: dict[str, Any], base: str) -> str:
+    if base not in value:
+        return base
+    suffix = 2
+    while f"{base}{suffix}" in value:
+        suffix += 1
+    return f"{base}{suffix}"
+
+
 def parse_output(text: str) -> tuple[str, Any]:
     stripped = text.strip()
     if not stripped:
@@ -143,6 +195,9 @@ def parse_output(text: str) -> tuple[str, Any]:
     try:
         return "json", redact_value(json.loads(stripped))
     except json.JSONDecodeError:
+        stream_text = redact_json_stream_text(text)
+        if stream_text is not None:
+            return "text", stream_text
         return "text", redact_text(text)
 
 
@@ -241,7 +296,7 @@ def envelope_from_input(args: argparse.Namespace) -> Any:
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
-        return redact_text(text)
+        return redact_json_stream_text(text) or redact_text(text)
     return redact_value(value)
 
 

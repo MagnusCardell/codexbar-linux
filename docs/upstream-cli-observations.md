@@ -2,8 +2,8 @@
 
 Task 02A records upstream `codexbar` CLI evidence without implementing the
 production adapter. The current committed corpus includes a safe baseline of
-doc-derived samples from upstream public docs, synthetic error samples, and a
-reviewed redacted live Linux capture from 2026-04-29.
+doc-derived samples from upstream public docs, synthetic error samples, and
+reviewed redacted live Linux captures from 2026-04-29.
 
 ## Sources Inspected
 
@@ -22,9 +22,10 @@ reviewed redacted live Linux capture from 2026-04-29.
   `0.6.0`; that is not a verified Linux binary version.
 
 Task 02B has reviewed live evidence for config validation, cost output,
-unsupported-source errors, invalid-provider errors, and timeout behavior. It
-still lacks a successful live Linux usage/status payload because the promoted
-`--source cli` usage and status probes timed out with empty stdout/stderr.
+unsupported-source errors, invalid-provider errors, all-provider timeout
+behavior, and targeted Codex usage/status success. The all-provider
+`--source cli` usage and status probes timed out with empty stdout/stderr, so
+the adapter strategy should not rely only on one monolithic all-provider call.
 
 ## Capture Harness Scope
 
@@ -40,10 +41,17 @@ Additional read-only probes are individually gated:
 - `--allow-provider-network` adds usage, cost, and status probes that may
   contact providers through upstream CLI behavior. On Linux these success probes
   default to `--provider-source cli`.
+- `--providers LIST` limits usage/default/status success probes to a
+  comma-separated provider list such as `codex,claude`; when omitted, the
+  target remains `all`. Targeted fixture ids include provider and source, such
+  as `usage_codex_cli_default`, `usage_claude_cli_subcommand`, and
+  `status_codex_cli`.
 - `--provider-source SOURCE` selects the source for usage/default/status
   success probes. Allowed values are `cli`, `auto`, and `web`; `cli` is the
   expected Linux success path, while `auto` and `web` are expected Linux
   unsupported-source paths.
+- `--usage-timeout`, `--cost-timeout`, and `--version-timeout` tune the bounded
+  command timeouts recorded in live metadata.
 - `--include-error-probes` adds unsupported-source and invalid-provider probes
   and requires `--allow-provider-network`.
 - `--include-config-dump` adds `codexbar config dump --pretty` and requires a
@@ -53,10 +61,10 @@ Additional read-only probes are individually gated:
 The full opted-in matrix is:
 
 - `codexbar config validate --format json --json-only`
-- `codexbar --format json --json-only --provider all --source cli`
-- `codexbar usage --format json --json-only --provider all --source cli`
+- `codexbar --format json --json-only --provider <provider> --source cli`
+- `codexbar usage --format json --json-only --provider <provider> --source cli`
 - `codexbar cost --format json --json-only --provider all`
-- `codexbar --format json --json-only --provider all --source cli --status`
+- `codexbar --format json --json-only --provider <provider> --source cli --status`
 - `codexbar --format json --json-only --provider all --source web`
 - `codexbar --format json --json-only --provider all --source auto`
 - `codexbar --format json --json-only --provider __codexbar_linux_invalid_provider__`
@@ -106,6 +114,21 @@ The same live capture showed:
 - invalid provider probing exited 1 and emitted `.txt` stdout containing two
   newline-separated JSON arrays, not one parseable JSON document.
 
+A later targeted Codex capture used these exact command shapes:
+
+- `codexbar --format json --json-only --provider codex --source cli`
+- `codexbar usage --format json --json-only --provider codex --source cli`
+- `codexbar --format json --json-only --provider codex --source cli --status`
+
+All three targeted Codex probes exited 0 with zero stderr and one valid JSON
+document on stdout. The promoted stdout sidecars therefore use `.json`.
+The successful targeted payloads were JSON arrays containing one provider
+object. The status probe includes a `status` object; the two usage probes carry
+usage and credit fields without status. This targeted result is the main Task
+02B adapter-strategy signal: prefer per-provider bounded probes or a fallback
+strategy, and treat all-provider usage/status as optional evidence rather than
+the only Linux path.
+
 ## Usage JSON Shape Summary
 
 The upstream docs show a provider usage payload with these notable fields:
@@ -152,6 +175,9 @@ with reviewed live Linux upstream failures:
   exit code 1 and `.txt` stdout containing multiple JSON documents.
 - `usage_error`: synthetic stderr redaction stress sample plus live usage/status
   timeout metadata with empty stdout/stderr.
+- `usage_success`: doc-derived usage/status shapes plus live targeted Codex
+  usage/default, usage subcommand, and status payloads with parseable JSON
+  stdout.
 
 The live invalid-provider stdout is intentionally stored as `.txt`: each line is
 JSON-looking, but the file as a whole is not valid single-document JSON.
@@ -163,10 +189,12 @@ JSON-looking, but the file as a whole is not valid single-document JSON.
 directory before manual review. `scripts/test-upstream-cli-capture.sh` runs a
 fake `codexbar` binary through the capture harness; it exercises default and
 explicit metadata-only capture, config validation, acknowledged config dump,
-provider-network probes, unsupported `web`/`auto`, invalid provider behavior,
-committed-corpus output guards, and redaction of emails, session keys, tokens,
-headers, and home/profile paths. This test is not production adapter coverage;
-it only protects the evidence capture tooling.
+provider-network probes, targeted `--providers` capture, per-probe timeout
+metadata, unsupported `web`/`auto`, invalid provider behavior, committed-corpus
+output guards, and redaction of emails, session keys, tokens, headers, and
+raw payload fields, multi-document JSON-stream text, account/org identifiers,
+and home/profile paths. This test is not production adapter coverage; it only
+protects the evidence capture tooling.
 
 ## Fields To Discard Or Redact Before Cache/D-Bus
 
@@ -189,7 +217,8 @@ Allowed normalized identity is limited to the frozen fields in
 
 - What exact JSON shape does `--provider all` emit when multiple providers are
   enabled on Linux for successful usage/status: one object, an array, or an
-  envelope?
+  envelope? Targeted Codex success emitted a JSON array containing one provider
+  object.
 - Does `--provider all --source cli` usage/status complete under a longer
   timeout or different upstream configuration? The promoted run timed out at 30
   seconds with no stdout/stderr.

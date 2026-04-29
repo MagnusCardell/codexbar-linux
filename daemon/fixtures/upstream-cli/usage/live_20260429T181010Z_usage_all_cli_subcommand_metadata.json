@@ -1,5 +1,5 @@
 {
-  "fixtureId": "usage_default_all",
+  "fixtureId": "usage_all_cli_subcommand",
   "synthetic": false,
   "docDerived": false,
   "command": "usage",
@@ -7,12 +7,12 @@
   "timeoutSeconds": 30,
   "exitCode": 124,
   "timedOut": true,
-  "durationMs": 30007,
+  "durationMs": 30006,
   "stdoutBytes": 0,
   "stderrBytes": 0,
-  "stdoutPath": "usage/live_20260429T181010Z_usage_default_all_stdout.txt",
-  "stderrPath": "usage/live_20260429T181010Z_usage_default_all_stderr.txt",
-  "metadataPath": "usage/live_20260429T181010Z_usage_default_all_metadata.json",
+  "stdoutPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_stdout.txt",
+  "stderrPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_stderr.txt",
+  "metadataPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_metadata.json",
   "upstreamVersion": "CodexBar",
   "capturedAt": "2026-04-29T18:10:10Z",
   "platform": {
@@ -23,6 +23,7 @@
   "codexbarCliPath": "[REDACTED_PATH]",
   "argv": [
     "codexbar",
+    "usage",
     "--format",
     "json",
     "--json-only",

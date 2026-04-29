@@ -20,6 +20,10 @@ struct Manifest {
 #[serde(rename_all = "camelCase")]
 struct FixtureEntry {
     fixture_id: String,
+    command: String,
+    argv: Vec<String>,
+    synthetic: bool,
+    doc_derived: bool,
     expected_category: String,
     stdout_path: String,
     stderr_path: String,
@@ -64,6 +68,228 @@ fn upstream_cli_manifest_and_json_fixtures_parse() {
                 });
             }
         }
+    }
+}
+
+#[test]
+fn upstream_cli_live_provider_fixture_ids_are_targeted() {
+    let (manifest, _root) = load_manifest();
+    for fixture in &manifest.fixtures {
+        if fixture.synthetic || fixture.doc_derived {
+            continue;
+        }
+        if fixture.command == "cost" {
+            assert_eq!(
+                option_value(&fixture.argv, "--provider"),
+                Some("all"),
+                "cost fixture {} must stay --provider all",
+                fixture.fixture_id
+            );
+            assert!(
+                option_value(&fixture.argv, "--source").is_none(),
+                "cost fixture {} must not include --source",
+                fixture.fixture_id
+            );
+            continue;
+        }
+        if !matches!(
+            fixture.expected_category.as_str(),
+            "usage_success" | "usage_error"
+        ) || !matches!(fixture.command.as_str(), "usage" | "status")
+        {
+            continue;
+        }
+        let provider = match option_value(&fixture.argv, "--provider") {
+            Some(provider) => provider,
+            None => continue,
+        };
+        let source = match option_value(&fixture.argv, "--source") {
+            Some(source) => source,
+            None => continue,
+        };
+        let expected_id = if fixture.command == "status" {
+            format!("status_{provider}_{source}")
+        } else if matches!(fixture.argv.get(1).map(String::as_str), Some("usage")) {
+            format!("usage_{provider}_{source}_subcommand")
+        } else {
+            format!("usage_{provider}_{source}_default")
+        };
+        assert_eq!(
+            fixture.fixture_id, expected_id,
+            "live usage/status fixture ids must include provider and source"
+        );
+    }
+}
+
+#[test]
+fn upstream_cli_required_live_matrix_is_present() {
+    let (manifest, _root) = load_manifest();
+    for (fixture_id, argv, expected_category) in [
+        ("version", &["codexbar", "--version"][..], "version"),
+        (
+            "config_validate",
+            &[
+                "codexbar",
+                "config",
+                "validate",
+                "--format",
+                "json",
+                "--json-only",
+            ],
+            "config_validate",
+        ),
+        (
+            "usage_all_cli_default",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+                "--source",
+                "cli",
+            ],
+            "usage_error",
+        ),
+        (
+            "usage_all_cli_subcommand",
+            &[
+                "codexbar",
+                "usage",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+                "--source",
+                "cli",
+            ],
+            "usage_error",
+        ),
+        (
+            "cost_all",
+            &[
+                "codexbar",
+                "cost",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+            ],
+            "cost_success",
+        ),
+        (
+            "status_all_cli",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+                "--source",
+                "cli",
+                "--status",
+            ],
+            "usage_error",
+        ),
+        (
+            "usage_codex_cli_default",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "cli",
+            ],
+            "usage_success",
+        ),
+        (
+            "usage_codex_cli_subcommand",
+            &[
+                "codexbar",
+                "usage",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "cli",
+            ],
+            "usage_success",
+        ),
+        (
+            "status_codex_cli",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "cli",
+                "--status",
+            ],
+            "usage_success",
+        ),
+        (
+            "unsupported_web_source",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+                "--source",
+                "web",
+            ],
+            "unsupported_source",
+        ),
+        (
+            "unsupported_auto_source",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "all",
+                "--source",
+                "auto",
+            ],
+            "unsupported_source",
+        ),
+        (
+            "invalid_provider",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "__codexbar_linux_invalid_provider__",
+            ],
+            "invalid_provider",
+        ),
+    ] {
+        let fixture = manifest
+            .fixtures
+            .iter()
+            .find(|candidate| candidate.fixture_id == fixture_id)
+            .unwrap_or_else(|| panic!("missing required live fixture {fixture_id}"));
+        assert_eq!(fixture.argv, argv, "argv mismatch for {fixture_id}");
+        assert_eq!(
+            fixture.expected_category, expected_category,
+            "expectedCategory mismatch for {fixture_id}"
+        );
     }
 }
 
@@ -185,6 +411,11 @@ fn count_raw_identity_keys(text: &str) -> usize {
     .sum()
 }
 
+fn option_value<'a>(argv: &'a [String], option: &str) -> Option<&'a str> {
+    let index = argv.iter().position(|arg| arg == option)?;
+    argv.get(index + 1).map(String::as_str)
+}
+
 fn assert_upstream_fixture_text_safe(text: &str, path: &Path) {
     let lower = text.to_ascii_lowercase();
     for forbidden in [
@@ -211,4 +442,88 @@ fn assert_upstream_fixture_text_safe(text: &str, path: &Path) {
             path.display()
         );
     }
+    assert_no_raw_json_identity_values(text, path);
+}
+
+fn assert_no_raw_json_identity_values(text: &str, path: &Path) {
+    for key in ["accountEmail", "signedInEmail"] {
+        for value in json_string_values(text, key) {
+            assert!(
+                value == "[REDACTED_EMAIL]" || value.contains("***@"),
+                "{} contains unredacted identity email field {key}",
+                path.display()
+            );
+        }
+    }
+
+    for key in [
+        "providerID",
+        "providerId",
+        "accountID",
+        "accountId",
+        "userID",
+        "userId",
+        "customerID",
+        "customerId",
+        "teamID",
+        "teamId",
+        "workspaceID",
+        "workspaceId",
+    ] {
+        for value in json_string_values(text, key) {
+            assert!(
+                value.starts_with("[REDACTED_") && value.ends_with(']'),
+                "{} contains unredacted account id field {key}",
+                path.display()
+            );
+        }
+    }
+
+    for key in [
+        "accountOrganization",
+        "organization",
+        "org",
+        "workspace",
+        "team",
+        "teamName",
+    ] {
+        for value in json_string_values(text, key) {
+            assert!(
+                value.starts_with("[REDACTED_") && value.ends_with(']'),
+                "{} contains unredacted organization field {key}",
+                path.display()
+            );
+        }
+    }
+}
+
+fn json_string_values(text: &str, key: &str) -> Vec<String> {
+    let needle = format!("\"{key}\"");
+    let mut values = Vec::new();
+    let mut offset = 0;
+    while let Some(relative_index) = text[offset..].find(&needle) {
+        let key_start = offset + relative_index;
+        let after_key = key_start + needle.len();
+        let Some(colon_relative) = text[after_key..].find(':') else {
+            break;
+        };
+        let mut value_start = after_key + colon_relative + 1;
+        while let Some(ch) = text[value_start..].chars().next() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            value_start += ch.len_utf8();
+        }
+        if text[value_start..].starts_with('"') {
+            let content_start = value_start + 1;
+            if let Some(end_relative) = text[content_start..].find('"') {
+                let content_end = content_start + end_relative;
+                values.push(text[content_start..content_end].to_string());
+                offset = content_end + 1;
+                continue;
+            }
+        }
+        offset = after_key;
+    }
+    values
 }

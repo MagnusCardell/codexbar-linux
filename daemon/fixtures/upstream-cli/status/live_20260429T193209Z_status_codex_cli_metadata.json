@@ -1,0 +1,42 @@
+{
+  "fixtureId": "status_codex_cli",
+  "synthetic": false,
+  "docDerived": false,
+  "command": "status",
+  "expectedCategory": "usage_success",
+  "timeoutSeconds": 90,
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 3072,
+  "stdoutBytes": 764,
+  "stderrBytes": 0,
+  "stdoutPath": "status/live_20260429T193209Z_status_codex_cli_stdout.json",
+  "stderrPath": "status/live_20260429T193209Z_status_codex_cli_stderr.txt",
+  "metadataPath": "status/live_20260429T193209Z_status_codex_cli_metadata.json",
+  "upstreamVersion": "CodexBar",
+  "capturedAt": "2026-04-29T19:32:09Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "6.8.0-110-generic",
+    "arch": "x86_64"
+  },
+  "codexbarCliPath": "[REDACTED_PATH]",
+  "argv": [
+    "codexbar",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "codex",
+    "--source",
+    "cli",
+    "--status"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "live output redacted before fixture write"
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "fixtureSet": "upstream-cli-p02a",
-  "generatedAt": "2026-04-29T18:10:10Z",
+  "generatedAt": "2026-04-29T19:32:09Z",
   "upstreamVersion": "mixed: live Linux CodexBar capture plus doc-derived and synthetic corpus",
   "platform": {
     "os": "Linux",
@@ -13,7 +13,8 @@
     "policyVersion": 1,
     "notes": [
       "Committed corpus contains redacted doc-derived, synthetic, and reviewed live Linux samples.",
-      "Live samples were promoted from /tmp/codexbar-upstream-cli-provider-cli after capture validation.",
+      "All-provider live samples were promoted from /tmp/codexbar-upstream-cli-provider-cli after capture validation.",
+      "Targeted Codex usage/status samples were promoted from /tmp/codexbar-upstream-cli-provider-codex-cli after capture validation and secret-scan review.",
       "Raw live upstream CLI output is not committed."
     ]
   },
@@ -199,7 +200,7 @@
       }
     },
     {
-      "fixtureId": "usage_default_all",
+      "fixtureId": "usage_all_cli_default",
       "command": "usage",
       "argv": [
         "codexbar",
@@ -220,9 +221,9 @@
       "capturedAt": "2026-04-29T18:10:10Z",
       "exitCode": 124,
       "timedOut": true,
-      "stdoutPath": "usage/live_20260429T181010Z_usage_default_all_stdout.txt",
-      "stderrPath": "usage/live_20260429T181010Z_usage_default_all_stderr.txt",
-      "metadataPath": "usage/live_20260429T181010Z_usage_default_all_metadata.json",
+      "stdoutPath": "usage/live_20260429T181010Z_usage_all_cli_default_stdout.txt",
+      "stderrPath": "usage/live_20260429T181010Z_usage_all_cli_default_stderr.txt",
+      "metadataPath": "usage/live_20260429T181010Z_usage_all_cli_default_metadata.json",
       "expectedCategory": "usage_error",
       "synthetic": false,
       "docDerived": false,
@@ -235,7 +236,7 @@
       }
     },
     {
-      "fixtureId": "usage_subcommand_all",
+      "fixtureId": "usage_all_cli_subcommand",
       "command": "usage",
       "argv": [
         "codexbar",
@@ -257,9 +258,9 @@
       "capturedAt": "2026-04-29T18:10:10Z",
       "exitCode": 124,
       "timedOut": true,
-      "stdoutPath": "usage/live_20260429T181010Z_usage_subcommand_all_stdout.txt",
-      "stderrPath": "usage/live_20260429T181010Z_usage_subcommand_all_stderr.txt",
-      "metadataPath": "usage/live_20260429T181010Z_usage_subcommand_all_metadata.json",
+      "stdoutPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_stdout.txt",
+      "stderrPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_stderr.txt",
+      "metadataPath": "usage/live_20260429T181010Z_usage_all_cli_subcommand_metadata.json",
       "expectedCategory": "usage_error",
       "synthetic": false,
       "docDerived": false,
@@ -307,7 +308,7 @@
       }
     },
     {
-      "fixtureId": "status_all",
+      "fixtureId": "status_all_cli",
       "command": "status",
       "argv": [
         "codexbar",
@@ -329,10 +330,120 @@
       "capturedAt": "2026-04-29T18:10:10Z",
       "exitCode": 124,
       "timedOut": true,
-      "stdoutPath": "status/live_20260429T181010Z_status_all_stdout.txt",
-      "stderrPath": "status/live_20260429T181010Z_status_all_stderr.txt",
-      "metadataPath": "status/live_20260429T181010Z_status_all_metadata.json",
+      "stdoutPath": "status/live_20260429T181010Z_status_all_cli_stdout.txt",
+      "stderrPath": "status/live_20260429T181010Z_status_all_cli_stderr.txt",
+      "metadataPath": "status/live_20260429T181010Z_status_all_cli_metadata.json",
       "expectedCategory": "usage_error",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "usage_codex_cli_default",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "codex",
+        "--source",
+        "cli"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T19:32:09Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "usage/live_20260429T193209Z_usage_codex_cli_default_stdout.json",
+      "stderrPath": "usage/live_20260429T193209Z_usage_codex_cli_default_stderr.txt",
+      "metadataPath": "usage/live_20260429T193209Z_usage_codex_cli_default_metadata.json",
+      "expectedCategory": "usage_success",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "usage_codex_cli_subcommand",
+      "command": "usage",
+      "argv": [
+        "codexbar",
+        "usage",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "codex",
+        "--source",
+        "cli"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T19:32:09Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "usage/live_20260429T193209Z_usage_codex_cli_subcommand_stdout.json",
+      "stderrPath": "usage/live_20260429T193209Z_usage_codex_cli_subcommand_stderr.txt",
+      "metadataPath": "usage/live_20260429T193209Z_usage_codex_cli_subcommand_metadata.json",
+      "expectedCategory": "usage_success",
+      "synthetic": false,
+      "docDerived": false,
+      "redaction": {
+        "applied": true,
+        "policyVersion": 1,
+        "notes": [
+          "live output redacted before fixture write"
+        ]
+      }
+    },
+    {
+      "fixtureId": "status_codex_cli",
+      "command": "status",
+      "argv": [
+        "codexbar",
+        "--format",
+        "json",
+        "--json-only",
+        "--provider",
+        "codex",
+        "--source",
+        "cli",
+        "--status"
+      ],
+      "upstreamVersion": "CodexBar",
+      "platform": {
+        "os": "Linux",
+        "kernel": "6.8.0-110-generic",
+        "arch": "x86_64"
+      },
+      "capturedAt": "2026-04-29T19:32:09Z",
+      "exitCode": 0,
+      "timedOut": false,
+      "stdoutPath": "status/live_20260429T193209Z_status_codex_cli_stdout.json",
+      "stderrPath": "status/live_20260429T193209Z_status_codex_cli_stderr.txt",
+      "metadataPath": "status/live_20260429T193209Z_status_codex_cli_metadata.json",
+      "expectedCategory": "usage_success",
       "synthetic": false,
       "docDerived": false,
       "redaction": {
