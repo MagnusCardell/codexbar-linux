@@ -13,6 +13,7 @@ INCLUDE_ERROR_PROBES=0
 INCLUDE_CONFIG_VALIDATE=0
 INCLUDE_CONFIG_DUMP=0
 UNDERSTAND_CONFIG_DUMP=0
+PROVIDER_SOURCE="cli"
 
 usage() {
   cat <<'USAGE'
@@ -37,6 +38,10 @@ Options:
   --allow-provider-network
       Also run usage/cost/status commands that may contact provider endpoints
       through the upstream codexbar CLI.
+  --provider-source SOURCE
+      Source for provider success probes when --allow-provider-network is set.
+      Allowed values: cli, auto, web. Defaults to cli, which is the expected
+      Linux success source. auto and web are Linux error-probe sources.
   --include-error-probes
       Also run unsupported-source and invalid-provider probes. This requires
       --allow-provider-network, because provider-oriented CLI entry points must
@@ -85,6 +90,10 @@ while [[ $# -gt 0 ]]; do
       ALLOW_PROVIDER_NETWORK=1
       shift
       ;;
+    --provider-source)
+      PROVIDER_SOURCE="${2:?missing value for --provider-source}"
+      shift 2
+      ;;
     --include-error-probes)
       INCLUDE_ERROR_PROBES=1
       shift
@@ -126,6 +135,14 @@ committed fixtures and fake-codexbar tests, not a live codexbar binary.
 EOF
   exit 2
 fi
+
+case "$PROVIDER_SOURCE" in
+  cli|auto|web) ;;
+  *)
+    echo "--provider-source must be one of: cli, auto, web" >&2
+    exit 2
+    ;;
+esac
 
 if [[ "$METADATA_ONLY" -eq 1 ]]; then
   if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 || "$INCLUDE_ERROR_PROBES" -eq 1 || "$INCLUDE_CONFIG_VALIDATE" -eq 1 || "$INCLUDE_CONFIG_DUMP" -eq 1 ]]; then
@@ -483,10 +500,10 @@ EOF
 fi
 
 if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 ]]; then
-  run_capture "usage_default_all" "usage" "usage" "usage_success" 30 --format json --json-only --provider all
-  run_capture "usage_subcommand_all" "usage" "usage" "usage_success" 30 usage --format json --json-only --provider all
+  run_capture "usage_default_all" "usage" "usage" "usage_success" 30 --format json --json-only --provider all --source "$PROVIDER_SOURCE"
+  run_capture "usage_subcommand_all" "usage" "usage" "usage_success" 30 usage --format json --json-only --provider all --source "$PROVIDER_SOURCE"
   run_capture "cost_all" "cost" "cost" "cost_success" 20 cost --format json --json-only --provider all
-  run_capture "status_all" "status" "status" "usage_success" 30 --format json --json-only --provider all --status
+  run_capture "status_all" "status" "status" "usage_success" 30 --format json --json-only --provider all --source "$PROVIDER_SOURCE" --status
 fi
 
 if [[ "$INCLUDE_ERROR_PROBES" -eq 1 ]]; then

@@ -16,7 +16,7 @@ from typing import Any
 
 
 SENSITIVE_KEY = re.compile(
-    r"(authorization|cookie|secret|token|password|api.?key|sessionkey|session[_-]?key|headers|profile.*path|raw)",
+    r"(authorization|cookie|secret|token|password|api.?key|sessionkey|session[_-]?key|headers|profile.*path|auth.*path|raw)",
     re.IGNORECASE,
 )
 EMAIL_KEY = re.compile(r"(^|[_-])(?:account)?email$", re.IGNORECASE)
@@ -24,6 +24,8 @@ ACCOUNT_KEY = re.compile(r"(account.*id|provider.*id|user.*id|customer.*id|team.
 ORG_KEY = re.compile(r"(organization|org|workspace|team)(name)?$", re.IGNORECASE)
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 HOME_PATH = re.compile(r"(?i)(/home/[^/\s\"']+|/Users/[^/\s\"']+|[A-Za-z]:\\Users\\[^\\\s\"']+)(?:[/\\][^\s\"']*)?")
+LOCAL_SHARE_PATH = re.compile(r"(?i)~[/\\]\.local[/\\]share[/\\][^\s\"']+")
+AUTH_JSON_PATH = re.compile(r"(?i)(?:[^\s\"']*[/\\])?auth\.json")
 HEADER_SECRET = re.compile(r"(?im)\b(authorization|cookie|set-cookie|x-api-key)\s*:\s*[^\r\n]+")
 BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{6,}\b")
@@ -52,6 +54,8 @@ FORBIDDEN = [
     ("jwt", JWT),
     ("secret_assignment", SECRET_ASSIGNMENT),
     ("home_path", re.compile(r"(?i)(/home/(?!\[REDACTED_USER\])|/Users/(?!\[REDACTED_USER\])|[A-Za-z]:\\Users\\)")),
+    ("local_share_path", re.compile(r"(?i)~[/\\]\.local[/\\]share[/\\]")),
+    ("auth_json_path", re.compile(r"(?i)auth\.json")),
     ("browser_profile_path", re.compile(r"(?i)(\.config/chrom|\.mozilla/firefox|Network/Cookies|Login Data)")),
     ("raw_payload", re.compile(r"(?i)\"raw(payload|response)\"")),
 ]
@@ -103,6 +107,8 @@ def redact_text(text: str) -> str:
     text = JWT.sub("[REDACTED_TOKEN]", text)
     text = SECRET_QUERY.sub(r"\1redacted=[REDACTED_TOKEN]", text)
     text = SECRET_ASSIGNMENT.sub("[REDACTED_SECRET]", text)
+    text = LOCAL_SHARE_PATH.sub("[REDACTED_PATH]", text)
+    text = AUTH_JSON_PATH.sub("[REDACTED_PATH]", text)
     text = HOME_PATH.sub("/home/[REDACTED_USER]/...", text)
     text = EMAIL.sub(mask_email, text)
     return text

@@ -56,9 +56,12 @@ secret_patterns = [
     ),
     ("raw_home_path", re.compile(r"/home/(?!\[REDACTED_USER\])[^/\s\"']+")),
     ("raw_users_path", re.compile(r"/Users/(?!\[REDACTED_USER\])[^/\s\"']+")),
+    ("local_share_path", re.compile(r"(?i)~[/\\]\.local[/\\]share[/\\]")),
+    ("auth_json_path", re.compile(r"(?i)(^|[/\\])auth\.json\b")),
     ("browser_profile_path", re.compile(r"(?i)(Network/Cookies|Login Data|\.config/(google-chrome|chromium|BraveSoftware)|\.mozilla/firefox)")),
 ]
 raw_email = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+identity_email_keys = {"accountemail", "signedinemail"}
 
 
 def check_text(path: Path, text: str) -> None:
@@ -70,6 +73,25 @@ def check_text(path: Path, text: str) -> None:
     for code, pattern in secret_patterns:
         if pattern.search(text):
             raise SystemExit(f"Potential secret pattern {code} in {path}")
+
+
+def check_identity_values(path: Path, value, trail: tuple[str, ...] = ()) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = key.replace("_", "").replace("-", "").lower()
+            child_trail = (*trail, key)
+            if normalized_key in identity_email_keys:
+                if child is None or child == "[REDACTED_EMAIL]":
+                    pass
+                elif isinstance(child, str) and "***@" in child:
+                    pass
+                else:
+                    dotted = ".".join(child_trail)
+                    raise SystemExit(f"Unredacted identity email value in {path}: {dotted}")
+            check_identity_values(path, child, child_trail)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            check_identity_values(path, child, (*trail, str(index)))
 
 
 def rel_path(value: str) -> Path:
@@ -163,9 +185,10 @@ for path in sorted(paths_to_check):
     check_text(path, text)
     if path.suffix == ".json":
         try:
-            json.loads(text)
+            value = json.loads(text)
         except json.JSONDecodeError as exc:
             raise SystemExit(f"JSON fixture does not parse: {path}: {exc}") from exc
+        check_identity_values(path, value)
     try:
         display_path = path.relative_to(fixture_root.parent.parent.parent)
     except ValueError:

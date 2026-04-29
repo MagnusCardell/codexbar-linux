@@ -3,7 +3,7 @@
 Task 02A records upstream `codexbar` CLI evidence without implementing the
 production adapter. The current committed corpus is a safe baseline only:
 doc-derived samples from upstream public docs plus synthetic error samples. No
-local live Linux capture was available in this workspace.
+reviewed live Linux capture has been promoted into this corpus yet.
 
 ## Sources Inspected
 
@@ -14,8 +14,9 @@ local live Linux capture was available in this workspace.
 
 ## Version Observed
 
-- Local upstream CLI path: not available.
-- Local upstream CLI version: not available.
+- Local upstream CLI path: available in the Task 02A.2 environment but not
+  promoted into this committed corpus by the harness patch.
+- Local upstream CLI version: not captured in the committed corpus.
 - Documentation sample version fields include provider-level examples such as
   `0.6.0`; that is not a verified Linux binary version.
 
@@ -34,7 +35,12 @@ Additional read-only probes are individually gated:
 - `--include-config-validate` adds
   `codexbar config validate --format json --json-only`.
 - `--allow-provider-network` adds usage, cost, and status probes that may
-  contact providers through upstream CLI behavior.
+  contact providers through upstream CLI behavior. On Linux these success probes
+  default to `--provider-source cli`.
+- `--provider-source SOURCE` selects the source for usage/default/status
+  success probes. Allowed values are `cli`, `auto`, and `web`; `cli` is the
+  expected Linux success path, while `auto` and `web` are expected Linux
+  unsupported-source paths.
 - `--include-error-probes` adds unsupported-source and invalid-provider probes
   and requires `--allow-provider-network`.
 - `--include-config-dump` adds `codexbar config dump --pretty` and requires a
@@ -44,10 +50,10 @@ Additional read-only probes are individually gated:
 The full opted-in matrix is:
 
 - `codexbar config validate --format json --json-only`
-- `codexbar --format json --json-only --provider all`
-- `codexbar usage --format json --json-only --provider all`
+- `codexbar --format json --json-only --provider all --source cli`
+- `codexbar usage --format json --json-only --provider all --source cli`
 - `codexbar cost --format json --json-only --provider all`
-- `codexbar --format json --json-only --provider all --status`
+- `codexbar --format json --json-only --provider all --source cli --status`
 - `codexbar --format json --json-only --provider all --source web`
 - `codexbar --format json --json-only --provider all --source auto`
 - `codexbar --format json --json-only --provider __codexbar_linux_invalid_provider__`
@@ -58,7 +64,8 @@ behind `--include-config-dump` plus a second confirmation because config dumps
 can contain secrets and need manual review even after redaction. Live capture
 writes `manifest.live-<timestamp>.json` sidecars by default and refuses to
 write any live capture manifest under `daemon/fixtures/upstream-cli/` unless
-the same explicit committed-fixture override is set for manual promotion.
+the same explicit committed-fixture override is set for manual promotion. Raw
+terminal output must never be promoted.
 
 ## Linux Source Behavior
 
@@ -69,10 +76,22 @@ Upstream CLI documentation states:
 - On Linux, `web` and `auto` are not supported and the CLI exits non-zero.
 - `--json-only` suppresses non-JSON output and reports errors as JSON payloads.
 
+Manual Linux testing for Task 02A.2 additionally showed:
+
+- plain/default source attempts `auto` and fails on Linux with the macOS-only
+  web-support error;
+- `usage --format json --pretty --provider all --source cli` succeeds, making
+  `cli` the expected Linux success source;
+- `--source auto` and `--source web` produce JSON runtime errors on Linux;
+- cost capture must use `--json-only` because pretty mode may emit human warning
+  text before or around the machine-readable payload;
+- raw output can contain `accountEmail`, nested `identity.accountEmail`,
+  `/home/...`, `~/.local/share/...`, and `auth.json` paths before redaction.
+
 This repository has a synthetic `unsupported_source` fixture for `--source web`.
-`--source auto` is now part of the live capture harness error-probe matrix, but
-it was not locally observed because the binary is unavailable; it must be
-captured before Task 02B relies on exact exit-code or stderr behavior.
+`--source auto` is part of the live capture harness error-probe matrix. Reviewed
+redacted live fixtures are still required before Task 02B relies on exact
+exit-code, stdout, or stderr behavior.
 
 ## Usage JSON Shape Summary
 

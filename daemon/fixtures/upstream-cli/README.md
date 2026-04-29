@@ -8,8 +8,8 @@ daemon refresh behavior.
 
 - `manifest.json` lists every committed sample and its stdout/stderr/metadata
   sidecars.
-- `usage/` contains redacted output for
-  `codexbar --format json --json-only --provider all`.
+- `usage/` contains redacted output for usage/default probes such as
+  `codexbar --format json --json-only --provider all --source cli`.
 - `cost/` contains redacted output for
   `codexbar cost --format json --json-only --provider all`.
 - `status/` contains status-bearing CLI output.
@@ -77,13 +77,18 @@ without provider-network probes:
 ```
 
 Usage, cost, and provider status commands may contact providers through the
-upstream CLI. Capture them only with explicit opt-in:
+upstream CLI. Capture them only with explicit opt-in. Linux provider success
+captures default to `--provider-source cli`; this adds `--source cli` to usage
+and status probes. `auto` and `web` are Linux unsupported-source probe values,
+not expected success paths. The cost probe intentionally uses `--json-only` but
+does not receive `--source` unless upstream support for that flag is verified.
 
 ```bash
 ./scripts/capture-upstream-cli-samples.sh \
   --live \
   --include-config-validate \
   --allow-provider-network \
+  --provider-source cli \
   --include-error-probes \
   --output /tmp/codexbar-upstream-cli
 ```
@@ -102,4 +107,6 @@ Promotion is deliberate:
 5. Update `manifest.json` with selected entries.
 6. Run `./scripts/validate-upstream-cli-fixtures.sh`.
 
-Do not commit raw capture files.
+Do not commit raw capture files or raw terminal output. Live upstream output may
+contain raw `accountEmail` values, nested `identity.accountEmail` values, home
+paths, `~/.local/share/...` paths, or `auth.json` paths before redaction.

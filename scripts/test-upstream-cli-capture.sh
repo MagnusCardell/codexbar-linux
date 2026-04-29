@@ -26,6 +26,9 @@ case "$*" in
     printf '{"apiKey":"sk-config-secret","home":"/home/person/.codexbar/config.json"}\n'
     printf 'sessionKey=plain-session-secret Authorization: Bearer plain-token\n' >&2
     ;;
+  "--format json --json-only --provider all --source cli"|"usage --format json --json-only --provider all --source cli"|"--format json --json-only --provider all --source cli --status")
+    printf '{"provider":"codex","accountEmail":"dev@example.com","usage":{"identity":{"accountEmail":"nested@example.com","authPath":"~/.local/share/codexbar/auth.json"},"primary":{"usedPercent":12}},"diagnosticsPath":"/home/person/.local/share/codexbar/auth.json"}\n'
+    ;;
   *"--source web"*)
     printf '{"error":{"code":"unsupported_source","message":"web unsupported"}}\n'
     exit 1
@@ -162,10 +165,10 @@ fi
 run_capture "$TMP/provider" --allow-provider-network
 for expected in \
   "--version" \
-  "--format json --json-only --provider all" \
-  "usage --format json --json-only --provider all" \
+  "--format json --json-only --provider all --source cli" \
+  "usage --format json --json-only --provider all --source cli" \
   "cost --format json --json-only --provider all" \
-  "--format json --json-only --provider all --status"
+  "--format json --json-only --provider all --source cli --status"
 do
   grep -Fx -- "$expected" "$LOG" >/dev/null || {
     echo "missing provider capture invocation: $expected" >&2
@@ -173,6 +176,39 @@ do
     exit 1
   }
 done
+if grep -E '^cost .*--source' "$LOG" >/dev/null; then
+  echo "cost capture should not receive --source" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+if grep -R -E 'dev@example.com|nested@example.com|/home/person|~/.local/share|auth\.json' "$TMP/provider" >/dev/null; then
+  echo "provider capture retained an unredacted fake identity or path" >&2
+  exit 1
+fi
+
+: >"$LOG"
+run_capture "$TMP/provider-cli-flag" --allow-provider-network --provider-source cli
+grep -Fx -- "usage --format json --json-only --provider all --source cli" "$LOG" >/dev/null || {
+  echo "explicit --provider-source cli was not passed to usage capture" >&2
+  cat "$LOG" >&2
+  exit 1
+}
+
+: >"$LOG"
+set +e
+TMPDIR="$TMP" CODEXBAR_FAKE_LOG="$LOG" CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI="$FAKE" \
+  "$ROOT/scripts/capture-upstream-cli-samples.sh" --output "$TMP/provider-source-invalid" --allow-provider-network --provider-source local >"$TMP/provider-source-invalid.out" 2>"$TMP/provider-source-invalid.err"
+status=$?
+set -e
+if [[ "$status" -ne 2 ]]; then
+  echo "expected invalid --provider-source to exit 2, got $status" >&2
+  exit 1
+fi
+if [[ -s "$LOG" ]]; then
+  echo "invalid provider source refusal should not invoke fake codexbar" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
 
 : >"$LOG"
 set +e
