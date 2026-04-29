@@ -47,11 +47,33 @@ before committing new samples.
 
 ## Capturing new samples
 
-The capture harness does not run provider-networking commands by default.
-Version/config validation can be captured locally:
+The capture harness is always opt-in (`--live` or `CODEXBAR_CAPTURE_LIVE=1`)
+and writes to `/tmp/codexbar-upstream-cli-live-<timestamp>` unless `--output`
+is provided. It refuses to write directly into this committed fixture directory
+or write a live capture manifest there through `--manifest` unless
+`CODEXBAR_ALLOW_COMMITTED_FIXTURE_OUTPUT=1` is set. If `--manifest` is
+provided, it must point directly under the capture output directory so the
+manifest and sidecars remain one validated package, and its basename must match
+`manifest.live-*.json`.
+
+The default live mode, with or without explicit `--metadata-only`, captures only
+`codexbar --version`:
 
 ```bash
-./scripts/capture-upstream-cli-samples.sh --output /tmp/codexbar-upstream-cli
+./scripts/capture-upstream-cli-samples.sh \
+  --live \
+  --metadata-only \
+  --output /tmp/codexbar-upstream-cli
+```
+
+Config validation is separate from metadata-only mode and may be captured
+without provider-network probes:
+
+```bash
+./scripts/capture-upstream-cli-samples.sh \
+  --live \
+  --include-config-validate \
+  --output /tmp/codexbar-upstream-cli
 ```
 
 Usage, cost, and provider status commands may contact providers through the
@@ -59,9 +81,25 @@ upstream CLI. Capture them only with explicit opt-in:
 
 ```bash
 ./scripts/capture-upstream-cli-samples.sh \
+  --live \
+  --include-config-validate \
   --allow-provider-network \
+  --include-error-probes \
   --output /tmp/codexbar-upstream-cli
 ```
 
-Review the redacted output, copy only useful samples into this directory, then
-update `manifest.json`. Do not commit raw capture files.
+`--include-config-dump` requires a second confirmation via
+`CODEXBAR_CAPTURE_INCLUDE_CONFIG_DUMP=1` or
+`--i-understand-config-dump-may-contain-secrets`. Use it only when the redacted
+dump is needed for upstream evidence and manually review it before promotion.
+
+Promotion is deliberate:
+
+1. Capture into `/tmp` or another non-repository directory.
+2. Run `./scripts/validate-upstream-cli-capture.sh /path/to/capture`.
+3. Manually inspect every redacted stdout, stderr, metadata, and manifest file.
+4. Copy only useful reviewed sidecars into this directory.
+5. Update `manifest.json` with selected entries.
+6. Run `./scripts/validate-upstream-cli-fixtures.sh`.
+
+Do not commit raw capture files.

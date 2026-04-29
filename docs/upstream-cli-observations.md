@@ -22,22 +22,43 @@ local live Linux capture was available in this workspace.
 Task 02B remains blocked on reviewed real redacted Linux samples from an
 installed upstream `codexbar` binary.
 
-## Commands Attempted Or Modeled
+## Capture Harness Scope
 
-The capture harness models this bounded read-only command matrix:
+Live capture is local-only and opt-in. The default live path, with or without
+explicit `--metadata-only`, captures only:
 
 - `codexbar --version`
+
+Additional read-only probes are individually gated:
+
+- `--include-config-validate` adds
+  `codexbar config validate --format json --json-only`.
+- `--allow-provider-network` adds usage, cost, and status probes that may
+  contact providers through upstream CLI behavior.
+- `--include-error-probes` adds unsupported-source and invalid-provider probes
+  and requires `--allow-provider-network`.
+- `--include-config-dump` adds `codexbar config dump --pretty` and requires a
+  second explicit confirmation because config dumps may contain secrets before
+  redaction.
+
+The full opted-in matrix is:
+
 - `codexbar config validate --format json --json-only`
 - `codexbar --format json --json-only --provider all`
 - `codexbar usage --format json --json-only --provider all`
 - `codexbar cost --format json --json-only --provider all`
 - `codexbar --format json --json-only --provider all --status`
 - `codexbar --format json --json-only --provider all --source web`
+- `codexbar --format json --json-only --provider all --source auto`
 - `codexbar --format json --json-only --provider __codexbar_linux_invalid_provider__`
+- `codexbar config dump --pretty`
 
 The script does not mutate `~/.codexbar/config.json`. `config dump` capture is
-behind an explicit `--include-config-dump` flag because config dumps can contain
-secrets and need manual review even after redaction.
+behind `--include-config-dump` plus a second confirmation because config dumps
+can contain secrets and need manual review even after redaction. Live capture
+writes `manifest.live-<timestamp>.json` sidecars by default and refuses to
+write any live capture manifest under `daemon/fixtures/upstream-cli/` unless
+the same explicit committed-fixture override is set for manual promotion.
 
 ## Linux Source Behavior
 
@@ -49,8 +70,9 @@ Upstream CLI documentation states:
 - `--json-only` suppresses non-JSON output and reports errors as JSON payloads.
 
 This repository has a synthetic `unsupported_source` fixture for `--source web`.
-`--source auto` was not locally observed because the binary is unavailable; it
-must be captured before Task 02B relies on exact exit-code or stderr behavior.
+`--source auto` is now part of the live capture harness error-probe matrix, but
+it was not locally observed because the binary is unavailable; it must be
+captured before Task 02B relies on exact exit-code or stderr behavior.
 
 ## Usage JSON Shape Summary
 
@@ -98,6 +120,18 @@ available:
 
 Real Linux samples must confirm exact upstream exit codes, stdout/stderr JSON
 shape, and whether unsupported `auto` behaves identically to unsupported `web`.
+
+## Harness Validation
+
+`scripts/validate-upstream-cli-fixtures.sh` validates the committed corpus.
+`scripts/validate-upstream-cli-capture.sh` validates an unpromoted live capture
+directory before manual review. `scripts/test-upstream-cli-capture.sh` runs a
+fake `codexbar` binary through the capture harness; it exercises default and
+explicit metadata-only capture, config validation, acknowledged config dump,
+provider-network probes, unsupported `web`/`auto`, invalid provider behavior,
+committed-corpus output guards, and redaction of emails, session keys, tokens,
+headers, and home/profile paths. This test is not production adapter coverage;
+it only protects the evidence capture tooling.
 
 ## Fields To Discard Or Redact Before Cache/D-Bus
 

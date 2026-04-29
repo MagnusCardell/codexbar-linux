@@ -1,53 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIXTURE_ROOT="$ROOT/daemon/fixtures/upstream-cli"
-MANIFEST="$FIXTURE_ROOT/manifest.json"
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 /path/to/manifest.live-*.json-or-capture-dir" >&2
+  exit 2
+fi
 
-validate_manifest() {
-  local fixture_root="$1"
-  local manifest="$2"
-  local mode="$3"
+TARGET="$1"
 
-python3 - "$fixture_root" "$manifest" "$mode" <<'PY'
+python3 - "$TARGET" <<'PY'
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
-fixture_root = Path(sys.argv[1])
-manifest_path = Path(sys.argv[2])
-mode = sys.argv[3]
-enforce_committed_coverage = mode == "committed"
+target = Path(sys.argv[1])
+if target.is_dir():
+    matches = sorted(target.glob("manifest.live-*.json"))
+    if len(matches) != 1:
+        raise SystemExit(f"Expected exactly one manifest.live-*.json in {target}, found {len(matches)}")
+    manifest_path = matches[0]
+else:
+    manifest_path = target
+capture_root = manifest_path.parent
 
 if not manifest_path.is_file():
-    raise SystemExit(f"Missing upstream CLI manifest: {manifest_path}")
-
-manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-if manifest.get("schemaVersion") != 1:
-    raise SystemExit("manifest.schemaVersion must be 1")
-if not isinstance(manifest.get("fixtures"), list) or not manifest["fixtures"]:
-    raise SystemExit("manifest.fixtures must be a non-empty list")
-
-required_categories = {
-    "unsupported_source",
-    "invalid_provider",
-    "missing_binary",
-    "timeout_synthetic",
-    "parse_error_synthetic",
-}
-usage_categories = {"usage_success", "usage_error"}
-cost_categories = {"cost_success", "cost_error"}
-metadata_categories = {"version", "config_validate", "config_dump"}
-allowed_categories = required_categories | usage_categories | cost_categories | metadata_categories
+    raise SystemExit(f"Missing live capture manifest: {manifest_path}")
 
 secret_patterns = [
     ("bearer_token", re.compile(r"(?i)\bBearer\s+(?!\[REDACTED_TOKEN\])\S+")),
     ("openai_api_key", re.compile(r"\bsk-[A-Za-z0-9._-]{8,}\b")),
     ("anthropic_token", re.compile(r"\bsk-ant-[A-Za-z0-9._-]{8,}\b")),
-    ("authorization_header", re.compile(r"(?im)^Authorization\s*:\s*(?!\[REDACTED_TOKEN\]\s*$).+")),
-    ("cookie_header", re.compile(r"(?im)^(Cookie|Set-Cookie)\s*:\s*(?!\[REDACTED_COOKIE\]\s*$).+")),
+    ("github_token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{12,}\b")),
+    ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")),
+    ("authorization_header", re.compile(r"(?im)^Authorization\s*:")),
+    ("cookie_header", re.compile(r"(?im)^(Cookie|Set-Cookie)\s*:")),
     (
         "token_assignment",
         re.compile(
@@ -59,6 +49,17 @@ secret_patterns = [
     ("browser_profile_path", re.compile(r"(?i)(Network/Cookies|Login Data|\.config/(google-chrome|chromium|BraveSoftware)|\.mozilla/firefox)")),
 ]
 raw_email = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+allowed_categories = {
+    "version",
+    "config_validate",
+    "config_dump",
+    "usage_success",
+    "usage_error",
+    "cost_success",
+    "cost_error",
+    "unsupported_source",
+    "invalid_provider",
+}
 
 
 def check_text(path: Path, text: str) -> None:
@@ -72,18 +73,33 @@ def check_text(path: Path, text: str) -> None:
             raise SystemExit(f"Potential secret pattern {code} in {path}")
 
 
+def check_file_mode(path: Path) -> None:
+    if os.name != "posix":
+        return
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o077:
+        raise SystemExit(f"Live capture artifact is not private (expected 0600): {path} mode {oct(mode)}")
+
+
 def rel_path(value: str) -> Path:
-    candidate = fixture_root / value
+    candidate = capture_root / value
     resolved = candidate.resolve()
-    root_resolved = fixture_root.resolve()
+    root_resolved = capture_root.resolve()
     if root_resolved not in (resolved, *resolved.parents):
-        raise SystemExit(f"Manifest path escapes fixture root: {value}")
+        raise SystemExit(f"Manifest path escapes capture root: {value}")
     return candidate
 
 
-categories = set()
-seen_ids = set()
+manifest_text = manifest_path.read_text(encoding="utf-8")
+check_text(manifest_path, manifest_text)
+manifest = json.loads(manifest_text)
+if manifest.get("schemaVersion") != 1:
+    raise SystemExit("manifest.schemaVersion must be 1")
+if not isinstance(manifest.get("fixtures"), list) or not manifest["fixtures"]:
+    raise SystemExit("manifest.fixtures must be a non-empty list")
+
 paths_to_check: set[Path] = {manifest_path}
+seen_ids: set[str] = set()
 for entry in manifest["fixtures"]:
     for key in [
         "fixtureId",
@@ -109,10 +125,8 @@ for entry in manifest["fixtures"]:
     argv = entry["argv"]
     if not isinstance(argv, list) or not argv or argv[0] != "codexbar":
         raise SystemExit(f"Manifest argv must start with codexbar for {fixture_id}")
-    category = entry["expectedCategory"]
-    if category not in allowed_categories:
-        raise SystemExit(f"Unexpected fixture category {category} for {fixture_id}")
-    categories.add(category)
+    if entry["expectedCategory"] not in allowed_categories:
+        raise SystemExit(f"Unexpected capture category {entry['expectedCategory']} for {fixture_id}")
     redaction = entry["redaction"]
     if redaction.get("applied") is not True or redaction.get("policyVersion") != 1:
         raise SystemExit(f"Redaction metadata must be applied policy v1 for {fixture_id}")
@@ -141,37 +155,17 @@ for entry in manifest["fixtures"]:
     if metadata_redaction.get("applied") is not True or metadata_redaction.get("policyVersion") != 1:
         raise SystemExit(f"Metadata redaction must be applied policy v1 for {fixture_id}")
 
-if enforce_committed_coverage:
-    missing = sorted(required_categories - categories)
-    if missing:
-        raise SystemExit(f"Missing required fixture categories: {', '.join(missing)}")
-    if not categories & usage_categories:
-        raise SystemExit("Missing usage_success or usage_error fixture category")
-    if not categories & cost_categories:
-        raise SystemExit("Missing cost_success or cost_error fixture category")
-
-referenced_paths = {path.resolve() for path in paths_to_check}
-for raw_path in fixture_root.rglob("*.raw"):
-    raise SystemExit(f"Raw upstream CLI capture artifact must not be committed: {raw_path}")
-
-for path in list(fixture_root.glob("*/*.json")) + list(fixture_root.glob("*/*.txt")):
-    if path.resolve() not in referenced_paths:
-        raise SystemExit(f"Unreferenced upstream CLI fixture artifact: {path}")
+for raw_path in capture_root.rglob("*.raw"):
+    raise SystemExit(f"Raw file left in live capture directory: {raw_path}")
 
 for path in sorted(paths_to_check):
     text = path.read_text(encoding="utf-8")
     check_text(path, text)
+    check_file_mode(path)
     if path.suffix == ".json":
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"JSON fixture does not parse: {path}: {exc}") from exc
-    try:
-        display_path = path.relative_to(fixture_root.parent.parent.parent)
-    except ValueError:
-        display_path = path
-    print(f"Upstream CLI fixture valid: {display_path}")
+            raise SystemExit(f"JSON capture artifact does not parse: {path}: {exc}") from exc
+    print(f"Upstream CLI live capture valid: {path}")
 PY
-}
-
-validate_manifest "$FIXTURE_ROOT" "$MANIFEST" "committed"

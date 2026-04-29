@@ -16,7 +16,7 @@ from typing import Any
 
 
 SENSITIVE_KEY = re.compile(
-    r"(authorization|cookie|secret|token|password|api.?key|headers|profile.*path|raw)",
+    r"(authorization|cookie|secret|token|password|api.?key|sessionkey|session[_-]?key|headers|profile.*path|raw)",
     re.IGNORECASE,
 )
 EMAIL_KEY = re.compile(r"(^|[_-])(?:account)?email$", re.IGNORECASE)
@@ -27,13 +27,17 @@ HOME_PATH = re.compile(r"(?i)(/home/[^/\s\"']+|/Users/[^/\s\"']+|[A-Za-z]:\\User
 HEADER_SECRET = re.compile(r"(?im)\b(authorization|cookie|set-cookie|x-api-key)\s*:\s*[^\r\n]+")
 BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{6,}\b")
+GITHUB_TOKEN = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{12,}\b")
+SLACK_TOKEN = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
+GOOGLE_API_KEY = re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")
+JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"session[_-]?token|token|secret|password)\b\s*[:=]\s*[\"']?[^\"'\s,}]+"
+    r"session[_-]?key|session[_-]?token|token|secret|password)\b\s*[:=]\s*[\"']?[^\"'\s,}]+"
 )
 SECRET_QUERY = re.compile(
     r"(?i)([?&])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"session[_-]?token|token|secret|code|key)=[^&#\s\"']+"
+    r"session[_-]?key|session[_-]?token|token|secret|code|key)=[^&#\s\"']+"
 )
 
 FORBIDDEN = [
@@ -42,6 +46,10 @@ FORBIDDEN = [
     ("cookie_header", re.compile(r"\bcookie\s*:", re.IGNORECASE)),
     ("bearer_token", re.compile(r"\bbearer\s+", re.IGNORECASE)),
     ("api_key", re.compile(r"\bsk-[A-Za-z0-9]", re.IGNORECASE)),
+    ("github_token", GITHUB_TOKEN),
+    ("slack_token", SLACK_TOKEN),
+    ("google_api_key", GOOGLE_API_KEY),
+    ("jwt", JWT),
     ("secret_assignment", SECRET_ASSIGNMENT),
     ("home_path", re.compile(r"(?i)(/home/(?!\[REDACTED_USER\])|/Users/(?!\[REDACTED_USER\])|[A-Za-z]:\\Users\\)")),
     ("browser_profile_path", re.compile(r"(?i)(\.config/chrom|\.mozilla/firefox|Network/Cookies|Login Data)")),
@@ -87,8 +95,12 @@ def mask_email(_match: re.Match[str]) -> str:
 
 def redact_text(text: str) -> str:
     text = HEADER_SECRET.sub("[REDACTED_HEADER]", text)
-    text = BEARER.sub("Bearer [REDACTED_TOKEN]", text)
+    text = BEARER.sub("[REDACTED_TOKEN]", text)
     text = OPENAI_KEY.sub("[REDACTED_TOKEN]", text)
+    text = GITHUB_TOKEN.sub("[REDACTED_TOKEN]", text)
+    text = SLACK_TOKEN.sub("[REDACTED_TOKEN]", text)
+    text = GOOGLE_API_KEY.sub("[REDACTED_TOKEN]", text)
+    text = JWT.sub("[REDACTED_TOKEN]", text)
     text = SECRET_QUERY.sub(r"\1redacted=[REDACTED_TOKEN]", text)
     text = SECRET_ASSIGNMENT.sub("[REDACTED_SECRET]", text)
     text = HOME_PATH.sub("/home/[REDACTED_USER]/...", text)
