@@ -26,7 +26,7 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 02A upstream CLI fixture corpus** status.
+This repository is at **Task 02B upstream CLI daemon adapter** status.
 
 Present:
 
@@ -40,6 +40,9 @@ Present:
 - Contract, schema-payload, cache, settings, redaction, browser-import stub, and D-Bus runtime tests.
 - Redacted upstream CLI fixture corpus under `daemon/fixtures/upstream-cli/`.
 - Local-only upstream CLI capture harness and fixture validator.
+- Production daemon upstream CLI adapter for targeted provider refresh.
+- Runtime refresh uses targeted usage/status probes and defaults to `codex` when no provider is configured or requested.
+- Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
 - GNOME Shell extension skeleton under `extension/`.
 - Preferences skeleton that exposes only the GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
@@ -47,16 +50,20 @@ Present:
 - Local install/uninstall bootstrap scripts.
 - Validation scripts and GitHub Actions check workflow.
 
-Not implemented after Task 02A:
+Not implemented after Task 02B:
 
-- upstream `codexbar` CLI adapter/runtime integration, which remains Task 02B+;
 - browser-cookie import, beyond the schema-valid `not_implemented` test stub;
 - provider network calls or Linux web adapters;
 - provider scraping;
 - keyring access;
-- upstream `codexbar` CLI invocation;
 - production Shell UI behavior beyond the Task 00 loadable extension skeleton, which remains Task 03;
 - Debian package build wiring.
+
+The upstream CLI adapter does not default production usage/status refresh to
+`--provider all` because the promoted live Linux evidence timed out for those
+all-provider usage/status probes. The first proven Linux usage/status provider
+is `codex`; `all` remains explicit for usage/status and is used by default only
+for cost summaries.
 
 ## Local checks
 

@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
+use crate::cli::{self, CliRefreshRequest, UpstreamCliAdapter};
 use crate::clock::{duration_ms, now_rfc3339, Clock};
 use crate::config::{
     apply_settings_patch, is_safe_id, parse_settings_patch, SettingsLoad, SettingsStore,
@@ -15,7 +16,7 @@ use crate::model::{
     BrowserProviderStatus, BrowserSourceAdapter, BusyBehavior, Capabilities, DaemonInfo,
     DaemonPathsInfo, DaemonState, DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity,
     EventRedaction, ProviderEvent, ProviderEventReason, RedactionSummary, RefreshOptions,
-    RefreshReason, RefreshResult, RefreshStatus, Settings, Snapshot, UpstreamCliInfo,
+    RefreshReason, RefreshResult, RefreshStatus, Settings, Snapshot,
 };
 use crate::paths::AppPaths;
 use crate::redact;
@@ -45,7 +46,7 @@ struct ActiveRefresh {
     started_at: String,
     started_instant: Instant,
     reason: RefreshReason,
-    fixture_allowed: bool,
+    options: RefreshOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -73,7 +74,7 @@ impl App {
         let settings_store =
             SettingsStore::new(paths.config_dir.clone(), paths.config_file.clone());
         let mut diagnostics = Vec::new();
-        let snapshot = match cache.load() {
+        let mut snapshot = match cache.load() {
             CacheLoad::Loaded(snapshot) => {
                 diagnostics.push(diagnostic_event(
                     "cache_loaded",
@@ -102,6 +103,8 @@ impl App {
                 fixtures::synthetic_loading(clock.started_at())?
             }
         };
+        snapshot.daemon.version = env!("CARGO_PKG_VERSION").to_string();
+        snapshot.daemon.upstream_cli = Some(cli::resolve_info(&paths));
         let settings = match settings_store.load() {
             SettingsLoad::Loaded(settings) => {
                 diagnostics.push(diagnostic_event(
@@ -168,6 +171,9 @@ impl App {
         let provider = if provider_id.is_empty() || provider_id == "global" {
             None
         } else {
+            if !is_safe_id(provider_id) {
+                return Err(AppError::invalid_json());
+            }
             Some(provider_id.to_string())
         };
         let events = state
@@ -218,6 +224,11 @@ impl App {
         {
             return Err(AppError::invalid_json());
         }
+        for provider in &options.providers {
+            if !is_safe_id(provider) {
+                return Err(AppError::invalid_json());
+            }
+        }
         for profile_id in &options.profile_ids {
             if !is_safe_id(profile_id) {
                 return Err(AppError::invalid_json());
@@ -264,7 +275,7 @@ impl App {
             started_at: started_at.clone(),
             started_instant: Instant::now(),
             reason: options.reason,
-            fixture_allowed: options.source_adapter_policy.allows_fixture(),
+            options,
         });
         state.snapshot.daemon.state = DaemonState::Refreshing;
         state.snapshot.daemon.last_refresh_id = Some(refresh_id.clone());
@@ -273,43 +284,89 @@ impl App {
         Ok(RefreshStart::Started { refresh_id })
     }
 
-    pub fn finish_refresh(&self, refresh_id: &str) -> AppResult<RefreshCompletion> {
-        let mut state = self.lock_state()?;
-        let active = state
-            .active_refresh
-            .clone()
-            .ok_or_else(AppError::internal_redacted)?;
-        if active.id != refresh_id {
-            return Err(AppError::internal_redacted());
-        }
+    pub async fn finish_refresh(&self, refresh_id: &str) -> AppResult<RefreshCompletion> {
+        let (active, settings, previous_snapshot) = {
+            let state = self.lock_state()?;
+            let active = state
+                .active_refresh
+                .clone()
+                .ok_or_else(AppError::internal_redacted)?;
+            if active.id != refresh_id {
+                return Err(AppError::internal_redacted());
+            }
+            (active, state.settings.clone(), state.snapshot.clone())
+        };
+
         let finished_at = now_rfc3339();
-        let (snapshot, cache_written, status, diagnostic_codes) = if active.fixture_allowed {
-            let snapshot =
-                fixtures::refreshed_snapshot(refresh_id, &active.started_at, &finished_at)?;
-            let cache_written = self.cache.store(&snapshot).is_ok();
-            let status = if cache_written {
-                RefreshStatus::Ok
-            } else {
-                RefreshStatus::Partial
-            };
-            let diagnostic_codes = if cache_written {
-                Vec::new()
-            } else {
-                vec!["internal_error_redacted".to_string()]
-            };
-            (snapshot, cache_written, status, diagnostic_codes)
-        } else {
-            let snapshot = fixtures::unsupported_adapter_snapshot(&finished_at)?;
+        let provider_targets = cli::target_providers(&settings, &active.options.providers);
+        let fixture_only = active.options.source_adapter_policy.allows_fixture()
+            && !active.options.source_adapter_policy.allows_upstream_cli();
+
+        let (mut snapshot, mut diagnostics, mut diagnostic_codes) = if fixture_only {
             (
-                snapshot,
-                false,
-                RefreshStatus::Error,
-                vec![
-                    "upstream_cli_not_implemented".to_string(),
-                    "browser_import_not_implemented".to_string(),
-                ],
+                fixtures::refreshed_snapshot(refresh_id, &active.started_at, &finished_at)?,
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if active.options.source_adapter_policy.allows_upstream_cli() {
+            let adapter = UpstreamCliAdapter::from_paths(&self.paths);
+            let refresh = adapter
+                .refresh(CliRefreshRequest {
+                    refresh_id: refresh_id.to_string(),
+                    started_at: active.started_at.clone(),
+                    finished_at: finished_at.clone(),
+                    providers: provider_targets,
+                    selected_provider: previous_snapshot.selected_provider.clone(),
+                })
+                .await?;
+            let diagnostic_codes = refresh
+                .diagnostics
+                .iter()
+                .map(|event| event.code.clone())
+                .collect::<Vec<_>>();
+            (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
+        } else {
+            (
+                fixtures::unsupported_adapter_snapshot(&finished_at)?,
+                Vec::new(),
+                vec!["upstream_cli_excluded".to_string()],
             )
         };
+
+        let live_had_success = snapshot
+            .providers
+            .iter()
+            .any(|provider| provider.state == crate::model::ProviderState::Ok);
+        if !live_had_success
+            && active
+                .options
+                .source_adapter_policy
+                .allow_stale_cache_fallback
+            && settings.refresh.allow_stale_cache_fallback
+            && previous_snapshot
+                .providers
+                .iter()
+                .any(|provider| provider.state.is_usable_for_stale_cache())
+        {
+            snapshot = stale_mutated(previous_snapshot, &finished_at);
+            snapshot.daemon.last_refresh_id = Some(refresh_id.to_string());
+            snapshot.daemon.last_refresh_started_at = Some(active.started_at.clone());
+            snapshot.daemon.last_refresh_finished_at = Some(finished_at.clone());
+            diagnostic_codes.push("stale_cache_fallback".to_string());
+            diagnostics.push(diagnostic_event(
+                "stale_cache_fallback",
+                "Live refresh failed; serving stale normalized cache",
+                &finished_at,
+                None,
+            ));
+        }
+
+        let cache_written = live_had_success && self.cache.store(&snapshot).is_ok();
+        if live_had_success && !cache_written {
+            diagnostic_codes.push("internal_error_redacted".to_string());
+        }
+
+        let status = refresh_status(&snapshot, cache_written, &diagnostic_codes);
         let result = refresh_result(
             &snapshot,
             &active,
@@ -319,18 +376,27 @@ impl App {
             diagnostic_codes,
         );
         let provider_events = provider_events(&snapshot, refresh_id, &finished_at)?;
+
+        let mut state = self.lock_state()?;
+        match &state.active_refresh {
+            Some(current) if current.id == refresh_id => {}
+            _ => return Err(AppError::internal_redacted()),
+        }
         state.snapshot = snapshot;
         state.active_refresh = None;
+        state.diagnostics.append(&mut diagnostics);
         state.diagnostics.push(diagnostic_event(
             "refresh_finished",
-            "Task 01 fixture refresh completed and cache was written",
+            "Daemon refresh finished",
             &finished_at,
             None,
         ));
+        let snapshot_json = to_public_json(&state.snapshot)?;
+        let result_json = to_public_json(&result)?;
         Ok(RefreshCompletion {
             refresh_id: refresh_id.to_string(),
-            snapshot_json: to_public_json(&state.snapshot)?,
-            result_json: to_public_json(&result)?,
+            snapshot_json,
+            result_json,
             provider_events,
         })
     }
@@ -356,6 +422,28 @@ impl App {
     }
 
     fn daemon_info(&self, state: &AppState) -> DaemonInfo {
+        let resolved_upstream_cli = cli::resolve_info(&self.paths);
+        let upstream_cli = if resolved_upstream_cli.available {
+            let mut info = resolved_upstream_cli;
+            if info.version.is_none() {
+                info.version = state
+                    .snapshot
+                    .daemon
+                    .upstream_cli
+                    .as_ref()
+                    .and_then(|cli| cli.version.clone());
+            }
+            info
+        } else {
+            state
+                .snapshot
+                .daemon
+                .upstream_cli
+                .clone()
+                .filter(|cli| cli.available)
+                .unwrap_or(resolved_upstream_cli)
+        };
+        let upstream_cli_available = upstream_cli.available;
         DaemonInfo {
             schema_version: 1,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -369,23 +457,18 @@ impl App {
                 interface: DBUS_INTERFACE.to_string(),
             },
             capabilities: Capabilities {
-                upstream_cli: false,
+                upstream_cli: upstream_cli_available,
                 browser_import: false,
                 linux_web_adapters: false,
-                cost: false,
+                cost: upstream_cli_available,
                 settings_patch: true,
             },
             paths: DaemonPathsInfo {
-                config_file: Some(self.paths.config_file.display().to_string()),
-                cache_file: Some(self.paths.cache_file.display().to_string()),
+                config_file: Some(cli::resolver::display_safe_path(&self.paths.config_file)),
+                cache_file: Some(cli::resolver::display_safe_path(&self.paths.cache_file)),
                 upstream_config_file: self.paths.upstream_config_file_hint.clone(),
             },
-            upstream_cli: UpstreamCliInfo {
-                available: false,
-                path: None,
-                version: None,
-                diagnostic_code: Some("upstream_cli_not_implemented".to_string()),
-            },
+            upstream_cli,
             build: Some(crate::model::BuildInfo {
                 git_sha: option_env!("GIT_SHA").map(str::to_string),
                 target: option_env!("TARGET").map(str::to_string),
@@ -418,6 +501,25 @@ fn refresh_result(
     }
 }
 
+fn refresh_status(
+    snapshot: &Snapshot,
+    cache_written: bool,
+    diagnostic_codes: &[String],
+) -> RefreshStatus {
+    let ok_count = snapshot
+        .providers
+        .iter()
+        .filter(|provider| provider.state == crate::model::ProviderState::Ok)
+        .count();
+    if ok_count == snapshot.providers.len() && diagnostic_codes.is_empty() && cache_written {
+        RefreshStatus::Ok
+    } else if ok_count > 0 {
+        RefreshStatus::Partial
+    } else {
+        RefreshStatus::Error
+    }
+}
+
 fn provider_events(
     snapshot: &Snapshot,
     refresh_id: &str,
@@ -445,6 +547,11 @@ fn validate_refresh_options(options: &RefreshOptions) -> AppResult<()> {
         || has_duplicates(&options.source_adapter_policy.adapters)
     {
         return Err(AppError::invalid_json());
+    }
+    for provider in &options.providers {
+        if !is_safe_id(provider) {
+            return Err(AppError::invalid_json());
+        }
     }
     Ok(())
 }

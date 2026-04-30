@@ -6,9 +6,9 @@ use codexbar_linuxd::model::{
     BrowserImportOptions, BrowserImportPolicy, ProviderEvent, ProviderEventReason, Settings,
 };
 
-#[test]
-fn daemon_generated_payloads_validate_against_schemas() {
-    let (_tmp, paths) = common::temp_paths();
+#[tokio::test]
+async fn daemon_generated_payloads_validate_against_schemas() {
+    let (tmp, paths) = common::temp_paths();
     let app = App::new(paths).expect("app");
 
     let snapshot_json = app.get_snapshot_json().expect("snapshot");
@@ -38,12 +38,16 @@ fn daemon_generated_payloads_validate_against_schemas() {
     common::assert_schema("browser-import-result.schema.json", &browser_json);
 
     let refresh = app
-        .start_refresh(r#"{"schemaVersion":1,"reason":"test","force":true}"#)
+        .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("start refresh");
     let RefreshStart::Started { refresh_id } = refresh else {
         panic!("expected new refresh");
     };
-    let completion = app.finish_refresh(&refresh_id).expect("finish refresh");
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("finish refresh");
+    assert!(tmp.path().is_dir());
     common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
     common::assert_schema("refresh-result.schema.json", &completion.result_json);
     for (_provider_id, event_json) in completion.provider_events {

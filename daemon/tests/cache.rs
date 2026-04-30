@@ -33,17 +33,19 @@ fn invalid_cache_is_ignored_safely() {
     assert!(matches!(cache.load(), CacheLoad::Invalid));
 }
 
-#[test]
-fn restart_loads_cache_as_stale_without_relabeling_known_adapter() {
+#[tokio::test]
+async fn restart_loads_cache_as_stale_without_relabeling_known_adapter() {
     let (_tmp, paths) = common::temp_paths();
     let app = App::new(paths.clone()).expect("app");
     let refresh = app
-        .start_refresh(r#"{"schemaVersion":1,"reason":"test","force":true}"#)
+        .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("start refresh");
     let RefreshStart::Started { refresh_id } = refresh else {
         panic!("expected started refresh");
     };
-    app.finish_refresh(&refresh_id).expect("finish refresh");
+    app.finish_refresh(&refresh_id)
+        .await
+        .expect("finish refresh");
 
     let restarted = App::new(paths).expect("restarted app");
     let snapshot = restarted.get_snapshot_json().expect("snapshot");

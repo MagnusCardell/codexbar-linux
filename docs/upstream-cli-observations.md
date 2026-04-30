@@ -21,11 +21,12 @@ reviewed redacted live Linux captures from 2026-04-29.
 - Documentation sample version fields include provider-level examples such as
   `0.6.0`; that is not a verified Linux binary version.
 
-Task 02B has reviewed live evidence for config validation, cost output,
-unsupported-source errors, invalid-provider errors, all-provider timeout
-behavior, and targeted Codex usage/status success. The all-provider
-`--source cli` usage and status probes timed out with empty stdout/stderr, so
-the adapter strategy should not rely only on one monolithic all-provider call.
+Task 02B implements the production daemon adapter from the reviewed live
+evidence for config validation, cost output, unsupported-source errors,
+invalid-provider errors, all-provider timeout behavior, and targeted Codex
+usage/status success. The all-provider `--source cli` usage and status probes
+timed out with empty stdout/stderr, so the runtime adapter uses targeted
+provider probes instead of relying on one monolithic all-provider call.
 
 ## Capture Harness Scope
 
@@ -124,10 +125,11 @@ All three targeted Codex probes exited 0 with zero stderr and one valid JSON
 document on stdout. The promoted stdout sidecars therefore use `.json`.
 The successful targeted payloads were JSON arrays containing one provider
 object. The status probe includes a `status` object; the two usage probes carry
-usage and credit fields without status. This targeted result is the main Task
-02B adapter-strategy signal: prefer per-provider bounded probes or a fallback
-strategy, and treat all-provider usage/status as optional evidence rather than
-the only Linux path.
+usage and credit fields without status. The Task 02B runtime adapter therefore
+selects provider targets from refresh options, then enabled daemon settings,
+then defaults to `codex`, the first proven Linux usage/status provider. It
+treats all-provider usage/status as an explicit requested probe or future
+optimization, not the default production path.
 
 ## Usage JSON Shape Summary
 
@@ -160,6 +162,9 @@ payloads with:
 
 Task 02B must map this into the bounded `cost` summary in
 `spec/snapshot.schema.json`, not preserve arbitrary upstream cost payloads.
+The implemented adapter keeps bounded cost amounts in provider `cost` summaries
+and drops daily chronology, model breakdowns, model lists, raw file paths, and
+raw upstream cost payloads before cache or D-Bus output.
 
 ## Error Shape Summary
 

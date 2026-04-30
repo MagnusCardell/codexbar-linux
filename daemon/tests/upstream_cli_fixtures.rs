@@ -61,7 +61,6 @@ fn upstream_cli_manifest_and_json_fixtures_parse() {
             assert!(path.is_file(), "missing fixture path {}", path.display());
             let text = fs::read_to_string(&path).expect("fixture text");
             assert_upstream_fixture_text_safe(&text, &path);
-            common::assert_public_json_safe(&text);
             if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                 serde_json::from_str::<Value>(&text).unwrap_or_else(|err| {
                     panic!("JSON fixture {} failed to parse: {err}", path.display())

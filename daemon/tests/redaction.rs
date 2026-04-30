@@ -9,12 +9,22 @@ use codexbar_linuxd::redact;
 fn obvious_forbidden_content_is_rejected() {
     for toxic in [
         r#"{"value":"Authorization: Bearer abc"}"#,
+        r#"{"authorization":"Basic abc"}"#,
+        r#"{"Cookie":"session=abc"}"#,
         r#"{"value":"Set-Cookie: session=abc"}"#,
         r#"{"value":"sk-test-secret"}"#,
+        r#"{"value":"ghp_secret"}"#,
+        r#"{"value":"xoxb-secret"}"#,
+        r#"{"accessToken":"abc"}"#,
         r#"{"value":"refresh_token=abc"}"#,
+        r#"{"sessionKey":"abc"}"#,
+        r#"{"apiKey":"abc"}"#,
         r#"{"value":"raw@example.com"}"#,
         r#"{"rawPayload":"secret"}"#,
+        r#"{"rawResponse":"secret"}"#,
+        r#"{"headers":{"Authorization":"Bearer abc"}}"#,
         r#"{"value":"/home/user/.config/chromium/Profile 1/Cookies"}"#,
+        r#"{"value":"~/.local/share/auth.json"}"#,
     ] {
         assert!(
             redact::validate_public_json_text(toxic).is_err(),
@@ -23,17 +33,21 @@ fn obvious_forbidden_content_is_rejected() {
     }
 }
 
-#[test]
-fn daemon_public_payloads_and_cache_pass_redaction_scan() {
-    let (_tmp, paths) = common::temp_paths();
+#[tokio::test]
+async fn daemon_public_payloads_and_cache_pass_redaction_scan() {
+    let (tmp, paths) = common::temp_paths();
     let app = App::new(paths.clone()).expect("app");
     let refresh = app
-        .start_refresh(r#"{"schemaVersion":1,"reason":"test","force":true}"#)
+        .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("start refresh");
     let RefreshStart::Started { refresh_id } = refresh else {
         panic!("expected started refresh");
     };
-    let completion = app.finish_refresh(&refresh_id).expect("finish refresh");
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("finish refresh");
+    assert!(tmp.path().is_dir());
 
     for payload in [
         app.get_snapshot_json().expect("snapshot"),

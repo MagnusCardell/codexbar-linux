@@ -8,6 +8,8 @@ use tempfile::{NamedTempFile, TempDir};
 
 use codexbar_linuxd::paths::AppPaths;
 
+pub const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
+
 pub fn repo_path(relative_path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -24,6 +26,7 @@ pub fn temp_paths() -> (TempDir, AppPaths) {
         config_dir,
         cache_dir,
         upstream_config_file_hint: Some("~/.codexbar/config.json".to_string()),
+        upstream_cli_path: None,
     };
     (tmp, paths)
 }

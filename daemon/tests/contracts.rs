@@ -41,6 +41,7 @@ const REQUIRED_SIGNALS: &[&str] = &[
     "RefreshFinished",
     "ProviderChanged",
 ];
+const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
 
 #[test]
 fn dbus_contract_has_expected_interface_object_methods_and_signals() {
@@ -153,7 +154,8 @@ fn app_getters_return_schema_shaped_redacted_json() {
         serde_json::from_str(&app.get_daemon_info_json().expect("daemon info json")).unwrap();
     assert_eq!(info.schema_version, 1);
     assert_eq!(info.dbus.interface, DBUS_INTERFACE);
-    assert!(!info.capabilities.upstream_cli);
+    assert_eq!(info.capabilities.upstream_cli, info.upstream_cli.available);
+    assert_eq!(info.capabilities.cost, info.upstream_cli.available);
     assert!(info.capabilities.settings_patch);
 
     let diagnostics: serde_json::Value =
@@ -162,19 +164,23 @@ fn app_getters_return_schema_shaped_redacted_json() {
     assert_eq!(diagnostics["redaction"]["applied"], true);
 }
 
-#[test]
-fn refresh_writes_cache_and_restart_serves_stale_snapshot() {
-    let (_tmp, paths) = temp_paths();
+#[tokio::test]
+async fn refresh_writes_cache_and_restart_serves_stale_snapshot() {
+    let (tmp, paths) = temp_paths();
     let app = App::new(paths.clone()).expect("app starts");
     let start = app
-        .start_refresh(r#"{"schemaVersion":1,"reason":"test","force":true}"#)
+        .start_refresh(FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("refresh starts");
     let refresh_id = match start {
         RefreshStart::Started { refresh_id } => refresh_id,
         RefreshStart::Existing { .. } => panic!("first refresh should start"),
     };
     std::thread::sleep(std::time::Duration::from_millis(2));
-    let completion = app.finish_refresh(&refresh_id).expect("refresh finishes");
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("refresh finishes");
+    assert!(tmp.path().is_dir());
 
     let result: RefreshResult = serde_json::from_str(&completion.result_json).unwrap();
     assert_eq!(result.schema_version, 1);
@@ -205,12 +211,12 @@ fn refresh_writes_cache_and_restart_serves_stale_snapshot() {
     assert_eq!(snapshot.providers[0].state, ProviderState::Stale);
 }
 
-#[test]
-fn refresh_busy_semantics_return_existing_or_reject() {
-    let (_tmp, paths) = temp_paths();
+#[tokio::test]
+async fn refresh_busy_semantics_return_existing_or_reject() {
+    let (tmp, paths) = temp_paths();
     let app = App::new(paths).expect("app starts");
     let first = app
-        .start_refresh(r#"{"schemaVersion":1,"reason":"manual"}"#)
+        .start_refresh(FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("first refresh starts");
     let refresh_id = match first {
         RefreshStart::Started { refresh_id } => refresh_id,
@@ -232,7 +238,10 @@ fn refresh_busy_semantics_return_existing_or_reject() {
         .expect_err("reject returns RefreshBusy");
     assert!(matches!(rejected, AppError::RefreshBusy(_)));
 
-    app.finish_refresh(&refresh_id).expect("cleanup refresh");
+    app.finish_refresh(&refresh_id)
+        .await
+        .expect("cleanup refresh");
+    assert!(tmp.path().is_dir());
 }
 
 #[test]
@@ -308,6 +317,7 @@ fn temp_paths() -> (tempfile::TempDir, AppPaths) {
         config_dir,
         cache_dir,
         upstream_config_file_hint: Some("~/.codexbar/config.json".to_string()),
+        upstream_cli_path: None,
     };
     (tmp, paths)
 }

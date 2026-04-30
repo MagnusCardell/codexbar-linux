@@ -37,7 +37,7 @@ impl CodexbarInterface {
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     let _ = Self::refresh_started(&ctxt, &spawned_refresh_id).await;
                     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-                    if let Ok(completion) = app.finish_refresh(&spawned_refresh_id) {
+                    if let Ok(completion) = app.finish_refresh(&spawned_refresh_id).await {
                         for (provider_id, provider_event_json) in completion.provider_events {
                             let _ =
                                 Self::provider_changed(&ctxt, &provider_id, &provider_event_json)

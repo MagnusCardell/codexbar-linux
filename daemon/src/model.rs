@@ -250,11 +250,27 @@ pub enum RefreshSourceAdapter {
 }
 
 impl SourceAdapterPolicy {
-    pub fn allows_fixture(&self) -> bool {
+    pub fn allows_upstream_cli(&self) -> bool {
         match self.mode {
             SourceAdapterPolicyMode::Auto => true,
             SourceAdapterPolicyMode::Prefer => {
-                self.adapters.is_empty() || self.adapters.contains(&RefreshSourceAdapter::Fixture)
+                self.adapters.is_empty()
+                    || self.adapters.contains(&RefreshSourceAdapter::UpstreamCli)
+            }
+            SourceAdapterPolicyMode::Only => {
+                self.adapters.contains(&RefreshSourceAdapter::UpstreamCli)
+            }
+            SourceAdapterPolicyMode::Exclude => {
+                !self.adapters.contains(&RefreshSourceAdapter::UpstreamCli)
+            }
+        }
+    }
+
+    pub fn allows_fixture(&self) -> bool {
+        match self.mode {
+            SourceAdapterPolicyMode::Auto => false,
+            SourceAdapterPolicyMode::Prefer => {
+                self.adapters.contains(&RefreshSourceAdapter::Fixture)
             }
             SourceAdapterPolicyMode::Only => self.adapters.contains(&RefreshSourceAdapter::Fixture),
             SourceAdapterPolicyMode::Exclude => {

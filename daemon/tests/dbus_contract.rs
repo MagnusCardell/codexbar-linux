@@ -11,6 +11,7 @@ use zbus::Proxy;
 const BUS_NAME: &str = "org.codexbar.Linux1";
 const OBJECT_PATH: &str = "/org/codexbar/Linux1";
 const INTERFACE: &str = "org.codexbar.Linux1";
+const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
 
 struct DaemonChild {
     child: Child,
@@ -89,10 +90,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
         .expect("finished stream");
 
     let refresh_id: String = proxy
-        .call(
-            "Refresh",
-            &r#"{"schemaVersion":1,"reason":"test","force":true}"#,
-        )
+        .call("Refresh", &FIXTURE_REFRESH_OPTIONS_JSON)
         .await
         .expect("Refresh");
     assert!(!refresh_id.is_empty());

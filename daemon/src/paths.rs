@@ -10,6 +10,7 @@ pub struct AppPaths {
     pub cache_dir: PathBuf,
     pub cache_file: PathBuf,
     pub upstream_config_file_hint: Option<String>,
+    pub upstream_cli_path: Option<PathBuf>,
 }
 
 impl AppPaths {
@@ -22,6 +23,9 @@ impl AppPaths {
             config_dir,
             cache_dir,
             upstream_config_file_hint: Some(crate::UPSTREAM_CONFIG_PATH_HINT.to_string()),
+            upstream_cli_path: env::var_os("CODEXBAR_CLI")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from),
         }
     }
 }
