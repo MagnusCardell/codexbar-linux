@@ -17,6 +17,7 @@ if [[ ! -f "$ROOT/daemon/Cargo.toml" ]]; then
 fi
 cargo fmt --manifest-path "$ROOT/daemon/Cargo.toml" -- --check
 cargo clippy --manifest-path "$ROOT/daemon/Cargo.toml" --all-targets -- -D warnings
+# Ignored live upstream CLI smoke tests are opt-in and intentionally excluded.
 cargo test --manifest-path "$ROOT/daemon/Cargo.toml"
 dbus-run-session -- cargo test --manifest-path "$ROOT/daemon/Cargo.toml" dbus_contract
 

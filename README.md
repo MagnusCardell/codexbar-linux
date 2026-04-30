@@ -85,6 +85,14 @@ cargo clippy --manifest-path daemon/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path daemon/Cargo.toml
 ```
 
+Optional upstream CLI live smoke tests are ignored by default and are not part
+of `./scripts/check.sh` or CI:
+
+```bash
+CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
+  cargo test --manifest-path daemon/Cargo.toml -- --ignored --test-threads=1
+```
+
 ## Repository layout
 
 ```text

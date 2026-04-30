@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -92,6 +94,115 @@ if errors:
 pub fn assert_public_json_safe(text: &str) {
     codexbar_linuxd::redact::validate_public_json_text(text)
         .unwrap_or_else(|finding| panic!("public JSON failed redaction scan: {:?}", finding));
+}
+
+pub fn assert_no_live_secret_markers(label: &str, text: &str) {
+    let lower = text.to_ascii_lowercase();
+    for needle in [
+        "/home/",
+        "~/.local/share",
+        "auth.json",
+        "authorization",
+        "bearer ",
+        "cookie",
+        "set-cookie",
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "session_token",
+        "sessionkey",
+        "sessiontoken",
+        "apikey",
+        "api_key",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+        "github_pat",
+        "xoxb-",
+        "xoxp-",
+        "xoxa-",
+        "rawresponse",
+        "raw_response",
+        "rawpayload",
+        "raw_payload",
+    ] {
+        assert!(
+            !lower.contains(needle),
+            "{label} contains forbidden live secret marker {needle:?}"
+        );
+    }
+    assert!(
+        !contains_raw_email(text),
+        "{label} contains a raw email-like value"
+    );
+}
+
+pub fn live_codexbar_binary() -> Option<PathBuf> {
+    if std::env::var("CODEXBAR_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("skipping live upstream CLI smoke: CODEXBAR_LIVE=1 is not set");
+        return None;
+    }
+    let Some(value) = std::env::var_os("CODEXBAR_CLI") else {
+        eprintln!("skipping live upstream CLI smoke: CODEXBAR_CLI is not set");
+        return None;
+    };
+    let path = PathBuf::from(value);
+    if path.as_os_str().is_empty() {
+        eprintln!("skipping live upstream CLI smoke: CODEXBAR_CLI is empty");
+        return None;
+    }
+    let metadata = match std::fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            eprintln!(
+                "skipping live upstream CLI smoke: CODEXBAR_CLI {} is unavailable: {err}",
+                display_safe_path_for_test(&path)
+            );
+            return None;
+        }
+    };
+    #[cfg(unix)]
+    let is_executable = metadata.permissions().mode() & 0o111 != 0;
+    #[cfg(not(unix))]
+    let is_executable = true;
+    if !metadata.is_file() || !is_executable {
+        eprintln!(
+            "skipping live upstream CLI smoke: CODEXBAR_CLI {} is not executable",
+            display_safe_path_for_test(&path)
+        );
+        return None;
+    }
+    Some(path)
+}
+
+fn display_safe_path_for_test(path: &Path) -> String {
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        if let Ok(stripped) = path.strip_prefix(home) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    path.display().to_string()
+}
+
+fn contains_raw_email(text: &str) -> bool {
+    text.split(|ch: char| {
+        !(ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '%' | '+' | '-' | '@' | '*'))
+    })
+    .any(|token| {
+        let Some((local, domain)) = token.split_once('@') else {
+            return false;
+        };
+        !token.contains('*')
+            && !local.is_empty()
+            && domain.contains('.')
+            && domain
+                .rsplit('.')
+                .next()
+                .is_some_and(|suffix| suffix.len() >= 2)
+    })
 }
 
 #[cfg(unix)]

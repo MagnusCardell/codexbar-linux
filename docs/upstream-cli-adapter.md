@@ -87,3 +87,50 @@ available. If upstream refresh fails and stale fallback is allowed, the daemon
 serves the existing normalized cache as stale rather than overwriting it with an
 error-only snapshot. Error-only or synthetic snapshots do not replace a useful
 cache.
+
+## Opt-In Live Smoke Tests
+
+Normal validation and CI do not require a live upstream binary. The live smoke
+tests are ignored Rust tests and run only when explicitly requested with
+`CODEXBAR_LIVE=1` and `CODEXBAR_CLI=/path/to/codexbar`.
+
+Adapter refresh smoke:
+
+```bash
+CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
+  cargo test --manifest-path daemon/Cargo.toml \
+  live_upstream_cli_refresh_codex_smoke_redacts_outputs \
+  -- --ignored --nocapture --test-threads=1
+```
+
+D-Bus refresh smoke:
+
+```bash
+CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
+  dbus-run-session -- cargo test --manifest-path daemon/Cargo.toml \
+  live_dbus_upstream_cli_refresh_smoke_redacts_outputs \
+  -- --ignored --nocapture --test-threads=1
+```
+
+The D-Bus smoke uses the frozen refresh-options object form:
+
+```json
+{
+  "schemaVersion": 1,
+  "reason": "manual",
+  "force": true,
+  "busyBehavior": "return_existing",
+  "sourceAdapterPolicy": {
+    "mode": "only",
+    "adapters": ["upstream_cli"],
+    "allowStaleCacheFallback": false
+  },
+  "providers": ["codex"]
+}
+```
+
+Both live tests validate schema-shaped public payloads and scan normalized
+snapshots, refresh results, diagnostics, provider events, daemon info, and cache
+strings for raw emails, home paths, token/cookie/auth markers, `rawResponse`,
+and `rawPayload`. They do not commit live output and do not expose raw
+stdout/stderr.

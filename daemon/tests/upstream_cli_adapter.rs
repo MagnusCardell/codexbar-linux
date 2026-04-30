@@ -10,6 +10,7 @@ use codexbar_linuxd::cli::{CliRefreshRequest, CliTimeouts, UpstreamCliAdapter};
 use codexbar_linuxd::model::{ProviderState, SemanticSource};
 
 const UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"]}}"#;
+const LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing","sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":false},"providers":["codex"]}"#;
 
 #[tokio::test]
 async fn upstream_cli_adapter_normalizes_targeted_success_and_redacts_identity() {
@@ -265,6 +266,84 @@ async fn app_refresh_missing_upstream_cli_returns_schema_valid_missing_dependenc
         "upstream_cli_missing"
     );
     assert_eq!(result["status"], "error");
+}
+
+#[tokio::test]
+#[ignore = "requires CODEXBAR_LIVE=1 and CODEXBAR_CLI=/path/to/codexbar"]
+async fn live_upstream_cli_refresh_codex_smoke_redacts_outputs() {
+    let Some(binary) = common::live_codexbar_binary() else {
+        return;
+    };
+    let (_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    let start = app
+        .start_refresh(LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("live refresh should start");
+    };
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("refresh finishes");
+
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+    common::assert_public_json_safe(&completion.snapshot_json);
+    common::assert_public_json_safe(&completion.result_json);
+    common::assert_no_live_secret_markers("live snapshot", &completion.snapshot_json);
+    common::assert_no_live_secret_markers("live refresh result", &completion.result_json);
+    for (_, provider_event_json) in &completion.provider_events {
+        common::assert_schema("provider-event.schema.json", provider_event_json);
+        common::assert_public_json_safe(provider_event_json);
+        common::assert_no_live_secret_markers("live provider event", provider_event_json);
+    }
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    let providers = snapshot["providers"].as_array().expect("providers array");
+    let codex = providers
+        .iter()
+        .find(|provider| provider["provider"] == "codex")
+        .expect("codex provider present");
+    assert_eq!(codex["state"], "ok");
+    assert_eq!(codex["sourceAdapter"], "upstream_cli");
+    assert_eq!(codex["source"], "local");
+    assert_eq!(result["cacheWritten"], true);
+    let result_providers = result["providers"]
+        .as_array()
+        .expect("result providers array");
+    let result_codex = result_providers
+        .iter()
+        .find(|provider| provider["provider"] == "codex")
+        .expect("codex refresh result present");
+    assert_eq!(result_codex["status"], "ok");
+
+    let daemon_info_json = app.get_daemon_info_json().expect("daemon info json");
+    common::assert_schema("daemon-info.schema.json", &daemon_info_json);
+    common::assert_public_json_safe(&daemon_info_json);
+    common::assert_no_live_secret_markers("live daemon info", &daemon_info_json);
+
+    let diagnostics_json = app
+        .get_diagnostics_json("global")
+        .expect("diagnostics json");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    common::assert_no_live_secret_markers("live diagnostics", &diagnostics_json);
+    let provider_diagnostics_json = app
+        .get_diagnostics_json("codex")
+        .expect("provider diagnostics json");
+    common::assert_schema("diagnostics.schema.json", &provider_diagnostics_json);
+    common::assert_public_json_safe(&provider_diagnostics_json);
+    common::assert_no_live_secret_markers("live provider diagnostics", &provider_diagnostics_json);
+
+    let cache_json = fs::read_to_string(app.cache_file_path()).expect("live cache snapshot");
+    common::assert_schema("snapshot.schema.json", &cache_json);
+    common::assert_public_json_safe(&cache_json);
+    common::assert_no_live_secret_markers("live cache", &cache_json);
 }
 
 async fn run_adapter(
