@@ -19,6 +19,16 @@ cargo fmt --manifest-path "$ROOT/daemon/Cargo.toml" -- --check
 cargo clippy --manifest-path "$ROOT/daemon/Cargo.toml" --all-targets -- -D warnings
 # Ignored live upstream CLI smoke tests are opt-in and intentionally excluded.
 cargo test --manifest-path "$ROOT/daemon/Cargo.toml"
-dbus-run-session -- cargo test --manifest-path "$ROOT/daemon/Cargo.toml" dbus_contract
+DBUS_TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/codexbar-dbus-test.XXXXXX")"
+cleanup_dbus_test_home() {
+  rm -rf "$DBUS_TEST_HOME"
+}
+trap cleanup_dbus_test_home EXIT
+env \
+  CODEXBAR_LINUX_TEST_ISOLATED_DBUS=1 \
+  XDG_CACHE_HOME="$DBUS_TEST_HOME/cache" \
+  XDG_CONFIG_HOME="$DBUS_TEST_HOME/config" \
+  XDG_DATA_HOME="$DBUS_TEST_HOME/data" \
+  dbus-run-session -- cargo test --manifest-path "$ROOT/daemon/Cargo.toml" dbus_contract
 
 "$ROOT/scripts/lint-gjs.sh"

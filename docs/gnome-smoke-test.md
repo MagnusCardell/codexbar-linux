@@ -116,6 +116,43 @@ activation yet; restart the full user session and rerun the discovery checks.
     `gnome-extensions enable codexbar-linux@codexbar.dev`.
     Confirm only one panel item remains and refresh/diagnostics still work.
 
+## Recorded Live Result
+
+Example result from the Task 03.3 live smoke on 2026-05-01:
+
+- GNOME Shell version: 46.0.
+- Session type: Wayland.
+- The extension became discoverable after a real Shell/session restart.
+- The CodexBar top-bar item appeared.
+- The popover opened and rendered provider data.
+- Manual Refresh worked through the daemon D-Bus `Refresh` method.
+- Stopping and starting the daemon reflected in the UI without a blank panel.
+- Upstream CLI Codex data was visible through the UI via the daemon.
+- Remaining issue: visual polish is still needed in a later UI pass.
+
+No private paths, raw account identifiers, raw diagnostics, screenshots, cookies,
+tokens, or browser-profile data are part of this recorded result.
+
+## Fixture Mode Development
+
+The production daemon rejects explicit fixture refresh requests. For local UI
+development against fixture data, start the daemon with the fixture gate enabled:
+
+```bash
+CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
+```
+
+For the user systemd service in a development session:
+
+```bash
+systemctl --user set-environment CODEXBAR_LINUX_ALLOW_FIXTURE=1
+systemctl --user restart codexbar-linuxd.service
+```
+
+Unset the variable or restart the service from a clean user environment before
+production-like smoke runs. Fixture mode is for tests and explicit development
+only.
+
 ## Cleanup
 
 ```bash

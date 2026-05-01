@@ -26,7 +26,8 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 03 GNOME Shell vertical slice** status.
+This repository is at **Task 03 GNOME Shell vertical slice** status, with live
+GNOME 46 Wayland activation smoke proven.
 
 Present:
 
@@ -34,7 +35,9 @@ Present:
 - Task 01 daemon runtime that owns the D-Bus session name `org.codexbar.Linux1`.
 - D-Bus methods for snapshots, refresh, diagnostics, daemon info, daemon settings patches, and the browser-import test stub.
 - D-Bus refresh signals for started, provider changed, snapshot changed, and finished events.
-- Fixture-only refresh source that writes normalized snapshot cache data.
+- Fixture refresh source for tests and explicit development mode; production
+  daemon refresh rejects explicit fixture selection unless
+  `CODEXBAR_LINUX_ALLOW_FIXTURE=1` is set.
 - Normalized snapshot cache at `${XDG_CACHE_HOME:-~/.cache}/codexbar-linux/snapshot.json`; no raw provider payloads are cached.
 - Daemon-owned settings at `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json`.
 - Contract, schema-payload, cache, settings, redaction, browser-import stub, and D-Bus runtime tests.
@@ -49,6 +52,7 @@ Present:
 - User-scoped systemd/D-Bus and Debian packaging skeleton files.
 - Local install/uninstall bootstrap scripts.
 - Validation scripts and GitHub Actions check workflow.
+- Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
 
 Not implemented after Task 03:
 
@@ -92,6 +96,13 @@ of `./scripts/check.sh` or CI:
 ```bash
 CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   cargo test --manifest-path daemon/Cargo.toml -- --ignored --test-threads=1
+```
+
+Fixture-backed daemon refresh is disabled in production mode. For explicit local
+UI development against fixture snapshots, start the daemon with:
+
+```bash
+CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
 ```
 
 ## Manual GNOME smoke checks

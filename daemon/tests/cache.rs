@@ -36,7 +36,7 @@ fn invalid_cache_is_ignored_safely() {
 #[tokio::test]
 async fn restart_loads_cache_as_stale_without_relabeling_known_adapter() {
     let (_tmp, paths) = common::temp_paths();
-    let app = App::new(paths.clone()).expect("app");
+    let app = common::fixture_app(paths.clone());
     let refresh = app
         .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("start refresh");

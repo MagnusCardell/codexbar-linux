@@ -2,7 +2,7 @@ mod common;
 
 use std::fs;
 
-use codexbar_linuxd::app::{App, RefreshStart};
+use codexbar_linuxd::app::RefreshStart;
 use codexbar_linuxd::redact;
 
 #[test]
@@ -36,7 +36,7 @@ fn obvious_forbidden_content_is_rejected() {
 #[tokio::test]
 async fn daemon_public_payloads_and_cache_pass_redaction_scan() {
     let (tmp, paths) = common::temp_paths();
-    let app = App::new(paths.clone()).expect("app");
+    let app = common::fixture_app(paths.clone());
     let refresh = app
         .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("start refresh");

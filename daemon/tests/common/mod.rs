@@ -8,6 +8,7 @@ use std::process::Command;
 
 use tempfile::{NamedTempFile, TempDir};
 
+use codexbar_linuxd::app::{App, AppRuntime};
 use codexbar_linuxd::paths::AppPaths;
 
 pub const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
@@ -31,6 +32,11 @@ pub fn temp_paths() -> (TempDir, AppPaths) {
         upstream_cli_path: None,
     };
     (tmp, paths)
+}
+
+pub fn fixture_app(paths: AppPaths) -> App {
+    App::new_with_runtime(paths, AppRuntime::with_fixture_source_for_tests())
+        .expect("fixture-enabled app")
 }
 
 pub fn assert_schema(schema_name: &str, json_text: &str) {

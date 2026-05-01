@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use codexbar_linuxd::app::{App, RefreshStart};
+use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
 use codexbar_linuxd::cache::validate_snapshot;
 use codexbar_linuxd::error::AppError;
 use codexbar_linuxd::model::{
@@ -167,7 +167,8 @@ fn app_getters_return_schema_shaped_redacted_json() {
 #[tokio::test]
 async fn refresh_writes_cache_and_restart_serves_stale_snapshot() {
     let (tmp, paths) = temp_paths();
-    let app = App::new(paths.clone()).expect("app starts");
+    let app = App::new_with_runtime(paths.clone(), AppRuntime::with_fixture_source_for_tests())
+        .expect("app starts");
     let start = app
         .start_refresh(FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("refresh starts");
@@ -214,7 +215,8 @@ async fn refresh_writes_cache_and_restart_serves_stale_snapshot() {
 #[tokio::test]
 async fn refresh_busy_semantics_return_existing_or_reject() {
     let (tmp, paths) = temp_paths();
-    let app = App::new(paths).expect("app starts");
+    let app = App::new_with_runtime(paths, AppRuntime::with_fixture_source_for_tests())
+        .expect("app starts");
     let first = app
         .start_refresh(FIXTURE_REFRESH_OPTIONS_JSON)
         .expect("first refresh starts");

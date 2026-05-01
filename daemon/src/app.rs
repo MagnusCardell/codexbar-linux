@@ -16,7 +16,8 @@ use crate::model::{
     BrowserProviderStatus, BrowserSourceAdapter, BusyBehavior, Capabilities, DaemonInfo,
     DaemonPathsInfo, DaemonState, DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity,
     EventRedaction, ProviderEvent, ProviderEventReason, RedactionSummary, RefreshOptions,
-    RefreshReason, RefreshResult, RefreshStatus, Settings, Snapshot,
+    RefreshReason, RefreshResult, RefreshSourceAdapter, RefreshStatus, Settings, Snapshot,
+    SourceAdapter,
 };
 use crate::paths::AppPaths;
 use crate::redact;
@@ -25,11 +26,41 @@ use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 #[derive(Debug)]
 pub struct App {
     paths: AppPaths,
+    runtime: AppRuntime,
     clock: Clock,
     cache: SnapshotCache,
     settings_store: SettingsStore,
     refresh_counter: AtomicU64,
     state: Mutex<AppState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppRuntime {
+    allow_fixture_source: bool,
+}
+
+impl AppRuntime {
+    pub fn production() -> Self {
+        Self {
+            allow_fixture_source: false,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        Self {
+            allow_fixture_source: env_allows_fixture_source(),
+        }
+    }
+
+    pub fn with_fixture_source_for_tests() -> Self {
+        Self {
+            allow_fixture_source: true,
+        }
+    }
+
+    pub fn fixture_source_allowed(&self) -> bool {
+        self.allow_fixture_source
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -65,10 +96,14 @@ pub struct RefreshCompletion {
 
 impl App {
     pub fn from_env() -> AppResult<Self> {
-        Self::new(AppPaths::from_env())
+        Self::new_with_runtime(AppPaths::from_env(), AppRuntime::from_env())
     }
 
     pub fn new(paths: AppPaths) -> AppResult<Self> {
+        Self::new_with_runtime(paths, AppRuntime::production())
+    }
+
+    pub fn new_with_runtime(paths: AppPaths, runtime: AppRuntime) -> AppResult<Self> {
         let clock = Clock::started_now();
         let cache = SnapshotCache::new(paths.cache_dir.clone(), paths.cache_file.clone());
         let settings_store =
@@ -137,6 +172,7 @@ impl App {
 
         Ok(Self {
             paths,
+            runtime,
             clock,
             cache,
             settings_store,
@@ -299,39 +335,50 @@ impl App {
 
         let finished_at = now_rfc3339();
         let provider_targets = cli::target_providers(&settings, &active.options.providers);
+        let fixture_requested = fixture_requested(&active.options);
         let fixture_only = active.options.source_adapter_policy.allows_fixture()
             && !active.options.source_adapter_policy.allows_upstream_cli();
 
-        let (mut snapshot, mut diagnostics, mut diagnostic_codes) = if fixture_only {
-            (
-                fixtures::refreshed_snapshot(refresh_id, &active.started_at, &finished_at)?,
-                Vec::new(),
-                Vec::new(),
-            )
-        } else if active.options.source_adapter_policy.allows_upstream_cli() {
-            let adapter = UpstreamCliAdapter::from_paths(&self.paths);
-            let refresh = adapter
-                .refresh(CliRefreshRequest {
-                    refresh_id: refresh_id.to_string(),
-                    started_at: active.started_at.clone(),
-                    finished_at: finished_at.clone(),
-                    providers: provider_targets,
-                    selected_provider: previous_snapshot.selected_provider.clone(),
-                })
-                .await?;
-            let diagnostic_codes = refresh
-                .diagnostics
-                .iter()
-                .map(|event| event.code.clone())
-                .collect::<Vec<_>>();
-            (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
-        } else {
-            (
-                fixtures::unsupported_adapter_snapshot(&finished_at)?,
-                Vec::new(),
-                vec!["upstream_cli_excluded".to_string()],
-            )
-        };
+        let (mut snapshot, mut diagnostics, mut diagnostic_codes) =
+            if fixture_requested && !self.runtime.fixture_source_allowed() {
+                (
+                    fixture_not_allowed_snapshot(refresh_id, &active.started_at, &finished_at)?,
+                    vec![fixture_not_allowed_diagnostic(&finished_at)],
+                    vec![
+                        "capability_unimplemented".to_string(),
+                        "fixture_not_allowed".to_string(),
+                    ],
+                )
+            } else if fixture_only {
+                (
+                    fixtures::refreshed_snapshot(refresh_id, &active.started_at, &finished_at)?,
+                    Vec::new(),
+                    Vec::new(),
+                )
+            } else if active.options.source_adapter_policy.allows_upstream_cli() {
+                let adapter = UpstreamCliAdapter::from_paths(&self.paths);
+                let refresh = adapter
+                    .refresh(CliRefreshRequest {
+                        refresh_id: refresh_id.to_string(),
+                        started_at: active.started_at.clone(),
+                        finished_at: finished_at.clone(),
+                        providers: provider_targets,
+                        selected_provider: previous_snapshot.selected_provider.clone(),
+                    })
+                    .await?;
+                let diagnostic_codes = refresh
+                    .diagnostics
+                    .iter()
+                    .map(|event| event.code.clone())
+                    .collect::<Vec<_>>();
+                (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
+            } else {
+                (
+                    fixtures::unsupported_adapter_snapshot(&finished_at)?,
+                    Vec::new(),
+                    vec!["upstream_cli_excluded".to_string()],
+                )
+            };
 
         let live_had_success = snapshot
             .providers
@@ -541,6 +588,42 @@ fn provider_events(
     Ok(events)
 }
 
+fn fixture_requested(options: &RefreshOptions) -> bool {
+    options
+        .source_adapter_policy
+        .adapters
+        .contains(&RefreshSourceAdapter::Fixture)
+        || (options.source_adapter_policy.allows_fixture()
+            && !options.source_adapter_policy.allows_upstream_cli())
+}
+
+fn fixture_not_allowed_snapshot(
+    refresh_id: &str,
+    started_at: &str,
+    finished_at: &str,
+) -> AppResult<Snapshot> {
+    let mut snapshot = fixtures::unsupported_adapter_snapshot(finished_at)?;
+    snapshot.daemon.last_refresh_id = Some(refresh_id.to_string());
+    snapshot.daemon.last_refresh_started_at = Some(started_at.to_string());
+    snapshot.daemon.last_refresh_finished_at = Some(finished_at.to_string());
+    for provider in &mut snapshot.providers {
+        provider.source_adapter = SourceAdapter::None;
+        provider.diagnostics_summary =
+            Some("Fixture refresh source is disabled outside development mode".to_string());
+        provider.diagnostic_codes = vec![
+            "capability_unimplemented".to_string(),
+            "fixture_not_allowed".to_string(),
+        ];
+        if let Some(status) = provider.status.as_mut() {
+            status.indicator = Some("missing_dependency".to_string());
+            status.description =
+                Some("Fixture refresh source is disabled outside development mode".to_string());
+            status.updated_at = Some(finished_at.to_string());
+        }
+    }
+    Ok(snapshot)
+}
+
 fn validate_refresh_options(options: &RefreshOptions) -> AppResult<()> {
     if options.schema_version != 1
         || has_duplicates(&options.providers)
@@ -554,6 +637,15 @@ fn validate_refresh_options(options: &RefreshOptions) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn env_allows_fixture_source() -> bool {
+    matches!(
+        std::env::var("CODEXBAR_LINUX_ALLOW_FIXTURE")
+            .ok()
+            .as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
 }
 
 fn parse_input_json<T>(json: &str) -> AppResult<T>
@@ -601,6 +693,23 @@ fn diagnostic_event(
         timestamp: timestamp.to_string(),
         provider,
         source_adapter: None,
+        recoverable: true,
+        details: Default::default(),
+        redacted: EventRedaction {
+            applied: true,
+            classes: vec!["secrets".to_string(), "identity".to_string()],
+        },
+    }
+}
+
+fn fixture_not_allowed_diagnostic(timestamp: &str) -> DiagnosticEvent {
+    DiagnosticEvent {
+        code: "fixture_not_allowed".to_string(),
+        severity: DiagnosticSeverity::Warning,
+        safe_message: "Fixture refresh source is disabled outside development mode".to_string(),
+        timestamp: timestamp.to_string(),
+        provider: None,
+        source_adapter: Some(SourceAdapter::Fixture),
         recoverable: true,
         details: Default::default(),
         redacted: EventRedaction {

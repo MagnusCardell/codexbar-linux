@@ -1,6 +1,6 @@
 mod common;
 
-use codexbar_linuxd::app::{App, RefreshStart};
+use codexbar_linuxd::app::RefreshStart;
 use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{
     BrowserImportOptions, BrowserImportPolicy, ProviderEvent, ProviderEventReason, Settings,
@@ -9,7 +9,7 @@ use codexbar_linuxd::model::{
 #[tokio::test]
 async fn daemon_generated_payloads_validate_against_schemas() {
     let (tmp, paths) = common::temp_paths();
-    let app = App::new(paths).expect("app");
+    let app = common::fixture_app(paths);
 
     let snapshot_json = app.get_snapshot_json().expect("snapshot");
     common::assert_public_json_safe(&snapshot_json);

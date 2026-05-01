@@ -6,11 +6,13 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tempfile::TempDir;
 use tokio::time::timeout;
+use zbus::proxy::MethodFlags;
 use zbus::Proxy;
 
 const BUS_NAME: &str = "org.codexbar.Linux1";
 const OBJECT_PATH: &str = "/org/codexbar/Linux1";
 const INTERFACE: &str = "org.codexbar.Linux1";
+const ISOLATED_DBUS_ENV: &str = "CODEXBAR_LINUX_TEST_ISOLATED_DBUS";
 const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
 const LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing","sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":false},"providers":["codex"]}"#;
 
@@ -25,10 +27,23 @@ impl Drop for DaemonChild {
     }
 }
 
+#[test]
+fn real_user_session_bus_address_is_not_considered_isolated() {
+    assert!(!session_bus_address_is_isolated(
+        "unix:path=/run/user/1000/bus"
+    ));
+}
+
+#[test]
+fn dbus_run_session_style_bus_address_is_considered_isolated() {
+    assert!(session_bus_address_is_isolated(
+        "unix:path=/tmp/dbus-test-bus"
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
-    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-        eprintln!("skipping D-Bus contract test outside dbus-run-session");
+    if !isolated_session_bus_available("dbus_contract_runtime_methods_signals_errors_and_cache") {
         return;
     }
 
@@ -37,37 +52,38 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     let connection = zbus::Connection::session().await.expect("session bus");
     let proxy = wait_for_proxy(&connection).await;
 
-    let daemon_info: String = proxy
-        .call("GetDaemonInfo", &())
+    let daemon_info = call_string_no_autostart(&proxy, "GetDaemonInfo", &())
         .await
         .expect("GetDaemonInfo");
     common::assert_schema("daemon-info.schema.json", &daemon_info);
+    assert_dbus_test_paths_are_isolated(&daemon_info, &tmp);
 
-    let snapshot: String = proxy.call("GetSnapshot", &()).await.expect("GetSnapshot");
+    let snapshot = call_string_no_autostart(&proxy, "GetSnapshot", &())
+        .await
+        .expect("GetSnapshot");
     common::assert_schema("snapshot.schema.json", &snapshot);
 
-    let diagnostics: String = proxy
-        .call("GetDiagnostics", &"global")
+    let diagnostics = call_string_no_autostart(&proxy, "GetDiagnostics", &"global")
         .await
         .expect("GetDiagnostics");
     common::assert_schema("diagnostics.schema.json", &diagnostics);
 
-    let settings: String = proxy
-        .call(
-            "SetSettingsPatch",
-            &r#"{"schemaVersion":1,"refresh":{"intervalSeconds":240}}"#,
-        )
-        .await
-        .expect("SetSettingsPatch");
+    let settings = call_string_no_autostart(
+        &proxy,
+        "SetSettingsPatch",
+        &r#"{"schemaVersion":1,"refresh":{"intervalSeconds":240}}"#,
+    )
+    .await
+    .expect("SetSettingsPatch");
     common::assert_schema("settings.schema.json", &settings);
 
-    let browser_result: String = proxy
-        .call(
-            "TestBrowserImport",
-            &r#"{"schemaVersion":1,"providers":["codex"]}"#,
-        )
-        .await
-        .expect("TestBrowserImport");
+    let browser_result = call_string_no_autostart(
+        &proxy,
+        "TestBrowserImport",
+        &r#"{"schemaVersion":1,"providers":["codex"]}"#,
+    )
+    .await
+    .expect("TestBrowserImport");
     common::assert_schema("browser-import-result.schema.json", &browser_result);
     let browser_value: serde_json::Value =
         serde_json::from_str(&browser_result).expect("browser json");
@@ -90,19 +106,18 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
         .await
         .expect("finished stream");
 
-    let refresh_id: String = proxy
-        .call("Refresh", &FIXTURE_REFRESH_OPTIONS_JSON)
+    let refresh_id = call_string_no_autostart(&proxy, "Refresh", &FIXTURE_REFRESH_OPTIONS_JSON)
         .await
         .expect("Refresh");
     assert!(!refresh_id.is_empty());
 
-    let busy_err = proxy
-        .call::<_, _, String>(
-            "Refresh",
-            &r#"{"schemaVersion":1,"reason":"test","busyBehavior":"reject"}"#,
-        )
-        .await
-        .expect_err("busy refresh should reject");
+    let busy_err = call_string_no_autostart(
+        &proxy,
+        "Refresh",
+        &r#"{"schemaVersion":1,"reason":"test","busyBehavior":"reject"}"#,
+    )
+    .await
+    .expect_err("busy refresh should reject");
     assert_eq!(
         method_error_name(&busy_err),
         "org.codexbar.Linux1.Error.RefreshBusy"
@@ -143,8 +158,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     assert_eq!(finished_id, refresh_id);
     common::assert_schema("refresh-result.schema.json", &result_json);
 
-    let invalid_err = proxy
-        .call::<_, _, String>("Refresh", &"{")
+    let invalid_err = call_string_no_autostart(&proxy, "Refresh", &"{")
         .await
         .expect_err("invalid JSON should fail");
     assert_eq!(
@@ -167,8 +181,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     daemon = spawn_daemon(&tmp);
     let connection = zbus::Connection::session().await.expect("session bus 2");
     let proxy = wait_for_proxy(&connection).await;
-    let cached_snapshot: String = proxy
-        .call("GetSnapshot", &())
+    let cached_snapshot = call_string_no_autostart(&proxy, "GetSnapshot", &())
         .await
         .expect("cached GetSnapshot");
     common::assert_schema("snapshot.schema.json", &cached_snapshot);
@@ -181,8 +194,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires dbus-run-session, CODEXBAR_LIVE=1, and CODEXBAR_CLI=/path/to/codexbar"]
 async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
-    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-        eprintln!("skipping live D-Bus smoke outside dbus-run-session");
+    if !isolated_session_bus_available("live_dbus_upstream_cli_refresh_smoke_redacts_outputs") {
         return;
     }
     let Some(binary) = common::live_codexbar_binary() else {
@@ -194,8 +206,7 @@ async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
     let connection = zbus::Connection::session().await.expect("session bus");
     let proxy = wait_for_proxy(&connection).await;
 
-    let daemon_info: String = proxy
-        .call("GetDaemonInfo", &())
+    let daemon_info = call_string_no_autostart(&proxy, "GetDaemonInfo", &())
         .await
         .expect("GetDaemonInfo");
     common::assert_schema("daemon-info.schema.json", &daemon_info);
@@ -211,10 +222,10 @@ async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
         .await
         .expect("finished stream");
 
-    let refresh_id: String = proxy
-        .call("Refresh", &LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON)
-        .await
-        .expect("Refresh");
+    let refresh_id =
+        call_string_no_autostart(&proxy, "Refresh", &LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON)
+            .await
+            .expect("Refresh");
     assert!(!refresh_id.is_empty());
 
     let snapshot_msg = timeout(Duration::from_secs(120), snapshot_stream.next())
@@ -245,18 +256,18 @@ async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
         .expect("codex refresh result present");
     assert_eq!(result_codex["status"], "ok");
 
-    let current_snapshot: String = proxy.call("GetSnapshot", &()).await.expect("GetSnapshot");
+    let current_snapshot = call_string_no_autostart(&proxy, "GetSnapshot", &())
+        .await
+        .expect("GetSnapshot");
     assert_live_upstream_snapshot("live D-Bus GetSnapshot", &current_snapshot);
 
-    let diagnostics_json: String = proxy
-        .call("GetDiagnostics", &"global")
+    let diagnostics_json = call_string_no_autostart(&proxy, "GetDiagnostics", &"global")
         .await
         .expect("GetDiagnostics");
     common::assert_schema("diagnostics.schema.json", &diagnostics_json);
     common::assert_public_json_safe(&diagnostics_json);
     common::assert_no_live_secret_markers("live D-Bus diagnostics", &diagnostics_json);
-    let provider_diagnostics_json: String = proxy
-        .call("GetDiagnostics", &"codex")
+    let provider_diagnostics_json = call_string_no_autostart(&proxy, "GetDiagnostics", &"codex")
         .await
         .expect("GetDiagnostics codex");
     common::assert_schema("diagnostics.schema.json", &provider_diagnostics_json);
@@ -280,10 +291,18 @@ async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
 }
 
 fn spawn_daemon(tmp: &TempDir) -> DaemonChild {
-    spawn_daemon_with_cli(tmp, None)
+    spawn_daemon_with_cli_and_fixture_mode(tmp, None, true)
 }
 
 fn spawn_daemon_with_cli(tmp: &TempDir, cli_path: Option<&std::path::Path>) -> DaemonChild {
+    spawn_daemon_with_cli_and_fixture_mode(tmp, cli_path, false)
+}
+
+fn spawn_daemon_with_cli_and_fixture_mode(
+    tmp: &TempDir,
+    cli_path: Option<&std::path::Path>,
+    allow_fixture: bool,
+) -> DaemonChild {
     let bin = env!("CARGO_BIN_EXE_codexbar-linuxd");
     let home = if cli_path.is_some() {
         std::env::var_os("HOME").unwrap_or_else(|| tmp.path().join("home").into_os_string())
@@ -301,6 +320,11 @@ fn spawn_daemon_with_cli(tmp: &TempDir, cli_path: Option<&std::path::Path>) -> D
     if let Some(cli_path) = cli_path {
         command.env("CODEXBAR_CLI", cli_path);
     }
+    if allow_fixture {
+        command.env("CODEXBAR_LINUX_ALLOW_FIXTURE", "1");
+    } else {
+        command.env_remove("CODEXBAR_LINUX_ALLOW_FIXTURE");
+    }
     let child = command.spawn().expect("spawn daemon");
     DaemonChild { child }
 }
@@ -308,8 +332,7 @@ fn spawn_daemon_with_cli(tmp: &TempDir, cli_path: Option<&std::path::Path>) -> D
 async fn wait_for_proxy<'a>(connection: &'a zbus::Connection) -> Proxy<'a> {
     for _ in 0..50 {
         if let Ok(proxy) = Proxy::new(connection, BUS_NAME, OBJECT_PATH, INTERFACE).await {
-            if proxy
-                .call::<_, _, String>("GetDaemonInfo", &())
+            if call_string_no_autostart(&proxy, "GetDaemonInfo", &())
                 .await
                 .is_ok()
             {
@@ -319,6 +342,56 @@ async fn wait_for_proxy<'a>(connection: &'a zbus::Connection) -> Proxy<'a> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon did not become ready on D-Bus");
+}
+
+async fn call_string_no_autostart<B>(
+    proxy: &Proxy<'_>,
+    method_name: &str,
+    body: &B,
+) -> zbus::Result<String>
+where
+    B: serde::Serialize + zbus::zvariant::DynamicType,
+{
+    proxy
+        .call_with_flags::<_, _, String>(method_name, MethodFlags::NoAutoStart.into(), body)
+        .await?
+        .ok_or_else(|| zbus::Error::Failure("D-Bus call unexpectedly had no reply".to_string()))
+}
+
+fn isolated_session_bus_available(test_name: &str) -> bool {
+    let Some(address) = std::env::var_os("DBUS_SESSION_BUS_ADDRESS") else {
+        eprintln!("skipping {test_name}: DBUS_SESSION_BUS_ADDRESS is not set");
+        return false;
+    };
+    let address = address.to_string_lossy();
+    if std::env::var_os(ISOLATED_DBUS_ENV).is_some()
+        || session_bus_address_is_isolated(address.as_ref())
+    {
+        return true;
+    }
+    eprintln!(
+        "skipping {test_name}: refusing to use ambient user session bus {address:?}; run under dbus-run-session"
+    );
+    false
+}
+
+fn session_bus_address_is_isolated(address: &str) -> bool {
+    !address.contains("/run/user/")
+}
+
+fn assert_dbus_test_paths_are_isolated(daemon_info_json: &str, tmp: &TempDir) {
+    let info: serde_json::Value = serde_json::from_str(daemon_info_json).expect("daemon info json");
+    let config_file = info["paths"]["configFile"].as_str().expect("config path");
+    let cache_file = info["paths"]["cacheFile"].as_str().expect("cache path");
+    let tmp_display = tmp.path().display().to_string();
+    assert!(
+        config_file.starts_with(&tmp_display),
+        "D-Bus contract test config path is not isolated: {config_file}"
+    );
+    assert!(
+        cache_file.starts_with(&tmp_display),
+        "D-Bus contract test cache path is not isolated: {cache_file}"
+    );
 }
 
 fn method_error_name(err: &zbus::Error) -> String {
