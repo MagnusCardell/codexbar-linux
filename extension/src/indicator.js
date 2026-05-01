@@ -60,8 +60,12 @@ class CodexbarIndicator extends PanelMenu.Button {
     }
 
     _renderMerged(view) {
+        this._content.add_child(new St.Icon({
+            icon_name: iconForState(view.state),
+            style_class: 'system-status-icon codexbar-panel-icon codexbar-panel-icon-small',
+        }));
         this._content.add_child(new St.Label({
-            text: view.selectedRow?.shortLabel ?? 'CB',
+            text: view.panelLabel ?? 'CB',
             style_class: 'codexbar-panel-label',
         }));
         this._content.add_child(createMicroMeterStack(panelMeters(view.selectedProvider)));
@@ -72,7 +76,7 @@ class CodexbarIndicator extends PanelMenu.Button {
         for (const row of rows) {
             const item = new St.BoxLayout({
                 vertical: true,
-                style_class: `codexbar-provider-dot codexbar-state-${row.state}`,
+                style_class: `codexbar-provider-dot codexbar-panel-provider-item codexbar-state-${row.state}`,
             });
             item.add_child(new St.Label({
                 text: row.shortLabel,
@@ -97,12 +101,6 @@ class CodexbarIndicator extends PanelMenu.Button {
             icon_name: iconForState(view.state),
             style_class: 'system-status-icon codexbar-panel-icon',
         }));
-        if (view.selectedRow?.meters?.length > 0) {
-            this._content.add_child(new St.Label({
-                text: view.selectedRow.shortLabel,
-                style_class: 'codexbar-panel-label codexbar-panel-label-minimal',
-            }));
-        }
     }
 });
 

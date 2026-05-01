@@ -73,11 +73,15 @@ export class CodexbarPopover {
         top.add_child(refresh);
         header.add_child(top);
 
-        const statusPieces = [
-            view.panelStatus,
-            view.stale ? 'stale' : '',
-            view.generatedAt ? formatGenerated(view.generatedAt) : '',
-        ].filter(Boolean);
+        const status = view.refreshing
+            ? 'Refreshing…'
+            : (view.state === 'daemon_unavailable'
+                ? 'Daemon unavailable'
+                : (view.stale ? 'Stale data' : view.panelStatus));
+        const time = view.generatedAt
+            ? (view.stale ? formatGenerated(view.generatedAt) : formatUpdated(view.generatedAt))
+            : '';
+        const statusPieces = [status, time].filter(Boolean);
         header.add_child(new St.Label({
             text: statusPieces.join(' · ') || 'Status unavailable',
             style_class: 'codexbar-muted',
@@ -90,10 +94,18 @@ export class CodexbarPopover {
         const daemon = view.daemonInfo ?? view.daemon;
         const capabilities = view.daemonInfo?.capabilities ?? {};
         const upstream = view.daemonInfo?.upstreamCli ?? view.daemon?.upstreamCli ?? null;
+        const daemonVersion = daemon?.version ? ` ${daemon.version}` : '';
+        const upstreamVersion = upstream?.version ? ` ${upstream.version}` : '';
         const lines = [
-            `Daemon: ${daemon?.state ?? 'unknown'} ${daemon?.version ? `(${daemon.version})` : ''}`,
-            `Upstream CLI: ${upstream?.available ? 'available' : 'unavailable'}${upstream?.version ? ` ${upstream.version}` : ''}`,
-            `Cost: ${capabilities.cost ? 'available' : 'unavailable'} · Browser import: not implemented`,
+            [
+                `Daemon ${daemon?.state ?? 'unknown'}${daemonVersion}`,
+                `CLI ${upstream?.available ? 'available' : 'unavailable'}${upstreamVersion}`,
+                `Cost ${capabilities.cost ? 'available' : 'unavailable'}`,
+                `Browser import ${capabilities.browserImport ? 'available' : 'unavailable'}`,
+            ].join(' · '),
+            view.daemon?.lastRefreshFinishedAt
+                ? formatUpdated(view.daemon.lastRefreshFinishedAt)
+                : 'Last refresh unknown',
         ];
 
         const footer = new St.BoxLayout({
@@ -108,13 +120,6 @@ export class CodexbarPopover {
                 x_expand: true,
             }));
         }
-        footer.add_child(new St.Label({
-            text: view.daemon?.lastRefreshFinishedAt
-                ? formatUpdated(view.daemon.lastRefreshFinishedAt)
-                : 'Last refresh unknown',
-            style_class: 'codexbar-muted codexbar-small',
-            x_expand: true,
-        }));
         return footer;
     }
 }

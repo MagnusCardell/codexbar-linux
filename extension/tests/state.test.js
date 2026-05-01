@@ -7,11 +7,14 @@ import {
     applySnapshotJson,
     createInitialState,
     diagnosticsCopyText,
+    diagnosticsSummaryLine,
     meterRemainingPercent,
+    normalizeViewState,
     panelMeters,
     safeUrl,
     selectProvider,
     applyDiagnosticsJson,
+    stateMeta,
 } from '../src/state.js';
 
 const FIXTURE_STATES = [
@@ -32,9 +35,16 @@ function main() {
     assertSnapshotFixturesRenderStates();
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
+    assertViewModelUsesStateCopyMap();
+    assertViewModelKeepsSemanticSourceSeparateFromAdapter();
     assertDiagnosticsCopyRedaction();
+    assertDiagnosticsSummaryLineIsCollapsedAndSafe();
     assertDiagnosticsRejectUnsafePayload();
+    assertDiagnosticsRejectRawOutputFields();
+    assertProviderUnsafeStringsFailClosed();
+    assertDashboardActionHiddenForUnsafeUrls();
     assertSafeUrlRejectsLocalhost();
+    assertSafeUrlRejectsPrivateAndTokenizedUrls();
     print('extension state tests passed');
 }
 
@@ -85,6 +95,31 @@ function assertPanelMetersPreservePrimarySecondarySemantics() {
     assertEqual(meterRemainingPercent(secondary), 36);
 }
 
+function assertViewModelUsesStateCopyMap() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    assertEqual(stateMeta('loading').label, 'Loading usage…');
+    assertEqual(stateMeta('ok').label, 'Up to date');
+    assertEqual(stateMeta('stale').label, 'Stale data');
+    assertEqual(stateMeta('unauthenticated').label, 'Sign-in required');
+    assertEqual(stateMeta('cookie_rejected').label, 'Browser session rejected');
+    assertEqual(stateMeta('parse_error').label, 'Could not read provider data');
+    assertEqual(stateMeta('timeout').label, 'Provider timed out');
+    assertEqual(view.panelStatus, 'Up to date');
+    assertEqual(view.panelLabel, 'COD');
+}
+
+function assertViewModelKeepsSemanticSourceSeparateFromAdapter() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const [row] = normalizeViewState(state, {}).providerRows;
+    assertEqual(row.sourceLabel, 'API');
+    assertEqual(row.adapterLabel, 'Fixture');
+    assertEqual(row.meters[0].label, 'Session');
+    assertEqual(row.meters[1].label, 'Weekly');
+}
+
 function assertDiagnosticsCopyRedaction() {
     const raw = {
         token: 'Bearer abc.def',
@@ -105,6 +140,38 @@ function assertDiagnosticsCopyRedaction() {
     assert(!redacted.includes('/home/test'), 'home path was not redacted');
 }
 
+function assertDiagnosticsSummaryLineIsCollapsedAndSafe() {
+    const diagnostics = {
+        schemaVersion: 1,
+        scope: 'provider',
+        provider: 'codex',
+        generatedAt: '2026-04-27T12:00:00Z',
+        events: [
+            {
+                code: 'fixture_warning',
+                severity: 'warning',
+                safeMessage: 'Safe warning',
+                timestamp: '2026-04-27T12:00:00Z',
+                redacted: {applied: true},
+            },
+            {
+                code: 'fixture_error',
+                severity: 'error',
+                safeMessage: 'Safe error',
+                timestamp: '2026-04-27T12:01:00Z',
+                redacted: {applied: true},
+            },
+        ],
+        redaction: {applied: true, policyVersion: 1},
+    };
+    const summary = diagnosticsSummaryLine(diagnostics);
+    assertEqual(summary, 'codex · 2 events · error · fixture_error');
+
+    const next = applyDiagnosticsJson(createInitialState(0), 'codex', JSON.stringify(diagnostics), 0);
+    assertEqual(next.diagnostics.summary, summary);
+    assert(!next.diagnostics.summary.includes('Safe warning'), 'collapsed diagnostics summary should not expand event messages');
+}
+
 function assertDiagnosticsRejectUnsafePayload() {
     const diagnostics = {
         schemaVersion: 1,
@@ -115,11 +182,55 @@ function assertDiagnosticsRejectUnsafePayload() {
             code: 'bad_secret',
             severity: 'error',
             safeMessage: 'sessionKey=plain-session-secret',
+            timestamp: '2026-04-27T12:00:00Z',
+            redacted: {applied: true},
         }],
+        redaction: {applied: true, policyVersion: 1},
     };
     const next = applyDiagnosticsJson(createInitialState(0), 'codex', JSON.stringify(diagnostics), 0);
     assertEqual(next.clientState, 'parse_error');
     assertEqual(next.lastClientError, 'Diagnostics payload did not match the v1 shape');
+}
+
+function assertDiagnosticsRejectRawOutputFields() {
+    for (const key of ['stdout', 'stderr', 'stdoutText', 'stderrText', 'stdoutJson', 'stderrJson', 'rawOutput', 'requestHeaders']) {
+        const diagnostics = {
+            schemaVersion: 1,
+            scope: 'provider',
+            provider: 'codex',
+            generatedAt: '2026-04-27T12:00:00Z',
+            events: [{
+                code: 'raw_output',
+                severity: 'error',
+                safeMessage: 'Details unavailable',
+                timestamp: '2026-04-27T12:00:00Z',
+                details: {[key]: 'raw upstream output'},
+                redacted: {applied: true},
+            }],
+            redaction: {applied: true, policyVersion: 1},
+        };
+        const next = applyDiagnosticsJson(createInitialState(0), 'codex', JSON.stringify(diagnostics), 0);
+        assertEqual(next.clientState, 'parse_error');
+    }
+}
+
+function assertProviderUnsafeStringsFailClosed() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    ok.providers[0].status.description = 'stdout: {"raw":"payload"}';
+    ok.providers[0].diagnosticsSummary = '{"rawPayload":"secret"}';
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {});
+    assertEqual(state.clientState, 'parse_error');
+    assert(!view.panelStatus.includes('stdout'), 'raw stdout marker surfaced in panel status');
+    assert(!JSON.stringify(view.providerRows).includes('rawPayload'), 'raw payload marker surfaced in provider rows');
+}
+
+function assertDashboardActionHiddenForUnsafeUrls() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    ok.providers[0].dashboardUrl = 'https://example.com/dashboard?access_token=secret';
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const [row] = normalizeViewState(state, {}).providerRows;
+    assertEqual(row.dashboardUrl, '');
 }
 
 function assertSafeUrlRejectsLocalhost() {
@@ -136,6 +247,24 @@ function assertSafeUrlRejectsLocalhost() {
     assertEqual(safeUrl(`${http}[::1]:3000/status`), '');
     assertEqual(safeUrl(`${http}user:pass@example.com/status`), '');
     assertEqual(safeUrl(dashboard), dashboard);
+}
+
+function assertSafeUrlRejectsPrivateAndTokenizedUrls() {
+    const http = 'http' + '://';
+    const https = 'https' + '://';
+    for (const url of [
+        `${http}localhost./status`,
+        `${http}2130706433/status`,
+        `${http}0177.0.0.1/status`,
+        `${http}0x7f000001/status`,
+        `${http}[::ffff:127.0.0.1]/status`,
+        `${http}169.254.169.254/status`,
+        `${http}10.0.0.1/status`,
+        `${http}192.168.1.1/status`,
+        `${http}172.16.0.1/status`,
+        `${https}example.com/dashboard?access_token=secret`,
+    ])
+        assertEqual(safeUrl(url), '');
 }
 
 function readJson(relativePath) {

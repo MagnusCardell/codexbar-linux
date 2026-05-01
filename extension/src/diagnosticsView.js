@@ -1,9 +1,11 @@
 import St from 'gi://St';
 
+import {diagnosticsSummaryLine} from './state.js';
+
 export function createDiagnosticsView(diagnostics, actions) {
     const box = new St.BoxLayout({
         vertical: true,
-        style_class: 'codexbar-diagnostics',
+        style_class: `codexbar-diagnostics${diagnostics?.payload ? ' codexbar-diagnostics-loaded' : ' codexbar-diagnostics-collapsed'}`,
         x_expand: true,
     });
 
@@ -21,14 +23,12 @@ export function createDiagnosticsView(diagnostics, actions) {
     }
     box.add_child(header);
 
-    const lines = diagnostics?.lines ?? ['Diagnostics not loaded'];
-    for (const line of lines.slice(0, 8)) {
-        box.add_child(new St.Label({
-            text: line,
-            style_class: 'codexbar-diagnostic-line',
-            x_expand: true,
-        }));
-    }
+    box.add_child(new St.Label({
+        text: diagnostics?.summary
+            ?? (diagnostics?.payload ? diagnosticsSummaryLine(diagnostics.payload) : 'Diagnostics not loaded'),
+        style_class: 'codexbar-diagnostic-line',
+        x_expand: true,
+    }));
 
     return box;
 }

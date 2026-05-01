@@ -3,6 +3,7 @@ import {
     PRODUCT_NAME,
     PROVIDER_STATES,
     RESET_TIME_FORMATS,
+    STATE_LABELS,
     THEMES,
 } from './constants.js';
 
@@ -12,69 +13,69 @@ const PRODUCT_PANEL_PLACEHOLDER = PRODUCT_NAME;
 
 const STATE_META = {
     loading: {
-        label: 'Loading',
+        label: STATE_LABELS.loading,
         severity: 'loading',
-        description: 'Waiting for daemon data',
+        description: 'Waiting for usage data',
         iconName: 'view-refresh-symbolic',
     },
     ok: {
-        label: 'OK',
+        label: STATE_LABELS.ok,
         severity: 'ok',
         description: 'Usage data is current',
         iconName: 'emblem-ok-symbolic',
     },
     stale: {
-        label: 'Stale',
+        label: STATE_LABELS.stale,
         severity: 'warning',
-        description: 'Showing stale daemon data',
+        description: 'Showing cached usage data',
         iconName: 'appointment-soon-symbolic',
     },
     unauthenticated: {
-        label: 'Sign in',
+        label: STATE_LABELS.unauthenticated,
         severity: 'warning',
-        description: 'Provider is unauthenticated',
+        description: 'Provider needs a valid sign-in',
         iconName: 'dialog-password-symbolic',
     },
     cookie_rejected: {
-        label: 'Cookie rejected',
+        label: STATE_LABELS.cookie_rejected,
         severity: 'warning',
-        description: 'Provider rejected the browser session',
+        description: 'Browser session was rejected',
         iconName: 'dialog-warning-symbolic',
     },
     missing_dependency: {
-        label: 'Missing dependency',
+        label: STATE_LABELS.missing_dependency,
         severity: 'warning',
-        description: 'A required local dependency is unavailable',
+        description: 'Required local dependency is unavailable',
         iconName: 'dialog-warning-symbolic',
     },
     provider_unavailable: {
-        label: 'Unavailable',
+        label: STATE_LABELS.provider_unavailable,
         severity: 'warning',
-        description: 'Provider or daemon is unavailable',
+        description: 'Provider or adapter is unavailable',
         iconName: 'network-offline-symbolic',
     },
     parse_error: {
-        label: 'Parse error',
+        label: STATE_LABELS.parse_error,
         severity: 'error',
-        description: 'Daemon could not parse provider output',
+        description: 'Provider data was not readable',
         iconName: 'dialog-error-symbolic',
     },
     timeout: {
-        label: 'Timeout',
+        label: STATE_LABELS.timeout,
         severity: 'warning',
         description: 'Provider refresh timed out',
         iconName: 'alarm-symbolic',
     },
     error: {
-        label: 'Error',
+        label: STATE_LABELS.error,
         severity: 'error',
-        description: 'Provider refresh failed',
+        description: 'Refresh did not complete',
         iconName: 'dialog-error-symbolic',
     },
     daemon_unavailable: {
-        label: 'Daemon unavailable',
+        label: STATE_LABELS.daemon_unavailable,
         severity: 'error',
-        description: 'Daemon D-Bus service is unavailable',
+        description: 'D-Bus service is unavailable',
         iconName: 'network-offline-symbolic',
     },
 };
@@ -100,31 +101,43 @@ const PROVIDER_REQUIRED_KEYS = ['provider', 'displayName', 'state', 'source', 's
 const DAEMON_STATES = ['starting', 'ok', 'refreshing', 'degraded', 'error'];
 const SEMANTIC_SOURCES = ['api', 'local', 'web', 'unknown'];
 const SOURCE_ADAPTERS = ['upstream_cli', 'linux_web', 'cache', 'fixture', 'synthetic', 'none'];
+const DIAGNOSTIC_SEVERITY_RANK = {
+    info: 1,
+    warning: 2,
+    error: 3,
+};
 const FORBIDDEN_PUBLIC_KEYS = new Set([
-    'accountEmail',
+    'accountemail',
     'email',
-    'accountOrganization',
+    'accountorganization',
     'organization',
-    'providerID',
     'raw',
-    'rawPayload',
-    'rawResponse',
+    'rawpayload',
+    'rawresponse',
+    'rawstdout',
+    'rawstderr',
+    'rawoutput',
+    'providerpayload',
     'headers',
+    'requestheaders',
+    'responseheaders',
     'authorization',
     'cookie',
     'cookies',
-    'setCookie',
-    'set-cookie',
-    'apiKey',
-    'api_key',
-    'accessToken',
-    'access_token',
-    'refreshToken',
-    'refresh_token',
-    'sessionToken',
-    'session_token',
-    'sessionKey',
-    'session_key',
+    'setcookie',
+    'apikey',
+    'accesstoken',
+    'refreshtoken',
+    'sessiontoken',
+    'sessionkey',
+    'stdout',
+    'stderr',
+    'stdouttext',
+    'stderrtext',
+    'stdoutjson',
+    'stderrjson',
+    'stdoutpath',
+    'stderrpath',
     'token',
 ]);
 
@@ -249,7 +262,8 @@ export function applyDiagnosticsJson(state, providerId, diagnosticsJson, nowMs =
         return withClientError(state, parsed.error, nowMs, 'parse_error', 'diagnostics_parse_error');
 
     const diagnostics = parsed.value;
-    if (hasForbiddenPublicData(diagnostics) || diagnostics.schemaVersion !== 1 || !Array.isArray(diagnostics.events))
+    const validation = validateDiagnosticsPayload(diagnostics);
+    if (!validation.ok)
         return withClientError(state, 'Diagnostics payload did not match the v1 shape', nowMs, 'parse_error', 'diagnostics_invalid');
 
     return {
@@ -259,6 +273,7 @@ export function applyDiagnosticsJson(state, providerId, diagnosticsJson, nowMs =
             payload: diagnostics,
             copyText: diagnosticsCopyText(diagnostics),
             lines: diagnosticsDisplayLines(diagnostics),
+            summary: diagnosticsSummaryLine(diagnostics),
         },
         lastClientError: null,
     };
@@ -426,9 +441,11 @@ export function normalizeViewState(state, options = {}) {
     const providerRows = (Array.isArray(snapshot.providers) ? snapshot.providers : [])
         .map(provider => providerRow(provider, uiOptions));
     const selectedRow = selectedProvider ? providerRow(selectedProvider, uiOptions) : null;
+    const viewState = state?.clientState ?? deriveSnapshotState(snapshot);
+    const viewMeta = stateMeta(viewState);
 
     return {
-        state: state?.clientState ?? deriveSnapshotState(snapshot),
+        state: viewState,
         refreshing: Boolean(state?.refreshing),
         activeRefreshId: state?.activeRefreshId ?? null,
         lastClientError: state?.lastClientError ?? null,
@@ -440,7 +457,7 @@ export function normalizeViewState(state, options = {}) {
         selectedRow,
         providerRows,
         panelLabel: selectedRow?.shortLabel ?? PRODUCT_PANEL_PLACEHOLDER,
-        panelStatus: selectedRow?.statusLabel ?? 'Loading',
+        panelStatus: viewState === 'ok' && selectedRow ? selectedRow.statusLabel : viewMeta.label,
         stale: Boolean(snapshot.stale),
         generatedAt: snapshot.generatedAt ?? null,
     };
@@ -453,7 +470,7 @@ export function providerRow(provider, options = {}) {
     const providerId = safeDisplay(provider?.provider || '');
     const shortLabel = shortProviderLabel(displayName, providerId);
     const identity = safeDisplay(providerIdentityText(provider));
-    const statusText = safeDisplay(providerStatusText(provider));
+    const statusText = safeDisplay(providerStatusText(provider), meta.description);
     const meters = providerMeters(provider);
 
     return {
@@ -560,8 +577,9 @@ export function formatMeterDetail(meter, resetTimeFormat = 'countdown', nowMs = 
         return 'No usage data';
 
     const pieces = [];
-    if (meter.detail)
-        pieces.push(safeDisplay(meter.detail));
+    const detail = meter.detail ? safeDisplay(meter.detail) : '';
+    if (detail)
+        pieces.push(detail);
     else if (typeof meter.remainingPercent === 'number')
         pieces.push(`${Math.round(meter.remainingPercent)}% remaining`);
     else if (typeof meter.usedPercent === 'number')
@@ -626,9 +644,11 @@ export function providerStatusText(provider) {
     if (!provider)
         return 'No provider selected';
 
-    return safeDisplay(provider.status?.description
-        || provider.diagnosticsSummary
-        || stateMeta(provider.state).description);
+    const meta = stateMeta(provider.state);
+    if (provider.state === 'ok')
+        return '';
+
+    return meta.description;
 }
 
 export function providerIdentityText(provider) {
@@ -674,8 +694,36 @@ export function diagnosticsDisplayLines(payload) {
     return lines.map(redactText);
 }
 
+export function diagnosticsSummaryLine(payload) {
+    const diagnostics = typeof payload === 'string' ? parseJsonObject(payload).value : payload;
+    if (!diagnostics || typeof diagnostics !== 'object')
+        return 'Diagnostics unavailable';
+
+    const scope = safeDisplay(diagnostics.provider || diagnostics.scope || 'global') || 'global';
+    const events = Array.isArray(diagnostics.events) ? diagnostics.events : [];
+    if (events.length === 0)
+        return `${scope} · no events`;
+
+    const highlightedEvent = strongestDiagnosticEvent(events);
+    const severity = DIAGNOSTIC_SEVERITY_RANK[highlightedEvent?.severity]
+        ? highlightedEvent.severity
+        : 'info';
+    const firstCode = safeDisplay(highlightedEvent?.code ?? '');
+    const pieces = [
+        scope,
+        `${events.length} ${events.length === 1 ? 'event' : 'events'}`,
+        severity,
+        firstCode,
+    ].filter(Boolean);
+
+    return redactText(pieces.join(' · '));
+}
+
 export function diagnosticsCopyText(payload) {
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    const parsed = typeof payload === 'string' ? parseJsonObject(payload).value : payload;
+    const text = parsed && validateDiagnosticsPayload(parsed).ok
+        ? JSON.stringify(diagnosticsCopyProjection(parsed), null, 2)
+        : (typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2));
     return redactText(text);
 }
 
@@ -686,10 +734,12 @@ export function redactText(value) {
     return text;
 }
 
-export function safeDisplay(value) {
+export function safeDisplay(value, fallback = '') {
     const text = redactText(value);
     if (!text || text === 'null' || text === 'undefined')
         return '';
+    if (looksUnsafePublicString(text))
+        return fallback;
     return text;
 }
 
@@ -699,10 +749,12 @@ export function safeUrl(value) {
     const text = value.trim();
     if (!/^https?:\/\/[^\s]+$/i.test(text))
         return '';
-    const host = urlHost(text);
-    if (!host || isLocalhostHost(host))
+    if (redactText(text) !== text)
         return '';
-    return redactText(text);
+    const host = urlHost(text);
+    if (!host || isUnsafeDashboardHost(host))
+        return '';
+    return text;
 }
 
 export function parseJsonObject(jsonText) {
@@ -781,6 +833,34 @@ function validateSnapshot(snapshot) {
     return {ok: true};
 }
 
+function validateDiagnosticsPayload(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== 'object' || Array.isArray(diagnostics))
+        return {ok: false};
+    if (hasForbiddenPublicData(diagnostics))
+        return {ok: false};
+    if (diagnostics.schemaVersion !== 1 || !Array.isArray(diagnostics.events))
+        return {ok: false};
+    if (!diagnostics.redaction || diagnostics.redaction.applied !== true || diagnostics.redaction.policyVersion !== 1)
+        return {ok: false};
+
+    for (const event of diagnostics.events) {
+        if (!event || typeof event !== 'object' || Array.isArray(event))
+            return {ok: false};
+        for (const key of ['code', 'severity', 'safeMessage', 'timestamp']) {
+            if (typeof event[key] !== 'string' || event[key].length === 0)
+                return {ok: false};
+        }
+        if (!Object.prototype.hasOwnProperty.call(DIAGNOSTIC_SEVERITY_RANK, event.severity))
+            return {ok: false};
+        if (!event.redacted || event.redacted.applied !== true)
+            return {ok: false};
+        if (event.details && (typeof event.details !== 'object' || Array.isArray(event.details)))
+            return {ok: false};
+    }
+
+    return {ok: true};
+}
+
 function hasForbiddenPublicData(value) {
     const queue = [value];
     while (queue.length > 0) {
@@ -792,7 +872,7 @@ function hasForbiddenPublicData(value) {
             continue;
         }
         for (const [key, child] of Object.entries(current)) {
-            if (FORBIDDEN_PUBLIC_KEYS.has(key) || /(?:^|_)(?:api|access|refresh|session)?token$/i.test(key))
+            if (isForbiddenPublicKey(key))
                 return true;
             if (typeof child === 'string' && looksUnsafePublicString(child))
                 return true;
@@ -803,7 +883,14 @@ function hasForbiddenPublicData(value) {
     return false;
 }
 
+function isForbiddenPublicKey(key) {
+    const fingerprint = String(key ?? '').replace(/[-_\s]/g, '').toLowerCase();
+    return FORBIDDEN_PUBLIC_KEYS.has(fingerprint)
+        || /^(api|access|refresh|session)?token$/i.test(fingerprint);
+}
+
 function looksUnsafePublicString(value) {
+    const trimmed = String(value ?? '').trim();
     const emailMatches = value.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g) ?? [];
     const hasRawEmail = emailMatches.some(match => !/^[^@\s]*\*{2,}[^@\s]*@/.test(match));
 
@@ -815,7 +902,8 @@ function looksUnsafePublicString(value) {
         || /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key))\b\s*[:=]/i.test(value)
         || hasRawEmail
         || /(^|["'\s])\/(?:home|Users)\//.test(value)
-        || /\b(rawPayload|rawResponse)\b/i.test(value);
+        || /\b(rawPayload|rawResponse|rawOutput|stdout|stderr)\b\s*[:=]/i.test(value)
+        || ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')));
 }
 
 function urlHost(url) {
@@ -834,6 +922,19 @@ function urlHost(url) {
     return authority.split(':', 1)[0].toLowerCase();
 }
 
+function isUnsafeDashboardHost(host) {
+    const canonical = host.toLowerCase().replace(/\.+$/, '');
+    if (!canonical)
+        return true;
+    if (isLocalhostHost(canonical))
+        return true;
+    if (canonical.includes(':'))
+        return true;
+
+    const ipv4 = parseIpv4Literal(canonical);
+    return ipv4 ? isUnsafeIpv4Address(ipv4) : false;
+}
+
 function isLocalhostHost(host) {
     return host === 'localhost'
         || host.endsWith('.localhost')
@@ -841,6 +942,95 @@ function isLocalhostHost(host) {
         || host === '::1'
         || host === '0:0:0:0:0:0:0:1'
         || /^127(?:\.\d{1,3}){0,3}$/.test(host);
+}
+
+function parseIpv4Literal(host) {
+    const parts = host.split('.');
+    if (parts.some(part => part.length === 0))
+        return null;
+
+    if (parts.length === 1) {
+        const value = parseNumericHostPart(parts[0]);
+        if (value === null || value > 0xffffffff)
+            return null;
+        return [
+            (value >>> 24) & 0xff,
+            (value >>> 16) & 0xff,
+            (value >>> 8) & 0xff,
+            value & 0xff,
+        ];
+    }
+
+    if (parts.length !== 4)
+        return null;
+
+    const octets = parts.map(parseNumericHostPart);
+    if (octets.some(value => value === null || value > 255))
+        return null;
+    return octets;
+}
+
+function parseNumericHostPart(value) {
+    if (/^0x[0-9a-f]+$/i.test(value))
+        return Number.parseInt(value.slice(2), 16);
+    if (/^0[0-7]+$/.test(value))
+        return Number.parseInt(value.slice(1), 8);
+    if (/^[0-9]+$/.test(value))
+        return Number.parseInt(value, 10);
+    return null;
+}
+
+function isUnsafeIpv4Address(octets) {
+    const [a, b, c] = octets;
+    return a === 0
+        || a === 10
+        || a === 127
+        || (a === 169 && b === 254)
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 192 && b === 0 && c === 0)
+        || (a === 100 && b >= 64 && b <= 127)
+        || (a === 198 && (b === 18 || b === 19))
+        || a >= 224;
+}
+
+function diagnosticsCopyProjection(diagnostics) {
+    return {
+        schemaVersion: 1,
+        generatedAt: diagnostics.generatedAt,
+        scope: diagnostics.scope,
+        provider: diagnostics.provider ?? null,
+        events: diagnostics.events.map(event => ({
+            code: safeDisplay(event.code, 'diagnostic_event'),
+            severity: Object.prototype.hasOwnProperty.call(DIAGNOSTIC_SEVERITY_RANK, event.severity)
+                ? event.severity
+                : 'info',
+            safeMessage: safeDisplay(event.safeMessage, 'Details unavailable'),
+            timestamp: event.timestamp,
+            provider: event.provider ?? null,
+            sourceAdapter: event.sourceAdapter ?? null,
+            recoverable: typeof event.recoverable === 'boolean' ? event.recoverable : null,
+            details: sanitizeDiagnosticsDetails(event.details),
+            redacted: {applied: true, classes: event.redacted?.classes ?? []},
+        })),
+        redaction: {applied: true, policyVersion: 1},
+    };
+}
+
+function sanitizeDiagnosticsDetails(details) {
+    if (!details || typeof details !== 'object' || Array.isArray(details))
+        return {};
+
+    const safe = {};
+    for (const [key, value] of Object.entries(details)) {
+        if (isForbiddenPublicKey(key))
+            continue;
+        if (typeof value === 'string')
+            safe[key] = safeDisplay(value, '[redacted]');
+        else if (['number', 'boolean'].includes(typeof value) || value === null)
+            safe[key] = value;
+    }
+    return safe;
 }
 
 function mostConstrainedUsableProvider(providers) {
@@ -864,6 +1054,20 @@ function mostConstrainedUsableProvider(providers) {
     }
 
     return selected ?? providers.find(provider => provider.state === 'ok') ?? null;
+}
+
+function strongestDiagnosticEvent(events) {
+    let selected = null;
+    let selectedRank = DIAGNOSTIC_SEVERITY_RANK.info;
+    for (const event of events) {
+        const severity = event?.severity;
+        const rank = DIAGNOSTIC_SEVERITY_RANK[severity] ?? 0;
+        if (!selected || rank > selectedRank) {
+            selected = event;
+            selectedRank = rank;
+        }
+    }
+    return selected;
 }
 
 function shortProviderLabel(displayName, providerId) {

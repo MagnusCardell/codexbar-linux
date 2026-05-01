@@ -116,6 +116,31 @@ activation yet; restart the full user session and rerun the discovery checks.
     `gnome-extensions enable codexbar-linux@codexbar.dev`.
     Confirm only one panel item remains and refresh/diagnostics still work.
 
+## Visual Polish Checklist
+
+Use this checklist for Task 03.4 and later visual QA passes. Capture screenshots
+only after masking account identity, diagnostics, and provider-specific secrets.
+
+- Merged mode top-bar item is compact and does not crowd adjacent Shell items.
+- Provider mode shows at most a bounded compact group, with a `+N` cue when
+  there are more providers than can fit comfortably.
+- Minimal mode shows a single low-noise icon and still opens the full popover.
+- Popover width is stable between loading, refreshed, stale, error, and
+  daemon-unavailable states.
+- Provider cards are scannable at a glance: provider label/name, state chip,
+  updated age, identity/source metadata, two usage bars, reset text, and actions
+  are visually distinct.
+- Refresh remains visible unless a refresh is already in progress.
+- Diagnostics are collapsed by default, one click away from provider cards, and
+  copied text remains redacted.
+- Stale, auth, timeout, parse-error, and daemon-unavailable wording is concise
+  and does not repeat the same state twice.
+- `Open` is hidden when no safe dashboard URL is available.
+- Footer is compact and communicates daemon, upstream CLI, cost, and browser
+  import capability without showing raw paths or debug payloads.
+- Disable/re-enable does not leave duplicate top-bar items, timers, signals, or
+  stale popover actors behind.
+
 ## Recorded Live Result
 
 Example result from the Task 03.3 live smoke on 2026-05-01:

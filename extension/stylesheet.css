@@ -1,11 +1,15 @@
 .codexbar-panel {
-  spacing: 6px;
-  padding: 0 3px;
+  spacing: 4px;
+  padding: 0 2px;
+}
+
+.codexbar-panel-content {
+  spacing: 4px;
 }
 
 .codexbar-panel-label {
   font-weight: 700;
-  max-width: 94px;
+  max-width: 54px;
 }
 
 .codexbar-panel-detail {
@@ -14,67 +18,75 @@
   max-width: 128px;
 }
 
-.codexbar-panel-state-ok .codexbar-panel-icon {
+.codexbar-state-ok .codexbar-panel-icon {
   color: #57c785;
 }
 
-.codexbar-panel-state-stale .codexbar-panel-icon,
-.codexbar-panel-state-unauthenticated .codexbar-panel-icon,
-.codexbar-panel-state-cookie_rejected .codexbar-panel-icon,
-.codexbar-panel-state-missing_dependency .codexbar-panel-icon,
-.codexbar-panel-state-provider_unavailable .codexbar-panel-icon,
-.codexbar-panel-state-timeout .codexbar-panel-icon {
+.codexbar-state-stale .codexbar-panel-icon,
+.codexbar-state-unauthenticated .codexbar-panel-icon,
+.codexbar-state-cookie_rejected .codexbar-panel-icon,
+.codexbar-state-missing_dependency .codexbar-panel-icon,
+.codexbar-state-provider_unavailable .codexbar-panel-icon,
+.codexbar-state-timeout .codexbar-panel-icon {
   color: #e5b84a;
 }
 
-.codexbar-panel-state-error .codexbar-panel-icon,
-.codexbar-panel-state-parse_error .codexbar-panel-icon,
-.codexbar-panel-state-daemon_unavailable .codexbar-panel-icon {
+.codexbar-state-error .codexbar-panel-icon,
+.codexbar-state-parse_error .codexbar-panel-icon,
+.codexbar-state-daemon_unavailable .codexbar-panel-icon {
   color: #ef6f6c;
 }
 
 .codexbar-popover {
-  min-width: 380px;
-  max-width: 460px;
-  spacing: 10px;
-  padding: 12px;
+  min-width: 360px;
+  max-width: 440px;
+  spacing: 8px;
+  padding: 10px;
 }
 
-.codexbar-popover-header,
-.codexbar-provider-card-header,
-.codexbar-diagnostics-header,
-.codexbar-provider-actions,
+.codexbar-header {
+  spacing: 4px;
+}
+
+.codexbar-header-top,
+.codexbar-provider-header,
+.codexbar-section-header,
+.codexbar-card-actions,
 .codexbar-meter-header {
   spacing: 8px;
 }
 
-.codexbar-popover-title,
+.codexbar-title,
 .codexbar-provider-title,
-.codexbar-diagnostics-title {
+.codexbar-section-title {
   font-weight: 700;
 }
 
-.codexbar-popover-subtitle,
+.codexbar-muted,
 .codexbar-provider-subtitle,
 .codexbar-provider-meta,
 .codexbar-meter-detail,
-.codexbar-diagnostics-line,
+.codexbar-diagnostic-line,
 .codexbar-footer {
   color: rgba(255, 255, 255, 0.68);
   font-size: 0.86em;
 }
 
+.codexbar-small {
+  font-size: 0.82em;
+}
+
 .codexbar-provider-list {
-  spacing: 8px;
+  spacing: 7px;
 }
 
 .codexbar-provider-card,
 .codexbar-diagnostics {
   border-radius: 8px;
-  padding: 10px;
-  spacing: 9px;
-  background-color: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 9px;
+  spacing: 7px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .codexbar-state-ok {
@@ -95,9 +107,52 @@
   border-color: rgba(239, 111, 108, 0.48);
 }
 
+.codexbar-provider-header {
+  spacing: 8px;
+}
+
+.codexbar-provider-glyph,
+.codexbar-provider-dot-label {
+  font-weight: 700;
+}
+
+.codexbar-provider-glyph {
+  min-width: 30px;
+}
+
+.codexbar-provider-title-box {
+  spacing: 1px;
+}
+
+.codexbar-provider-status-box {
+  spacing: 3px;
+}
+
+.codexbar-provider-message {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9em;
+}
+
+.codexbar-card-actions {
+  spacing: 6px;
+}
+
+.codexbar-panel-provider-item {
+  spacing: 1px;
+  max-width: 34px;
+}
+
+.codexbar-provider-dot {
+  padding: 0 1px;
+}
+
+.codexbar-panel-meter-stack {
+  spacing: 1px;
+}
+
 .codexbar-state-pill {
   border-radius: 7px;
-  padding: 3px 7px;
+  padding: 2px 7px;
   font-size: 0.78em;
   font-weight: 700;
 }
@@ -127,7 +182,7 @@
 }
 
 .codexbar-meter-row {
-  spacing: 4px;
+  spacing: 3px;
 }
 
 .codexbar-meter-row-compact {
@@ -138,14 +193,23 @@
   font-weight: 600;
 }
 
+.codexbar-meter-header {
+  spacing: 8px;
+}
+
+.codexbar-meter-detail {
+  max-width: 190px;
+}
+
 .codexbar-segment-bar {
   spacing: 2px;
 }
 
 .codexbar-meter-segment {
-  width: 8px;
-  height: 5px;
+  width: 7px;
+  height: 3px;
   border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.16);
 }
 
 .codexbar-meter-list-compact .codexbar-meter-segment {
@@ -203,11 +267,17 @@
 }
 
 .codexbar-diagnostics {
-  background-color: rgba(31, 41, 55, 0.44);
+  background-color: rgba(31, 41, 55, 0.36);
+}
+
+.codexbar-diagnostics-collapsed {
+  padding: 7px 8px;
+  spacing: 4px;
 }
 
 .codexbar-footer {
-  padding: 2px 1px 0;
+  padding: 0 1px;
+  spacing: 2px;
 }
 
 .codexbar-theme-compact .codexbar-popover {
@@ -237,31 +307,31 @@
 }
 
 .codexbar-panel-content {
-  spacing: 6px;
+  spacing: 4px;
 }
 
 .codexbar-panel-meter-stack {
-  spacing: 2px;
-  width: 42px;
+  spacing: 1px;
+  width: 32px;
 }
 
-.codexbar-panel-label-minimal {
-  font-size: 0.82em;
+.codexbar-panel-icon-small {
+  icon-size: 12px;
 }
 
 .codexbar-meter {
-  spacing: 2px;
-  min-height: 7px;
+  spacing: 1px;
+  min-height: 5px;
 }
 
 .codexbar-meter-compact {
-  min-height: 3px;
-  width: 42px;
+  min-height: 2px;
+  width: 32px;
 }
 
 .codexbar-meter-compact .codexbar-meter-segment {
-  width: 3px;
-  height: 3px;
+  width: 2px;
+  height: 2px;
 }
 
 .codexbar-meter-segment-active {
@@ -284,7 +354,7 @@
 .codexbar-header,
 .codexbar-footer,
 .codexbar-diagnostics {
-  spacing: 6px;
+  spacing: 5px;
 }
 
 .codexbar-header-top,
@@ -300,12 +370,20 @@
 }
 
 .codexbar-provider-glyph {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: 30px;
+  min-height: 30px;
   border-radius: 6px;
   text-align: center;
   font-weight: 700;
   background-color: rgba(98, 160, 234, 0.18);
+}
+
+.codexbar-provider-status-box {
+  spacing: 3px;
+}
+
+.codexbar-provider-updated {
+  max-width: 96px;
 }
 
 .codexbar-provider-title-box,
@@ -341,15 +419,23 @@
 
 .codexbar-provider-dot {
   spacing: 1px;
-  min-width: 30px;
+  min-width: 24px;
 }
 
 .codexbar-provider-dot-label {
-  font-size: 0.76em;
+  font-size: 0.72em;
   font-weight: 700;
   text-align: center;
 }
 
 .codexbar-state-daemon_unavailable {
   border-color: rgba(239, 111, 108, 0.48);
+}
+
+.codexbar-footer {
+  spacing: 2px;
+}
+
+.codexbar-diagnostics.codexbar-diagnostics-collapsed {
+  spacing: 4px;
 }

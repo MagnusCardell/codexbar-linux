@@ -34,15 +34,15 @@ export const UI_STATES = [
 ];
 
 export const STATE_LABELS = {
-    loading: 'Loading',
-    ok: 'OK',
-    stale: 'Stale',
-    unauthenticated: 'Sign in needed',
-    cookie_rejected: 'Session rejected',
-    missing_dependency: 'Missing dependency',
+    loading: 'Loading usage…',
+    ok: 'Up to date',
+    stale: 'Stale data',
+    unauthenticated: 'Sign-in required',
+    cookie_rejected: 'Browser session rejected',
+    missing_dependency: 'Dependency missing',
     provider_unavailable: 'Provider unavailable',
-    parse_error: 'Parse error',
-    timeout: 'Timed out',
+    parse_error: 'Could not read provider data',
+    timeout: 'Provider timed out',
     error: 'Error',
     daemon_unavailable: 'Daemon unavailable',
 };

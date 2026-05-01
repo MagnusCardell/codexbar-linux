@@ -32,7 +32,7 @@ export function createProviderMeters(meters, resetTimeFormat) {
 
     if (meters.length === 0) {
         box.add_child(new St.Label({
-            text: 'No usage data',
+            text: 'Usage unavailable',
             style_class: 'codexbar-muted codexbar-small',
         }));
         return box;
@@ -43,17 +43,22 @@ export function createProviderMeters(meters, resetTimeFormat) {
             vertical: true,
             style_class: 'codexbar-meter-row',
         });
-        row.add_child(new St.Label({
+
+        const header = new St.BoxLayout({
+            style_class: 'codexbar-meter-header',
+            x_expand: true,
+        });
+        header.add_child(new St.Label({
             text: safeDisplay(meter.label || meter.meterKey || 'Usage'),
             style_class: 'codexbar-meter-label',
             x_expand: true,
         }));
-        row.add_child(createSegmentMeter(meter));
-        row.add_child(new St.Label({
+        header.add_child(new St.Label({
             text: formatMeterDetail(meter, resetTimeFormat),
-            style_class: 'codexbar-muted codexbar-small',
-            x_expand: true,
+            style_class: 'codexbar-muted codexbar-small codexbar-meter-detail',
         }));
+        row.add_child(header);
+        row.add_child(createSegmentMeter(meter));
         box.add_child(row);
     }
 

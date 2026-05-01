@@ -30,9 +30,8 @@ export function createProviderCard(row, options, actions) {
         x_expand: true,
     }));
     const subtitlePieces = [
-        row.statusLabel,
         row.identity,
-        row.sourceLabel,
+        row.sourceLabel ? `${row.sourceLabel} source` : '',
     ].filter(Boolean);
     titleBox.add_child(new St.Label({
         text: subtitlePieces.join(' · '),
@@ -40,32 +39,42 @@ export function createProviderCard(row, options, actions) {
         x_expand: true,
     }));
     header.add_child(titleBox);
-    header.add_child(new St.Label({
-        text: row.updatedText,
-        style_class: 'codexbar-muted codexbar-small',
+
+    const statusBox = new St.BoxLayout({
+        vertical: true,
+        style_class: 'codexbar-provider-status-box',
+    });
+    statusBox.add_child(new St.Label({
+        text: row.statusLabel,
+        style_class: `codexbar-state-pill codexbar-state-pill-${row.severity}`,
     }));
+    statusBox.add_child(new St.Label({
+        text: row.updatedText,
+        style_class: 'codexbar-muted codexbar-small codexbar-provider-updated',
+    }));
+    header.add_child(statusBox);
     card.add_child(header);
 
-    card.add_child(new St.Label({
-        text: row.statusDescription || 'Status unavailable',
-        style_class: 'codexbar-provider-message',
-        x_expand: true,
-    }));
+    if (row.statusDescription) {
+        card.add_child(new St.Label({
+            text: row.statusDescription,
+            style_class: 'codexbar-provider-message',
+            x_expand: true,
+        }));
+    }
 
     card.add_child(createProviderMeters(row.meters, options.resetTimeFormat));
 
     const detailPieces = [];
-    if (row.resetText && row.resetText !== 'No usage data')
-        detailPieces.push(row.resetText);
-    if (row.diagnosticsSummary)
-        detailPieces.push(row.diagnosticsSummary);
-    if (row.adapterLabel)
-        detailPieces.push(`Adapter: ${row.adapterLabel}`);
-    card.add_child(new St.Label({
-        text: detailPieces.map(safeDisplay).filter(Boolean).join(' · ') || 'Details unavailable',
-        style_class: 'codexbar-muted codexbar-small',
-        x_expand: true,
-    }));
+    if (row.adapterLabel && row.adapterLabel !== 'None')
+        detailPieces.push(`Via ${row.adapterLabel}`);
+    if (detailPieces.length > 0) {
+        card.add_child(new St.Label({
+            text: detailPieces.map(safeDisplay).filter(Boolean).join(' · '),
+            style_class: 'codexbar-muted codexbar-small',
+            x_expand: true,
+        }));
+    }
 
     const buttons = new St.BoxLayout({
         style_class: 'codexbar-card-actions',

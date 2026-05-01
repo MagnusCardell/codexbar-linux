@@ -146,6 +146,31 @@ for needle, reason in {
     if needle not in state_js:
         violations.append(f"src/state.js: missing validation for {reason}")
 
+stylesheet = (root / "stylesheet.css").read_text(encoding="utf-8")
+for forbidden in ("codexbar-panel-state-", "codexbar-diagnostics-line"):
+    if forbidden in stylesheet:
+        violations.append(f"stylesheet.css: stale selector family remains: {forbidden}")
+for selector in (
+    ".codexbar-panel-content",
+    ".codexbar-state-ok .codexbar-panel-icon",
+    ".codexbar-diagnostic-line",
+    ".codexbar-section-header",
+    ".codexbar-card-actions",
+):
+    if selector not in stylesheet:
+        violations.append(f"stylesheet.css: missing selector for emitted class {selector}")
+
+launch_users = []
+for path in sorted(root.rglob("*.js")):
+    rel = path.relative_to(root)
+    if "launch_default_for_uri" in path.read_text(encoding="utf-8"):
+        launch_users.append(str(rel))
+if launch_users != ["src/actions.js"]:
+    violations.append(f"Gio.AppInfo.launch_default_for_uri must only be used in src/actions.js, got {launch_users}")
+actions_js = (root / "src/actions.js").read_text(encoding="utf-8")
+if "const safe = safeUrl(url);" not in actions_js or "launch_default_for_uri(safe" not in actions_js:
+    violations.append("src/actions.js: dashboard launches must pass through safeUrl()")
+
 if violations:
     raise SystemExit("\n".join(violations))
 print("GJS Shell-process boundary smoke check passed")
