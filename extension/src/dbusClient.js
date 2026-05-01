@@ -19,6 +19,8 @@ export class CodexbarDbusClient {
         this._subscriptions = [];
         this._callbacks = new Map();
         this._retrySources = [];
+        this._nameWatchId = 0;
+        this._destroyed = false;
         this.available = false;
     }
 
@@ -35,15 +37,28 @@ export class CodexbarDbusClient {
     }
 
     start() {
+        if (this._destroyed)
+            return Promise.resolve();
+
+        this._watchName();
         this._subscribeSignals();
         return this.refreshSnapshot({allowRetry: true});
     }
 
     destroy() {
+        if (this._destroyed)
+            return;
+
+        this._destroyed = true;
         this._cancellable.cancel();
         for (const sourceId of this._retrySources)
             GLib.Source.remove(sourceId);
         this._retrySources = [];
+
+        if (this._nameWatchId !== 0) {
+            Gio.bus_unwatch_name(this._nameWatchId);
+            this._nameWatchId = 0;
+        }
 
         for (const id of this._subscriptions)
             this._connection.signal_unsubscribe(id);
@@ -53,15 +68,22 @@ export class CodexbarDbusClient {
     }
 
     async refreshSnapshot({allowRetry = false} = {}) {
+        if (this._destroyed)
+            return;
+
         try {
             const [snapshotJson, daemonInfoJson] = await Promise.all([
                 this.getSnapshot(),
                 this.getDaemonInfo(),
             ]);
+            if (this._destroyed)
+                return;
             this.available = true;
             this._emit('snapshot', snapshotJson);
             this._emit('daemon-info', daemonInfoJson);
         } catch (error) {
+            if (this._destroyed)
+                return;
             this.available = false;
             this._emit('unavailable', error);
             if (allowRetry)
@@ -86,6 +108,9 @@ export class CodexbarDbusClient {
     }
 
     _subscribeSignals() {
+        if (this._subscriptions.length > 0)
+            return;
+
         this._signal('SnapshotChanged', params => {
             const [snapshotJson] = params.deep_unpack();
             this.available = true;
@@ -118,6 +143,8 @@ export class CodexbarDbusClient {
             null,
             Gio.DBusSignalFlags.NONE,
             (_connection, _sender, _path, _iface, _signal, params) => {
+                if (this._destroyed)
+                    return;
                 try {
                     callback(params);
                 } catch (error) {
@@ -129,6 +156,9 @@ export class CodexbarDbusClient {
     }
 
     _callString(method, parameters = null) {
+        if (this._destroyed)
+            return Promise.reject(new Error('CodexBar D-Bus client was destroyed'));
+
         return new Promise((resolve, reject) => {
             this._connection.call(
                 BUS_NAME,
@@ -141,6 +171,11 @@ export class CodexbarDbusClient {
                 DBUS_TIMEOUT_MS,
                 this._cancellable,
                 (_connection, result) => {
+                    if (this._destroyed) {
+                        reject(new Error('CodexBar D-Bus client was destroyed'));
+                        return;
+                    }
+
                     try {
                         const variant = this._connection.call_finish(result);
                         const [value] = variant.deep_unpack();
@@ -153,12 +188,36 @@ export class CodexbarDbusClient {
         });
     }
 
+    _watchName() {
+        if (this._nameWatchId !== 0)
+            return;
+
+        this._nameWatchId = Gio.bus_watch_name(
+            Gio.BusType.SESSION,
+            BUS_NAME,
+            Gio.BusNameWatcherFlags.NONE,
+            () => {
+                if (this._destroyed)
+                    return;
+                this.available = true;
+            },
+            () => {
+                if (this._destroyed)
+                    return;
+                this.available = false;
+                this._emit('unavailable', 'Daemon D-Bus service is unavailable');
+            }
+        );
+    }
+
     _scheduleStartupRetries() {
-        if (this._retrySources.length > 0)
+        if (this._destroyed || this._retrySources.length > 0)
             return;
 
         for (const delayMs of [1000, 3000]) {
             const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delayMs, () => {
+                if (this._destroyed)
+                    return GLib.SOURCE_REMOVE;
                 this._retrySources = this._retrySources.filter(sourceId => sourceId !== id);
                 this.refreshSnapshot().catch(error => Log.warn(error.message));
                 return GLib.SOURCE_REMOVE;
@@ -168,6 +227,9 @@ export class CodexbarDbusClient {
     }
 
     _emit(name, ...args) {
+        if (this._destroyed)
+            return;
+
         const callbacks = this._callbacks.get(name) ?? [];
         for (const callback of callbacks) {
             try {

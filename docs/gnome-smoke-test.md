@@ -11,6 +11,8 @@ Capture these values in the test notes:
 ```bash
 gnome-shell --version
 echo "$XDG_SESSION_TYPE"
+echo "${XDG_DATA_HOME:-$HOME/.local/share}"
+echo "${XDG_CONFIG_HOME:-$HOME/.config}"
 gsettings get org.gnome.shell enabled-extensions
 ```
 
@@ -25,6 +27,9 @@ If a live upstream CLI smoke is being tested, also record whether
   `codexbar-linuxd`.
 - No raw provider credentials, browser-cookie data, or daemon cache files are
   copied into the extension directory.
+- Local development installs place GNOME extension and D-Bus service files
+  under `${XDG_DATA_HOME:-$HOME/.local/share}`. If `PREFIX` is set, it only
+  changes where the debug daemon binary is installed.
 
 ## Install And Start
 
@@ -33,12 +38,47 @@ If a live upstream CLI smoke is being tested, also record whether
 systemctl --user daemon-reload
 systemctl --user restart codexbar-linuxd.service
 busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 GetDaemonInfo
+gnome-extensions list --user | grep -Fx codexbar-linux@codexbar.dev
 gnome-extensions enable codexbar-linux@codexbar.dev
 gnome-extensions info codexbar-linux@codexbar.dev
 ```
 
-On Wayland, log out and back in after installing extension files if GNOME Shell
-does not discover the extension immediately.
+On Wayland, log out and back in after first installing or replacing extension
+files if GNOME Shell does not discover the extension immediately. A copied
+extension directory can be correct on disk while the running Shell process still
+has not rescanned user extensions.
+
+## Discovery Diagnostics
+
+If `gnome-extensions list --user` does not show
+`codexbar-linux@codexbar.dev`, capture these checks before changing files:
+
+```bash
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+EXT_DIR="$DATA_HOME/gnome-shell/extensions/codexbar-linux@codexbar.dev"
+test -f "$EXT_DIR/metadata.json"
+test -f "$EXT_DIR/extension.js"
+test -f "$EXT_DIR/schemas/gschemas.compiled"
+python3 -m json.tool "$EXT_DIR/metadata.json" >/dev/null
+python3 - "$EXT_DIR/metadata.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+metadata = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert metadata["uuid"] == "codexbar-linux@codexbar.dev"
+assert "46" in metadata["shell-version"]
+assert metadata["settings-schema"] == "org.gnome.shell.extensions.codexbar-linux"
+PY
+stat -c '%A %U:%G %n' "$EXT_DIR" "$EXT_DIR/metadata.json" "$EXT_DIR/extension.js"
+journalctl --user -u codexbar-linuxd.service --no-pager -n 80
+```
+
+Common discovery failures are a nested directory such as
+`.../codexbar-linux@codexbar.dev/extension/metadata.json`, installing under
+`$PREFIX/share` when `XDG_DATA_HOME` points elsewhere, missing
+`schemas/gschemas.compiled`, metadata UUID mismatch, or a running Wayland Shell
+session that has not been restarted since the files were copied.
 
 ## Functional Checks
 

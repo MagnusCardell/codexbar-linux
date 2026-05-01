@@ -123,18 +123,21 @@ const FORBIDDEN_PUBLIC_KEYS = new Set([
     'refresh_token',
     'sessionToken',
     'session_token',
+    'sessionKey',
+    'session_key',
     'token',
 ]);
 
 const SECRET_PATTERNS = [
     [/\bAuthorization\s*:\s*[^\n\r,}]+/gi, 'Authorization: [redacted]'],
+    [/\b(X-API-Key|X-Auth-Token)\s*:\s*[^\n\r,}]+/gi, '$1: [redacted]'],
     [/\bSet-Cookie\s*:\s*[^\n\r,}]+/gi, 'Set-Cookie: [redacted]'],
     [/\bCookie\s*:\s*[^\n\r,}]+/gi, 'Cookie: [redacted]'],
     [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]'],
     [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[redacted-email]'],
     [/(^|["'\s])\/(?:home|Users)\/[^"'\s,}]+/g, '$1[redacted-path]'],
     [/~\/(?:\.config|Library|AppData)\/[^"'\s,}]*/g, '[redacted-path]'],
-    [/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token)\b\s*[:=]\s*[^"'\s,}]+/gi, '[redacted-secret]'],
+    [/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key))\b\s*[:=]\s*[^"'\s,}]+/gi, '[redacted]'],
 ];
 
 export function createInitialState(nowMs = Date.now()) {
@@ -693,9 +696,13 @@ export function safeDisplay(value) {
 export function safeUrl(value) {
     if (!value || typeof value !== 'string')
         return '';
-    if (!/^https?:\/\/[^\s]+$/i.test(value))
+    const text = value.trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(text))
         return '';
-    return redactText(value);
+    const host = urlHost(text);
+    if (!host || isLocalhostHost(host))
+        return '';
+    return redactText(text);
 }
 
 export function parseJsonObject(jsonText) {
@@ -801,12 +808,39 @@ function looksUnsafePublicString(value) {
     const hasRawEmail = emailMatches.some(match => !/^[^@\s]*\*{2,}[^@\s]*@/.test(match));
 
     return /\bAuthorization\s*:/i.test(value)
+        || /\b(?:X-API-Key|X-Auth-Token)\s*:/i.test(value)
         || /\bSet-Cookie\s*:/i.test(value)
         || /\bCookie\s*:/i.test(value)
         || /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(value)
+        || /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key))\b\s*[:=]/i.test(value)
         || hasRawEmail
         || /(^|["'\s])\/(?:home|Users)\//.test(value)
         || /\b(rawPayload|rawResponse)\b/i.test(value);
+}
+
+function urlHost(url) {
+    const match = url.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i);
+    const authority = match?.[1] ?? '';
+    if (!authority || authority.includes('@'))
+        return '';
+
+    if (authority.startsWith('[')) {
+        const end = authority.indexOf(']');
+        if (end < 0)
+            return '';
+        return authority.slice(1, end).toLowerCase();
+    }
+
+    return authority.split(':', 1)[0].toLowerCase();
+}
+
+function isLocalhostHost(host) {
+    return host === 'localhost'
+        || host.endsWith('.localhost')
+        || host === '0.0.0.0'
+        || host === '::1'
+        || host === '0:0:0:0:0:0:0:1'
+        || /^127(?:\.\d{1,3}){0,3}$/.test(host);
 }
 
 function mostConstrainedUsableProvider(providers) {

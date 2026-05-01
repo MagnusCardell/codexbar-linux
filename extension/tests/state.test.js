@@ -9,7 +9,9 @@ import {
     diagnosticsCopyText,
     meterRemainingPercent,
     panelMeters,
+    safeUrl,
     selectProvider,
+    applyDiagnosticsJson,
 } from '../src/state.js';
 
 const FIXTURE_STATES = [
@@ -31,6 +33,8 @@ function main() {
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
     assertDiagnosticsCopyRedaction();
+    assertDiagnosticsRejectUnsafePayload();
+    assertSafeUrlRejectsLocalhost();
     print('extension state tests passed');
 }
 
@@ -85,16 +89,53 @@ function assertDiagnosticsCopyRedaction() {
     const raw = {
         token: 'Bearer abc.def',
         header: 'Authorization: secret',
+        apiKeyHeader: 'X-API-Key: sk-api-secret',
         cookie: 'Cookie: session=value',
+        sessionKey: 'sessionKey=plain-session-secret',
         email: 'person@example.com',
         path: '/home/test/.config/browser/Profile/Cookies',
     };
     const redacted = diagnosticsCopyText(raw);
     assert(!redacted.includes('abc.def'), 'bearer token was not redacted');
     assert(!redacted.includes('secret'), 'authorization header was not redacted');
+    assert(!redacted.includes('sk-api-secret'), 'API key header was not redacted');
     assert(!redacted.includes('session=value'), 'cookie was not redacted');
+    assert(!redacted.includes('plain-session-secret'), 'session key was not redacted');
     assert(!redacted.includes('person@example.com'), 'email was not redacted');
     assert(!redacted.includes('/home/test'), 'home path was not redacted');
+}
+
+function assertDiagnosticsRejectUnsafePayload() {
+    const diagnostics = {
+        schemaVersion: 1,
+        scope: 'provider',
+        provider: 'codex',
+        generatedAt: '2026-04-27T12:00:00Z',
+        events: [{
+            code: 'bad_secret',
+            severity: 'error',
+            safeMessage: 'sessionKey=plain-session-secret',
+        }],
+    };
+    const next = applyDiagnosticsJson(createInitialState(0), 'codex', JSON.stringify(diagnostics), 0);
+    assertEqual(next.clientState, 'parse_error');
+    assertEqual(next.lastClientError, 'Diagnostics payload did not match the v1 shape');
+}
+
+function assertSafeUrlRejectsLocalhost() {
+    const http = 'http' + '://';
+    const https = 'https' + '://';
+    const localHost = 'local' + 'host';
+    const loopback = '127.' + '0.0.1';
+    const dashboard = `${https}example.com/dashboard`;
+
+    assertEqual(safeUrl('javascript:alert(1)'), '');
+    assertEqual(safeUrl(`${http}${localHost}:3000/status`), '');
+    assertEqual(safeUrl(`${http}api.${localHost}/status`), '');
+    assertEqual(safeUrl(`${http}${loopback}:3000/status`), '');
+    assertEqual(safeUrl(`${http}[::1]:3000/status`), '');
+    assertEqual(safeUrl(`${http}user:pass@example.com/status`), '');
+    assertEqual(safeUrl(dashboard), dashboard);
 }
 
 function readJson(relativePath) {

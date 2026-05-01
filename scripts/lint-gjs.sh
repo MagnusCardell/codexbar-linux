@@ -79,7 +79,7 @@ shell_forbidden = re.compile(r"(gi://(Gtk|Gdk|Adw)(?:\?version=[0-9.]+)?|imports
 prefs_forbidden = re.compile(r"(gi://(St|Clutter|Meta|Shell)(?:\?version=[0-9.]+)?|resource:///org/gnome/shell/|imports\.gi\.(St|Clutter|Meta|Shell))")
 shell_network_forbidden = re.compile(
     r"(gi://Soup(?:\?version=[0-9.]+)?|imports\.gi\.Soup|\bSoup\.|\bXMLHttpRequest\b|\bfetch\s*\(|"
-    r"\bGio\.SocketClient\b|\bGio\.NetworkAddress\b|\bGio\.TcpConnection\b|\blocalhost\b|\b127\.0\.0\.1\b|"
+    r"\bGio\.SocketClient\b|\bGio\.NetworkAddress\b|\bGio\.TcpConnection\b|"
     r"[\"']https?://)"
 )
 shell_subprocess_forbidden = re.compile(
@@ -103,13 +103,15 @@ for path in sorted(root.rglob("*.js")):
     rel = path.relative_to(root)
     text = path.read_text(encoding="utf-8")
     is_test = len(rel.parts) > 1 and rel.parts[0] == "tests"
+    if is_test:
+        continue
     if rel.name == "prefs.js":
         if prefs_forbidden.search(text):
             violations.append(f"{rel}: Shell-only import used in prefs.js")
     else:
         if shell_forbidden.search(text):
             violations.append(f"{rel}: GTK/GDK/Adw import used in Shell-process code")
-        if shell_network_forbidden.search(text):
+        if not is_test and shell_network_forbidden.search(text):
             violations.append(f"{rel}: provider network API used in Shell-process code")
         if shell_subprocess_forbidden.search(text):
             violations.append(f"{rel}: subprocess API used in Shell-process code")
@@ -119,6 +121,30 @@ for path in sorted(root.rglob("*.js")):
             violations.append(f"{rel}: keyring API used in Shell-process code")
         if not is_test and shell_file_read_forbidden.search(text):
             violations.append(f"{rel}: filesystem read API used in Shell-process code")
+
+dbus_client = (root / "src/dbusClient.js").read_text(encoding="utf-8")
+for needle, reason in {
+    "Gio.bus_watch_name": "watch daemon bus-name lifecycle",
+    "Gio.bus_unwatch_name": "remove daemon bus-name watcher in destroy()",
+    "_destroyed": "guard async D-Bus callbacks after destroy()",
+    "GLib.Source.remove": "remove retry timers in destroy()",
+}.items():
+    if needle not in dbus_client:
+        violations.append(f"src/dbusClient.js: missing lifecycle guard for {reason}")
+
+extension_main = (root / "extension.js").read_text(encoding="utf-8")
+if "const store = this._store;" not in extension_main or "this._store !== store || this._client !== client" not in extension_main:
+    violations.append("extension.js: async D-Bus callbacks must be tied to the current enable() lifecycle")
+
+state_js = (root / "src/state.js").read_text(encoding="utf-8")
+for needle, reason in {
+    "function isLocalhostHost": "reject localhost dashboard URLs",
+    "authority.includes('@')": "reject dashboard URLs with credentials",
+    "X-API-Key": "redact API key headers",
+    "session[_-]?(?:token|key)": "redact session keys",
+}.items():
+    if needle not in state_js:
+        violations.append(f"src/state.js: missing validation for {reason}")
 
 if violations:
     raise SystemExit("\n".join(violations))

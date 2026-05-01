@@ -16,21 +16,31 @@ export default class CodexBarExtension extends Extension {
         this._indicator = new CodexbarIndicator(this._actions);
         this._indicator.addToPanel();
 
+        const store = this._store;
+        const client = this._client;
+        const current = callback => (...args) => {
+            if (this._store !== store || this._client !== client)
+                return;
+            callback(...args);
+        };
+
         this._storeSubscription = this._store.subscribe(() => this._render());
         for (const key of Object.values(SETTINGS_KEYS))
             this._settingsSignals.push(this._settings.connect(`changed::${key}`, () => this._render()));
 
         this._clientSignals = [
-            this._client.on('snapshot', snapshotJson => this._store.applySnapshotJson(snapshotJson)),
-            this._client.on('daemon-info', infoJson => this._store.applyDaemonInfoJson(infoJson)),
-            this._client.on('provider-changed', (providerId, eventJson) => this._store.applyProviderEventJson(providerId, eventJson)),
-            this._client.on('refresh-started', refreshId => this._store.applyRefreshStarted(refreshId)),
-            this._client.on('refresh-finished', (refreshId, resultJson) => this._store.applyRefreshFinishedJson(refreshId, resultJson)),
-            this._client.on('parse-error', error => this._store.applyClientError(error, 'parse_error', 'dbus_signal_parse_error')),
-            this._client.on('unavailable', error => this._store.applyClientError(error, 'daemon_unavailable', 'daemon_unavailable')),
+            client.on('snapshot', current(snapshotJson => store.applySnapshotJson(snapshotJson))),
+            client.on('daemon-info', current(infoJson => store.applyDaemonInfoJson(infoJson))),
+            client.on('provider-changed', current((providerId, eventJson) => store.applyProviderEventJson(providerId, eventJson))),
+            client.on('refresh-started', current(refreshId => store.applyRefreshStarted(refreshId))),
+            client.on('refresh-finished', current((refreshId, resultJson) => store.applyRefreshFinishedJson(refreshId, resultJson))),
+            client.on('parse-error', current(error => store.applyClientError(error, 'parse_error', 'dbus_signal_parse_error'))),
+            client.on('unavailable', current(error => store.applyClientError(error, 'daemon_unavailable', 'daemon_unavailable'))),
         ];
-        this._client.start().catch(error => {
-            this._store.applyClientError(error, 'daemon_unavailable', 'daemon_unavailable');
+        client.start().catch(error => {
+            if (this._store !== store || this._client !== client)
+                return;
+            store.applyClientError(error, 'daemon_unavailable', 'daemon_unavailable');
         });
     }
 
