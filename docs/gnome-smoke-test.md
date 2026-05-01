@@ -13,6 +13,8 @@ gnome-shell --version
 echo "$XDG_SESSION_TYPE"
 echo "${XDG_DATA_HOME:-$HOME/.local/share}"
 echo "${XDG_CONFIG_HOME:-$HOME/.config}"
+pgrep -af gnome-shell
+ps -o pid,lstart,cmd -p "$(pgrep -n gnome-shell)"
 gsettings get org.gnome.shell enabled-extensions
 ```
 
@@ -46,7 +48,9 @@ gnome-extensions info codexbar-linux@codexbar.dev
 On Wayland, log out and back in after first installing or replacing extension
 files if GNOME Shell does not discover the extension immediately. A copied
 extension directory can be correct on disk while the running Shell process still
-has not rescanned user extensions.
+has not rescanned user extensions. After logging back in, confirm the
+`gnome-shell` PID or start time changed before treating discovery as a live
+post-restart result.
 
 ## Discovery Diagnostics
 
@@ -72,13 +76,17 @@ assert metadata["settings-schema"] == "org.gnome.shell.extensions.codexbar-linux
 PY
 stat -c '%A %U:%G %n' "$EXT_DIR" "$EXT_DIR/metadata.json" "$EXT_DIR/extension.js"
 journalctl --user -u codexbar-linuxd.service --no-pager -n 80
+pgrep -af gnome-shell
+ps -o pid,lstart,cmd -p "$(pgrep -n gnome-shell)"
 ```
 
 Common discovery failures are a nested directory such as
 `.../codexbar-linux@codexbar.dev/extension/metadata.json`, installing under
 `$PREFIX/share` when `XDG_DATA_HOME` points elsewhere, missing
 `schemas/gschemas.compiled`, metadata UUID mismatch, or a running Wayland Shell
-session that has not been restarted since the files were copied.
+session that has not been restarted since the files were copied. If the Shell
+PID/start time predates the install, discovery cannot prove Task 03.2 runtime
+activation yet; restart the full user session and rerun the discovery checks.
 
 ## Functional Checks
 
