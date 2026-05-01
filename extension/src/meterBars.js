@@ -1,13 +1,13 @@
 import St from 'gi://St';
 
 import {
-    formatMeterDetail,
     meterTone,
-    meterUsedPercent,
+    meterRemainingPercent,
     safeDisplay,
 } from './state.js';
 
-const SEGMENTS = 10;
+const PANEL_METER_WIDTH = 30;
+const PROVIDER_METER_WIDTH = 330;
 
 export function createMicroMeterStack(meters) {
     const box = new St.BoxLayout({
@@ -16,74 +16,107 @@ export function createMicroMeterStack(meters) {
     });
 
     for (const meter of meters.slice(0, 2))
-        box.add_child(createSegmentMeter(meter, {compact: true}));
+        box.add_child(createContinuousMeter(meterRemainingPercent(meter), meterTone(meter), {compact: true}));
 
     while (box.get_n_children() < 2)
-        box.add_child(createSegmentMeter(null, {compact: true}));
+        box.add_child(createContinuousMeter(null, 'unknown', {compact: true}));
 
     return box;
 }
 
-export function createProviderMeters(meters, resetTimeFormat) {
+export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable', limit = 4} = {}) {
+    const rows = Array.isArray(meterRows) ? meterRows : [];
     const box = new St.BoxLayout({
         vertical: true,
         style_class: 'codexbar-provider-meters',
     });
 
-    if (meters.length === 0) {
+    if (rows.length === 0) {
         box.add_child(new St.Label({
-            text: 'Usage unavailable',
+            text: emptyText,
             style_class: 'codexbar-muted codexbar-small',
         }));
         return box;
     }
 
-    for (const meter of meters.slice(0, 4)) {
+    for (const meter of rows.slice(0, limit)) {
         const row = new St.BoxLayout({
             vertical: true,
             style_class: 'codexbar-meter-row',
         });
 
-        const header = new St.BoxLayout({
-            style_class: 'codexbar-meter-header',
-            x_expand: true,
-        });
-        header.add_child(new St.Label({
-            text: safeDisplay(meter.label || meter.meterKey || 'Usage'),
+        row.add_child(new St.Label({
+            text: safeDisplay(meter.label || 'Usage'),
             style_class: 'codexbar-meter-label',
             x_expand: true,
         }));
-        header.add_child(new St.Label({
-            text: formatMeterDetail(meter, resetTimeFormat),
-            style_class: 'codexbar-muted codexbar-small codexbar-meter-detail',
+        row.add_child(createContinuousMeter(remainingVisualPercent(meter), meter.tone));
+
+        const detail = new St.BoxLayout({
+            style_class: 'codexbar-meter-detail-row',
+            x_expand: true,
+        });
+        detail.add_child(new St.Label({
+            text: meter.detail || 'Usage unavailable',
+            style_class: 'codexbar-muted codexbar-small codexbar-meter-detail-left',
+            x_expand: true,
         }));
-        row.add_child(header);
-        row.add_child(createSegmentMeter(meter));
+        if (meter.resetText) {
+            detail.add_child(new St.Label({
+                text: meter.resetText,
+                style_class: 'codexbar-muted codexbar-small codexbar-meter-detail-right',
+            }));
+        }
+        row.add_child(detail);
         box.add_child(row);
     }
 
     return box;
 }
 
-export function createSegmentMeter(meter, {compact = false} = {}) {
-    const used = meterUsedPercent(meter);
-    const activeSegments = used === null ? 0 : Math.round((used / 100) * SEGMENTS);
-    const tone = meterTone(meter);
+export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = false} = {}) {
+    const width = compact ? PANEL_METER_WIDTH : PROVIDER_METER_WIDTH;
+    const normalized = normalizedPercent(fillPercent);
+    const fillWidth = normalized === null ? 0 : Math.round((normalized / 100) * width);
+    const safeTone = ['ok', 'warning', 'danger', 'unknown'].includes(tone) ? tone : 'unknown';
     const box = new St.BoxLayout({
         style_class: compact
-            ? `codexbar-meter codexbar-meter-compact codexbar-meter-${tone}`
-            : `codexbar-meter codexbar-meter-${tone}`,
+            ? `codexbar-meter codexbar-meter-compact codexbar-meter-${safeTone}`
+            : `codexbar-meter codexbar-meter-${safeTone}`,
         x_expand: !compact,
+        style: `width: ${width}px;`,
     });
 
-    for (let index = 0; index < SEGMENTS; index++) {
-        box.add_child(new St.Widget({
-            style_class: index < activeSegments
-                ? 'codexbar-meter-segment codexbar-meter-segment-active'
-                : 'codexbar-meter-segment',
-            x_expand: !compact,
-        }));
-    }
+    box.add_child(new St.Widget({
+        style_class: `codexbar-meter-fill codexbar-meter-fill-${safeTone}`,
+        style: `width: ${fillWidth}px; background-color: ${meterColor(safeTone)};`,
+    }));
 
     return box;
+}
+
+function normalizedPercent(value) {
+    if (!Number.isFinite(value))
+        return null;
+    return Math.max(0, Math.min(100, value));
+}
+
+function remainingVisualPercent(meter) {
+    if (Number.isFinite(meter?.fillPercent))
+        return meter.fillPercent;
+    if (Number.isFinite(meter?.remainingPercent))
+        return meter.remainingPercent;
+    if (Number.isFinite(meter?.usedPercent))
+        return 100 - meter.usedPercent;
+    return null;
+}
+
+function meterColor(tone) {
+    if (tone === 'danger')
+        return '#d75f5f';
+    if (tone === 'warning')
+        return '#c9a227';
+    if (tone === 'ok')
+        return '#57c785';
+    return '#7a8794';
 }

@@ -7,12 +7,10 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {
     EXTENSION_STATUS_AREA_NAME,
-    MAX_PROVIDER_INDICATORS,
     PRODUCT_NAME,
 } from './constants.js';
 import {createMicroMeterStack} from './meterBars.js';
 import {CodexbarPopover} from './popover.js';
-import {panelMeters} from './state.js';
 
 export const CodexbarIndicator = GObject.registerClass(
 class CodexbarIndicator extends PanelMenu.Button {
@@ -41,7 +39,7 @@ class CodexbarIndicator extends PanelMenu.Button {
     update(view, options) {
         this._content.destroy_all_children();
         this.style_class = `panel-button codexbar-panel codexbar-theme-${options.theme} codexbar-state-${view.state}${view.stale ? ' codexbar-stale' : ''}`;
-        this.accessible_name = `${PRODUCT_NAME}: ${view.panelStatus}`;
+        this.accessible_name = `${PRODUCT_NAME}: ${view.panel?.label ?? view.panelLabel} ${view.headerStatus ?? view.panelStatus}`;
 
         if (options.panelMode === 'minimal')
             this._renderMinimal(view);
@@ -60,32 +58,33 @@ class CodexbarIndicator extends PanelMenu.Button {
     }
 
     _renderMerged(view) {
-        this._content.add_child(new St.Icon({
-            icon_name: iconForState(view.state),
-            style_class: 'system-status-icon codexbar-panel-icon codexbar-panel-icon-small',
+        const panel = view.panel ?? {};
+        this._content.add_child(new St.Widget({
+            style_class: 'codexbar-panel-status-dot',
         }));
         this._content.add_child(new St.Label({
-            text: view.panelLabel ?? 'CB',
+            text: panel.label ?? view.panelLabel ?? 'CB',
             style_class: 'codexbar-panel-label',
         }));
-        this._content.add_child(createMicroMeterStack(panelMeters(view.selectedProvider)));
+        this._content.add_child(createMicroMeterStack(panel.meters ?? []));
     }
 
     _renderProviderGroup(view) {
-        const rows = view.providerRows.slice(0, MAX_PROVIDER_INDICATORS);
+        const panel = view.panel ?? {};
+        const rows = panel.visibleProviders ?? [];
         for (const row of rows) {
             const item = new St.BoxLayout({
                 vertical: true,
                 style_class: `codexbar-provider-dot codexbar-panel-provider-item codexbar-state-${row.state}`,
             });
             item.add_child(new St.Label({
-                text: row.shortLabel,
+                text: row.label,
                 style_class: 'codexbar-provider-dot-label',
             }));
-            item.add_child(createMicroMeterStack(panelMeters(row.provider)));
+            item.add_child(createMicroMeterStack(row.meters ?? []));
             this._content.add_child(item);
         }
-        const extra = view.providerRows.length - rows.length;
+        const extra = panel.overflowCount ?? 0;
         if (extra > 0) {
             this._content.add_child(new St.Label({
                 text: `+${extra}`,
@@ -97,21 +96,10 @@ class CodexbarIndicator extends PanelMenu.Button {
     }
 
     _renderMinimal(view) {
+        const panel = view.panel ?? {};
         this._content.add_child(new St.Icon({
-            icon_name: iconForState(view.state),
+            icon_name: panel.iconName ?? 'emblem-ok-symbolic',
             style_class: 'system-status-icon codexbar-panel-icon',
         }));
     }
 });
-
-function iconForState(state) {
-    if (state === 'ok')
-        return 'emblem-ok-symbolic';
-    if (state === 'loading')
-        return 'view-refresh-symbolic';
-    if (state === 'daemon_unavailable' || state === 'provider_unavailable')
-        return 'network-offline-symbolic';
-    if (state === 'parse_error' || state === 'error')
-        return 'dialog-error-symbolic';
-    return 'dialog-warning-symbolic';
-}

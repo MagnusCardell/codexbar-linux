@@ -1,4 +1,5 @@
 import {
+    MAX_PROVIDER_INDICATORS,
     PANEL_MODES,
     PRODUCT_NAME,
     PROVIDER_STATES,
@@ -97,10 +98,82 @@ const ADAPTER_LABELS = {
 };
 
 const SNAPSHOT_REQUIRED_KEYS = ['schemaVersion', 'generatedAt', 'stale', 'daemon', 'providers'];
+const SNAPSHOT_OPTIONAL_KEYS = ['selectedProvider'];
 const PROVIDER_REQUIRED_KEYS = ['provider', 'displayName', 'state', 'source', 'sourceAdapter', 'updatedAt', 'usage'];
+const PROVIDER_OPTIONAL_KEYS = [
+    'version',
+    'staleSince',
+    'credits',
+    'identity',
+    'status',
+    'cost',
+    'dashboardUrl',
+    'diagnosticsSummary',
+    'diagnosticCodes',
+];
+const SNAPSHOT_DAEMON_REQUIRED_KEYS = ['version', 'state'];
+const SNAPSHOT_DAEMON_OPTIONAL_KEYS = ['lastRefreshId', 'lastRefreshStartedAt', 'lastRefreshFinishedAt', 'upstreamCli'];
+const UPSTREAM_CLI_REQUIRED_KEYS = ['available'];
+const UPSTREAM_CLI_OPTIONAL_KEYS = ['path', 'version', 'diagnosticCode'];
+const USAGE_REQUIRED_KEYS = ['primary', 'secondary', 'tertiary'];
+const METER_REQUIRED_KEYS = ['usedPercent', 'remainingPercent', 'windowMinutes', 'resetsAt', 'label'];
+const METER_OPTIONAL_KEYS = ['detail'];
+const IDENTITY_OPTIONAL_KEYS = [
+    'providerAccountIdHash',
+    'accountEmailDisplay',
+    'accountEmailHash',
+    'accountOrganizationDisplay',
+    'accountOrganizationHash',
+    'loginMethod',
+];
+const STATUS_REQUIRED_KEYS = ['indicator', 'description', 'updatedAt'];
+const STATUS_OPTIONAL_KEYS = ['url'];
+const CREDITS_REQUIRED_KEYS = ['remaining', 'remainingPercent', 'updatedAt'];
+const CREDITS_OPTIONAL_KEYS = ['unit'];
+const COST_REQUIRED_KEYS = ['updatedAt', 'currency', 'total', 'items'];
+const COST_OPTIONAL_KEYS = ['periodStartAt', 'periodEndAt', 'diagnosticCodes'];
+const COST_ITEM_REQUIRED_KEYS = ['label', 'amount', 'currency'];
+const COST_ITEM_OPTIONAL_KEYS = ['detail'];
 const DAEMON_STATES = ['starting', 'ok', 'refreshing', 'degraded', 'error'];
 const SEMANTIC_SOURCES = ['api', 'local', 'web', 'unknown'];
 const SOURCE_ADAPTERS = ['upstream_cli', 'linux_web', 'cache', 'fixture', 'synthetic', 'none'];
+const DIAGNOSTIC_SCOPES = ['global', 'provider', 'browser_import', 'upstream_cli', 'settings'];
+const DIAGNOSTICS_REQUIRED_KEYS = ['schemaVersion', 'generatedAt', 'scope', 'events', 'redaction'];
+const DIAGNOSTICS_OPTIONAL_KEYS = ['provider'];
+const DIAGNOSTIC_EVENT_REQUIRED_KEYS = ['code', 'severity', 'safeMessage', 'timestamp', 'redacted'];
+const DIAGNOSTIC_EVENT_OPTIONAL_KEYS = ['provider', 'sourceAdapter', 'recoverable', 'details'];
+const DIAGNOSTIC_REDACTION_REQUIRED_KEYS = ['applied', 'policyVersion'];
+const DIAGNOSTIC_REDACTION_OPTIONAL_KEYS = ['notes'];
+const DIAGNOSTIC_EVENT_REDACTED_REQUIRED_KEYS = ['applied'];
+const DIAGNOSTIC_EVENT_REDACTED_OPTIONAL_KEYS = ['classes'];
+const REFRESH_RESULT_STATUSES = ['ok', 'partial', 'error', 'busy', 'noop'];
+const REFRESH_REASONS = ['manual', 'scheduled', 'startup', 'settings_changed', 'retry', 'test'];
+const REFRESH_PROVIDER_STATUSES = [
+    'ok',
+    'stale',
+    'skipped',
+    'unauthenticated',
+    'cookie_rejected',
+    'missing_dependency',
+    'provider_unavailable',
+    'parse_error',
+    'timeout',
+    'error',
+];
+const REFRESH_RESULT_REQUIRED_KEYS = [
+    'schemaVersion',
+    'refreshId',
+    'status',
+    'startedAt',
+    'finishedAt',
+    'durationMs',
+    'reason',
+    'providers',
+    'cacheWritten',
+];
+const REFRESH_RESULT_OPTIONAL_KEYS = ['snapshotGeneratedAt', 'diagnosticCodes'];
+const REFRESH_PROVIDER_REQUIRED_KEYS = ['provider', 'status'];
+const REFRESH_PROVIDER_OPTIONAL_KEYS = ['sourceAdapter', 'diagnosticCodes'];
 const DIAGNOSTIC_SEVERITY_RANK = {
     info: 1,
     warning: 2,
@@ -147,8 +220,13 @@ const SECRET_PATTERNS = [
     [/\bSet-Cookie\s*:\s*[^\n\r,}]+/gi, 'Set-Cookie: [redacted]'],
     [/\bCookie\s*:\s*[^\n\r,}]+/gi, 'Cookie: [redacted]'],
     [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]'],
+    [/\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/g, '[redacted-token]'],
+    [/\bgh[opsu]_[A-Za-z0-9_]{20,}\b/g, '[redacted-token]'],
+    [/\bxox[baprs]-[A-Za-z0-9-]{16,}\b/g, '[redacted-token]'],
+    [/\bAIza[0-9A-Za-z_-]{20,}\b/g, '[redacted-token]'],
+    [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted-token]'],
     [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[redacted-email]'],
-    [/(^|["'\s])\/(?:home|Users)\/[^"'\s,}]+/g, '$1[redacted-path]'],
+    [/(^|["'\s=:/?&#])\/(?:home|Users)\/[^"'\s,}&#]+/g, '$1[redacted-path]'],
     [/~\/(?:\.config|Library|AppData)\/[^"'\s,}]*/g, '[redacted-path]'],
     [/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key))\b\s*[:=]\s*[^"'\s,}]+/gi, '[redacted]'],
 ];
@@ -352,18 +430,26 @@ export function applyRefreshFinishedJson(state, refreshId, resultJson, nowMs = D
         }, parsed.error, nowMs, 'parse_error', 'refresh_result_parse_error');
 
     const result = parsed.value;
+    const safeResult = refreshResultProjection(result);
+    if (!safeResult)
+        return withClientError({
+            ...state,
+            refreshing: false,
+            activeRefreshId: null,
+        }, 'Refresh result payload did not match the v1 shape', nowMs, 'parse_error', 'refresh_result_invalid');
+
     return {
         ...state,
         clientState: deriveSnapshotState(state.snapshot),
         refreshing: false,
         activeRefreshId: null,
-        lastRefreshResult: result,
+        lastRefreshResult: safeResult,
         snapshot: {
             ...state.snapshot,
             daemon: {
                 ...(state.snapshot?.daemon ?? {}),
-                lastRefreshId: refreshId || result.refreshId || state.snapshot?.daemon?.lastRefreshId || null,
-                lastRefreshFinishedAt: result.finishedAt ?? new Date(nowMs).toISOString(),
+                lastRefreshId: refreshId || safeResult.refreshId || state.snapshot?.daemon?.lastRefreshId || null,
+                lastRefreshFinishedAt: safeResult.finishedAt ?? new Date(nowMs).toISOString(),
             },
         },
         lastClientError: null,
@@ -383,6 +469,7 @@ export function withClientError(state, error, nowMs = Date.now(), clientState = 
         refreshing: false,
         activeRefreshId: null,
         lastClientError: safeMessage,
+        diagnostics: null,
     };
 }
 
@@ -443,9 +530,14 @@ export function normalizeViewState(state, options = {}) {
     const selectedRow = selectedProvider ? providerRow(selectedProvider, uiOptions) : null;
     const viewState = state?.clientState ?? deriveSnapshotState(snapshot);
     const viewMeta = stateMeta(viewState);
+    const providerSelectorRows = providerRows
+        .map(row => providerSelectorRow(row, selectedRow?.providerId ?? ''));
+    const refreshLabel = refreshButtonLabel(viewState, Boolean(state?.refreshing));
 
     return {
         state: viewState,
+        stateLabel: viewMeta.label,
+        stateDescription: viewMeta.description,
         refreshing: Boolean(state?.refreshing),
         activeRefreshId: state?.activeRefreshId ?? null,
         lastClientError: state?.lastClientError ?? null,
@@ -456,8 +548,19 @@ export function normalizeViewState(state, options = {}) {
         selectedProvider,
         selectedRow,
         providerRows,
+        providerSelectorRows,
+        selectedProviderId: selectedRow?.providerId ?? '',
+        panel: panelViewModel(providerRows, selectedRow, viewState, Boolean(snapshot.stale), uiOptions),
         panelLabel: selectedRow?.shortLabel ?? PRODUCT_PANEL_PLACEHOLDER,
         panelStatus: viewState === 'ok' && selectedRow ? selectedRow.statusLabel : viewMeta.label,
+        headerStatus: headerStatusText(viewState, Boolean(snapshot.stale), Boolean(state?.refreshing), snapshot.generatedAt),
+        refreshLabel,
+        titleAction: {
+            label: refreshLabel,
+            action: viewState === 'daemon_unavailable' ? 'retryDaemon' : 'refresh',
+            reactive: !state?.refreshing,
+        },
+        footerStatus: footerStatusText(state?.daemonInfo ?? snapshot.daemon, state?.daemonInfo?.capabilities ?? {}),
         stale: Boolean(snapshot.stale),
         generatedAt: snapshot.generatedAt ?? null,
     };
@@ -472,6 +575,12 @@ export function providerRow(provider, options = {}) {
     const identity = safeDisplay(providerIdentityText(provider));
     const statusText = safeDisplay(providerStatusText(provider), meta.description);
     const meters = providerMeters(provider);
+    const meterRows = meters.map(meter => meterRow(meter, options.resetTimeFormat));
+    const costRows = costSummaryRows(provider?.cost);
+    const source = sourceLabel(provider?.source);
+    const adapter = adapterLabel(provider?.sourceAdapter);
+    const titleStatusText = providerTitleStatusText(provider, options);
+    const planLabel = providerPlanLabel(provider, source, adapter);
 
     return {
         provider,
@@ -483,15 +592,73 @@ export function providerRow(provider, options = {}) {
         statusLabel: meta.label,
         statusDescription: statusText,
         identity,
-        sourceLabel: sourceLabel(provider?.source),
-        adapterLabel: adapterLabel(provider?.sourceAdapter),
+        sourceLabel: source,
+        adapterLabel: adapter,
+        planLabel,
+        metadataText: [identity, planLabel].filter(Boolean).join(' · '),
+        adapterText: '',
+        titleStatusText,
         updatedText: formatUpdatedAt(provider?.updatedAt),
         resetText: meters
             .map(meter => formatMeterDetail(meter, options.resetTimeFormat))
             .join(' / ') || 'No usage data',
         meters,
+        meterRows,
+        usageSections: usageSectionRows(meterRows),
+        costRows,
         diagnosticsSummary: safeDisplay(provider?.diagnosticsSummary || ''),
-        dashboardUrl: safeUrl(provider?.dashboardUrl || provider?.status?.url || ''),
+        dashboardUrl: safeUrl(provider?.dashboardUrl || ''),
+        statusPageUrl: safeUrl(provider?.status?.url || ''),
+    };
+}
+
+export function providerSelectorRow(row, selectedProviderId = '') {
+    const primaryMeter = row.meterRows[0] ?? null;
+    return {
+        providerId: row.providerId,
+        label: row.displayName,
+        displayName: row.displayName,
+        state: row.state,
+        severity: row.severity,
+        selected: row.providerId === selectedProviderId,
+        dimmed: !['ok', 'stale'].includes(row.state),
+        statusLabel: row.statusLabel,
+        meter: primaryMeter,
+    };
+}
+
+export function usageSectionRows(meterRows) {
+    const rows = Array.isArray(meterRows) ? meterRows : [];
+    return rows
+        .filter(row => ['primary', 'secondary', 'tertiary', 'credits'].includes(row.key))
+        .map(row => ({
+            key: row.key,
+            title: usageSectionTitle(row),
+            meter: row,
+        }));
+}
+
+export function panelViewModel(providerRows, selectedRow, viewState, stale, options = {}) {
+    const mode = PANEL_MODES.includes(options.panelMode) ? options.panelMode : 'merged';
+    const visibleLimit = MAX_PROVIDER_INDICATORS;
+    const visibleProviders = providerRows.slice(0, visibleLimit)
+        .map(row => ({
+            providerId: row.providerId,
+            label: row.shortLabel,
+            state: row.state,
+            severity: row.severity,
+            meters: panelMeters(row.provider),
+        }));
+
+    return {
+        mode,
+        label: selectedRow?.shortLabel ?? PRODUCT_PANEL_PLACEHOLDER,
+        status: stateMeta(viewState).label,
+        iconName: stateMeta(viewState).iconName,
+        stale,
+        meters: panelMeters(selectedRow?.provider),
+        visibleProviders,
+        overflowCount: Math.max(0, providerRows.length - visibleProviders.length),
     };
 }
 
@@ -535,7 +702,7 @@ export function meterFromCredits(credits) {
         remainingPercent: credits.remainingPercent ?? null,
         windowMinutes: null,
         resetsAt: null,
-        label: credits.unit ? `Credits (${credits.unit})` : 'Credits',
+        label: 'Credits',
         detail: formatCreditsDetail(credits),
         meterKey: 'credits',
     };
@@ -572,6 +739,22 @@ export function meterTone(meter) {
     return 'ok';
 }
 
+export function meterRow(meter, resetTimeFormat = 'countdown', nowMs = Date.now()) {
+    const used = meterUsedPercent(meter);
+    const remaining = meterRemainingPercent(meter);
+    const label = safeDisplay(meter?.label || meter?.meterKey || 'Usage');
+    return {
+        key: meter?.meterKey ?? 'usage',
+        label: label || 'Usage',
+        detail: formatMeterDetail(meter, resetTimeFormat, nowMs),
+        usedPercent: used,
+        remainingPercent: remaining,
+        fillPercent: remaining,
+        tone: meterTone(meter),
+        resetText: formatResetTime(meter?.resetsAt, resetTimeFormat, nowMs),
+    };
+}
+
 export function formatMeterDetail(meter, resetTimeFormat = 'countdown', nowMs = Date.now()) {
     if (!meter)
         return 'No usage data';
@@ -580,16 +763,38 @@ export function formatMeterDetail(meter, resetTimeFormat = 'countdown', nowMs = 
     const detail = meter.detail ? safeDisplay(meter.detail) : '';
     if (detail)
         pieces.push(detail);
-    else if (typeof meter.remainingPercent === 'number')
-        pieces.push(`${Math.round(meter.remainingPercent)}% remaining`);
-    else if (typeof meter.usedPercent === 'number')
-        pieces.push(`${Math.round(meter.usedPercent)}% used`);
-
-    const reset = formatResetTime(meter.resetsAt, resetTimeFormat, nowMs);
-    if (reset)
-        pieces.push(`resets ${reset}`);
+    else if (typeof meterRemainingPercent(meter) === 'number')
+        pieces.push(`${Math.round(meterRemainingPercent(meter))}% remaining`);
+    else if (typeof meterUsedPercent(meter) === 'number')
+        pieces.push(`${Math.round(meterUsedPercent(meter))}% used`);
 
     return safeDisplay(pieces.join(' · ') || 'Usage available');
+}
+
+export function costSummaryRows(cost) {
+    if (!cost || typeof cost !== 'object')
+        return [];
+
+    const rows = [];
+    const items = Array.isArray(cost.items) ? cost.items : [];
+    for (const item of items.slice(0, 2)) {
+        const value = [
+            typeof item.amount === 'number' ? formatMoney(item.amount, item.currency ?? cost.currency) : '',
+            safeDisplay(item.detail || ''),
+        ].filter(Boolean).join(' · ');
+        rows.push({
+            label: safeDisplay(item.label || 'Cost'),
+            value: value || 'Cost unavailable',
+        });
+    }
+    if (rows.length === 0 && typeof cost.total === 'number') {
+        rows.push({
+            label: 'Cost',
+            value: formatMoney(cost.total, cost.currency),
+        });
+    }
+
+    return rows;
 }
 
 export function formatResetTime(isoString, format = 'countdown', nowMs = Date.now()) {
@@ -651,6 +856,53 @@ export function providerStatusText(provider) {
     return meta.description;
 }
 
+export function headerStatusText(state, stale, refreshing, generatedAt) {
+    if (refreshing)
+        return 'Refreshing…';
+    if (state === 'daemon_unavailable')
+        return STATE_LABELS.daemon_unavailable;
+
+    const updated = generatedAt ? lowerInitial(formatUpdatedAt(generatedAt)) : '';
+    if (stale)
+        return ['Stale data', updated].filter(Boolean).join(' · ');
+    if (state === 'ok')
+        return updated ? capitalizeInitial(updated) : stateMeta(state).label;
+    return [stateMeta(state).label, updated].filter(Boolean).join(' · ');
+}
+
+export function providerTitleStatusText(provider, options = {}) {
+    const state = provider?.state ?? 'loading';
+    const updated = provider?.updatedAt
+        ? lowerInitial(formatUpdatedAt(provider.updatedAt, options.nowMs ?? Date.now()))
+        : '';
+    if (state === 'ok')
+        return updated ? capitalizeInitial(updated) : 'Updated just now';
+    if (state === 'stale')
+        return ['Stale data', updated].filter(Boolean).join(' · ');
+    return [stateMeta(state).label, updated].filter(Boolean).join(' · ') || stateMeta(state).label;
+}
+
+export function refreshButtonLabel(state, refreshing) {
+    if (refreshing)
+        return 'Refreshing';
+    if (state === 'daemon_unavailable')
+        return 'Retry';
+    return 'Refresh';
+}
+
+export function footerStatusText(daemon, capabilities = null) {
+    const daemonState = daemon?.state ?? 'unknown';
+    const upstream = daemon?.upstreamCli ?? null;
+    return [
+        `Daemon ${calmDaemonState(daemonState)}`,
+        upstream
+            ? `CLI ${upstream.available ? 'available' : 'unavailable'}`
+            : 'CLI unknown',
+        capabilityStatusText('Cost', capabilities, 'cost'),
+        browserImportStatusText(capabilities),
+    ].join(' · ');
+}
+
 export function providerIdentityText(provider) {
     const identity = provider?.identity;
     if (!identity)
@@ -702,29 +954,22 @@ export function diagnosticsSummaryLine(payload) {
     const scope = safeDisplay(diagnostics.provider || diagnostics.scope || 'global') || 'global';
     const events = Array.isArray(diagnostics.events) ? diagnostics.events : [];
     if (events.length === 0)
-        return `${scope} · no events`;
+        return 'No diagnostics';
 
     const highlightedEvent = strongestDiagnosticEvent(events);
-    const severity = DIAGNOSTIC_SEVERITY_RANK[highlightedEvent?.severity]
-        ? highlightedEvent.severity
-        : 'info';
-    const firstCode = safeDisplay(highlightedEvent?.code ?? '');
-    const pieces = [
-        scope,
-        `${events.length} ${events.length === 1 ? 'event' : 'events'}`,
-        severity,
-        firstCode,
-    ].filter(Boolean);
-
-    return redactText(pieces.join(' · '));
+    const message = safeDisplay(highlightedEvent?.safeMessage ?? '', 'Details unavailable');
+    return redactText(message ? `Last issue: ${message}` : `${scope} diagnostics available`);
 }
 
 export function diagnosticsCopyText(payload) {
     const parsed = typeof payload === 'string' ? parseJsonObject(payload).value : payload;
-    const text = parsed && validateDiagnosticsPayload(parsed).ok
-        ? JSON.stringify(diagnosticsCopyProjection(parsed), null, 2)
-        : (typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2));
-    return redactText(text);
+    if (parsed && validateDiagnosticsPayload(parsed).ok)
+        return redactText(JSON.stringify(diagnosticsCopyProjection(parsed), null, 2));
+
+    return JSON.stringify({
+        diagnostics: 'unavailable',
+        redaction: {applied: true, policyVersion: 1},
+    }, null, 2);
 }
 
 export function redactText(value) {
@@ -750,6 +995,10 @@ export function safeUrl(value) {
     if (!/^https?:\/\/[^\s]+$/i.test(text))
         return '';
     if (redactText(text) !== text)
+        return '';
+    if (hasUnsafeUrlPath(text))
+        return '';
+    if (hasSecretUrlComponent(text))
         return '';
     const host = urlHost(text);
     if (!host || isUnsafeDashboardHost(host))
@@ -781,6 +1030,8 @@ function isFullProviderEvent(event) {
 function isFullProvider(provider) {
     if (!provider || typeof provider !== 'object' || Array.isArray(provider))
         return false;
+    if (!hasExactKeys(provider, PROVIDER_REQUIRED_KEYS, PROVIDER_OPTIONAL_KEYS))
+        return false;
 
     for (const key of PROVIDER_REQUIRED_KEYS) {
         if (!Object.prototype.hasOwnProperty.call(provider, key))
@@ -800,11 +1051,30 @@ function isFullProvider(provider) {
         return false;
     if (!provider.usage || typeof provider.usage !== 'object' || Array.isArray(provider.usage))
         return false;
-    for (const key of ['primary', 'secondary', 'tertiary']) {
-        if (!Object.prototype.hasOwnProperty.call(provider.usage, key))
+    if (!validateUsage(provider.usage))
+        return false;
+    if (!isNullableDateTimeString(provider.updatedAt))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'version') && !isNullableString(provider.version))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'staleSince') && !isNullableDateTimeString(provider.staleSince))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'credits') && !validateCredits(provider.credits))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'identity') && !validateIdentity(provider.identity))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'status') && !validateStatus(provider.status))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(provider, 'cost') && !validateCost(provider.cost))
+        return false;
+    for (const key of ['dashboardUrl', 'diagnosticsSummary']) {
+        if (Object.prototype.hasOwnProperty.call(provider, key) && !isNullableString(provider[key]))
             return false;
     }
-    return Object.prototype.hasOwnProperty.call(provider, 'updatedAt');
+    if (Object.prototype.hasOwnProperty.call(provider, 'diagnosticCodes') && !isStringArray(provider.diagnosticCodes))
+        return false;
+
+    return true;
 }
 
 function validateSnapshot(snapshot) {
@@ -812,24 +1082,26 @@ function validateSnapshot(snapshot) {
         return {ok: false, error: 'Snapshot payload was not an object'};
     if (hasForbiddenPublicData(snapshot))
         return {ok: false, error: 'Snapshot payload contained non-public fields'};
+    if (!hasExactKeys(snapshot, SNAPSHOT_REQUIRED_KEYS, SNAPSHOT_OPTIONAL_KEYS))
+        return {ok: false, error: 'Snapshot payload did not match the v1 shape'};
     for (const key of SNAPSHOT_REQUIRED_KEYS) {
         if (!Object.prototype.hasOwnProperty.call(snapshot, key))
             return {ok: false, error: `Snapshot payload missing ${key}`};
     }
     if (snapshot.schemaVersion !== 1)
         return {ok: false, error: 'Snapshot payload had an unsupported schema version'};
-    if (typeof snapshot.generatedAt !== 'string')
+    if (!isDateTimeString(snapshot.generatedAt))
         return {ok: false, error: 'Snapshot payload had no generatedAt timestamp'};
     if (typeof snapshot.stale !== 'boolean')
         return {ok: false, error: 'Snapshot payload had no stale flag'};
-    if (!snapshot.daemon || typeof snapshot.daemon !== 'object' || Array.isArray(snapshot.daemon))
-        return {ok: false, error: 'Snapshot payload had no daemon state'};
-    if (typeof snapshot.daemon.version !== 'string' || !DAEMON_STATES.includes(snapshot.daemon.state))
+    if (!validateSnapshotDaemon(snapshot.daemon))
         return {ok: false, error: 'Snapshot daemon payload did not match the v1 shape'};
     if (!Array.isArray(snapshot.providers))
         return {ok: false, error: 'Snapshot payload had no providers array'};
     if (!snapshot.providers.every(isFullProvider))
         return {ok: false, error: 'Snapshot provider payload did not match the v1 shape'};
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'selectedProvider') && !isNullableString(snapshot.selectedProvider))
+        return {ok: false, error: 'Snapshot selected provider did not match the v1 shape'};
     return {ok: true};
 }
 
@@ -838,33 +1110,316 @@ function validateDiagnosticsPayload(diagnostics) {
         return {ok: false};
     if (hasForbiddenPublicData(diagnostics))
         return {ok: false};
-    if (diagnostics.schemaVersion !== 1 || !Array.isArray(diagnostics.events))
+    if (!hasExactKeys(diagnostics, DIAGNOSTICS_REQUIRED_KEYS, DIAGNOSTICS_OPTIONAL_KEYS))
         return {ok: false};
-    if (!diagnostics.redaction || diagnostics.redaction.applied !== true || diagnostics.redaction.policyVersion !== 1)
+    if (diagnostics.schemaVersion !== 1
+        || !isDateTimeString(diagnostics.generatedAt)
+        || !DIAGNOSTIC_SCOPES.includes(diagnostics.scope)
+        || !Array.isArray(diagnostics.events))
+        return {ok: false};
+    if (Object.prototype.hasOwnProperty.call(diagnostics, 'provider') && !isNullableString(diagnostics.provider))
+        return {ok: false};
+    if (!diagnostics.redaction
+        || typeof diagnostics.redaction !== 'object'
+        || Array.isArray(diagnostics.redaction)
+        || !hasExactKeys(diagnostics.redaction, DIAGNOSTIC_REDACTION_REQUIRED_KEYS, DIAGNOSTIC_REDACTION_OPTIONAL_KEYS)
+        || diagnostics.redaction.applied !== true
+        || diagnostics.redaction.policyVersion !== 1)
+        return {ok: false};
+    if (Object.prototype.hasOwnProperty.call(diagnostics.redaction, 'notes') && !isStringArray(diagnostics.redaction.notes))
         return {ok: false};
 
     for (const event of diagnostics.events) {
         if (!event || typeof event !== 'object' || Array.isArray(event))
             return {ok: false};
+        if (!hasExactKeys(event, DIAGNOSTIC_EVENT_REQUIRED_KEYS, DIAGNOSTIC_EVENT_OPTIONAL_KEYS))
+            return {ok: false};
         for (const key of ['code', 'severity', 'safeMessage', 'timestamp']) {
             if (typeof event[key] !== 'string' || event[key].length === 0)
                 return {ok: false};
         }
+        if (!isDateTimeString(event.timestamp))
+            return {ok: false};
         if (!Object.prototype.hasOwnProperty.call(DIAGNOSTIC_SEVERITY_RANK, event.severity))
             return {ok: false};
-        if (!event.redacted || event.redacted.applied !== true)
+        if (!event.redacted
+            || typeof event.redacted !== 'object'
+            || Array.isArray(event.redacted)
+            || !hasExactKeys(event.redacted, DIAGNOSTIC_EVENT_REDACTED_REQUIRED_KEYS, DIAGNOSTIC_EVENT_REDACTED_OPTIONAL_KEYS)
+            || event.redacted.applied !== true)
             return {ok: false};
-        if (event.details && (typeof event.details !== 'object' || Array.isArray(event.details)))
+        if (Object.prototype.hasOwnProperty.call(event.redacted, 'classes') && !isStringArray(event.redacted.classes))
             return {ok: false};
+        if (Object.prototype.hasOwnProperty.call(event, 'provider') && !isNullableString(event.provider))
+            return {ok: false};
+        if (Object.prototype.hasOwnProperty.call(event, 'sourceAdapter')
+            && event.sourceAdapter !== null
+            && !SOURCE_ADAPTERS.includes(event.sourceAdapter))
+            return {ok: false};
+        if (Object.prototype.hasOwnProperty.call(event, 'recoverable') && typeof event.recoverable !== 'boolean')
+            return {ok: false};
+        if (Object.prototype.hasOwnProperty.call(event, 'details')) {
+            if (!event.details || typeof event.details !== 'object' || Array.isArray(event.details))
+                return {ok: false};
+            if (!Object.entries(event.details).every(([key, value]) => !isForbiddenPublicKey(key) && isSafeDiagnosticDetailValue(value)))
+                return {ok: false};
+        }
     }
 
     return {ok: true};
+}
+
+function refreshResultProjection(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result))
+        return null;
+    if (hasForbiddenPublicData(result))
+        return null;
+    if (!hasExactKeys(result, REFRESH_RESULT_REQUIRED_KEYS, REFRESH_RESULT_OPTIONAL_KEYS))
+        return null;
+    if (result.schemaVersion !== 1
+        || typeof result.refreshId !== 'string'
+        || !REFRESH_RESULT_STATUSES.includes(result.status)
+        || typeof result.startedAt !== 'string'
+        || !isDateTimeString(result.startedAt)
+        || typeof result.finishedAt !== 'string'
+        || !isDateTimeString(result.finishedAt)
+        || !Number.isInteger(result.durationMs)
+        || result.durationMs < 0
+        || !REFRESH_REASONS.includes(result.reason)
+        || typeof result.cacheWritten !== 'boolean'
+        || !Array.isArray(result.providers))
+        return null;
+    if (Object.prototype.hasOwnProperty.call(result, 'snapshotGeneratedAt')
+        && result.snapshotGeneratedAt !== null
+        && (typeof result.snapshotGeneratedAt !== 'string' || !isDateTimeString(result.snapshotGeneratedAt)))
+        return null;
+    if (Object.prototype.hasOwnProperty.call(result, 'diagnosticCodes')
+        && !isStringArray(result.diagnosticCodes))
+        return null;
+
+    const providers = [];
+    for (const provider of result.providers) {
+        if (!provider
+            || typeof provider !== 'object'
+            || Array.isArray(provider)
+            || !hasExactKeys(provider, REFRESH_PROVIDER_REQUIRED_KEYS, REFRESH_PROVIDER_OPTIONAL_KEYS)
+            || typeof provider.provider !== 'string'
+            || !REFRESH_PROVIDER_STATUSES.includes(provider.status))
+            return null;
+        const adapter = Object.prototype.hasOwnProperty.call(provider, 'sourceAdapter')
+            ? provider.sourceAdapter
+            : null;
+        if (adapter !== null && !SOURCE_ADAPTERS.includes(adapter))
+            return null;
+        if (Object.prototype.hasOwnProperty.call(provider, 'diagnosticCodes')
+            && !isStringArray(provider.diagnosticCodes))
+            return null;
+        const diagnosticCodes = Array.isArray(provider.diagnosticCodes)
+            ? provider.diagnosticCodes.map(code => safeDisplay(code)).filter(Boolean)
+            : [];
+        providers.push({
+            provider: safeDisplay(provider.provider),
+            status: provider.status,
+            sourceAdapter: adapter,
+            diagnosticCodes,
+        });
+    }
+
+    return {
+        schemaVersion: 1,
+        refreshId: safeDisplay(result.refreshId),
+        status: result.status,
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt,
+        durationMs: result.durationMs,
+        reason: result.reason,
+        cacheWritten: result.cacheWritten,
+        snapshotGeneratedAt: result.snapshotGeneratedAt ?? null,
+        providers,
+        diagnosticCodes: Array.isArray(result.diagnosticCodes)
+            ? result.diagnosticCodes.map(code => safeDisplay(code)).filter(Boolean)
+            : [],
+    };
+}
+
+function hasExactKeys(value, required, optional = []) {
+    const allowed = new Set([...required, ...optional]);
+    for (const key of required) {
+        if (!Object.prototype.hasOwnProperty.call(value, key))
+            return false;
+    }
+    return Object.keys(value).every(key => allowed.has(key));
+}
+
+function validateSnapshotDaemon(daemon) {
+    if (!daemon || typeof daemon !== 'object' || Array.isArray(daemon))
+        return false;
+    if (!hasExactKeys(daemon, SNAPSHOT_DAEMON_REQUIRED_KEYS, SNAPSHOT_DAEMON_OPTIONAL_KEYS))
+        return false;
+    if (typeof daemon.version !== 'string' || !DAEMON_STATES.includes(daemon.state))
+        return false;
+    for (const key of ['lastRefreshId']) {
+        if (Object.prototype.hasOwnProperty.call(daemon, key) && !isNullableString(daemon[key]))
+            return false;
+    }
+    for (const key of ['lastRefreshStartedAt', 'lastRefreshFinishedAt']) {
+        if (Object.prototype.hasOwnProperty.call(daemon, key) && !isNullableDateTimeString(daemon[key]))
+            return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(daemon, 'upstreamCli') && !validateUpstreamCli(daemon.upstreamCli))
+        return false;
+    return true;
+}
+
+function validateUpstreamCli(upstreamCli) {
+    if (upstreamCli === null)
+        return true;
+    if (!upstreamCli || typeof upstreamCli !== 'object' || Array.isArray(upstreamCli))
+        return false;
+    if (!hasExactKeys(upstreamCli, UPSTREAM_CLI_REQUIRED_KEYS, UPSTREAM_CLI_OPTIONAL_KEYS))
+        return false;
+    if (typeof upstreamCli.available !== 'boolean')
+        return false;
+    for (const key of UPSTREAM_CLI_OPTIONAL_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(upstreamCli, key) && !isNullableString(upstreamCli[key]))
+            return false;
+    }
+    return true;
+}
+
+function validateUsage(usage) {
+    if (!hasExactKeys(usage, USAGE_REQUIRED_KEYS))
+        return false;
+    return USAGE_REQUIRED_KEYS.every(key => validateMeter(usage[key]));
+}
+
+function validateMeter(meter) {
+    if (meter === null)
+        return true;
+    if (!meter || typeof meter !== 'object' || Array.isArray(meter))
+        return false;
+    if (!hasExactKeys(meter, METER_REQUIRED_KEYS, METER_OPTIONAL_KEYS))
+        return false;
+    if (!isPercentOrNull(meter.usedPercent) || !isPercentOrNull(meter.remainingPercent))
+        return false;
+    if (!isNonNegativeIntegerOrNull(meter.windowMinutes))
+        return false;
+    if (!isNullableDateTimeString(meter.resetsAt) || !isNullableString(meter.label))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(meter, 'detail') && !isNullableString(meter.detail))
+        return false;
+    return true;
+}
+
+function validateIdentity(identity) {
+    if (identity === null)
+        return true;
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity))
+        return false;
+    if (!hasExactKeys(identity, [], IDENTITY_OPTIONAL_KEYS))
+        return false;
+    return IDENTITY_OPTIONAL_KEYS.every(key => !Object.prototype.hasOwnProperty.call(identity, key) || isNullableString(identity[key]));
+}
+
+function validateStatus(status) {
+    if (status === null)
+        return true;
+    if (!status || typeof status !== 'object' || Array.isArray(status))
+        return false;
+    if (!hasExactKeys(status, STATUS_REQUIRED_KEYS, STATUS_OPTIONAL_KEYS))
+        return false;
+    if (!isNullableString(status.indicator) || !isNullableString(status.description) || !isNullableDateTimeString(status.updatedAt))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(status, 'url') && !isNullableString(status.url))
+        return false;
+    return true;
+}
+
+function validateCredits(credits) {
+    if (credits === null)
+        return true;
+    if (!credits || typeof credits !== 'object' || Array.isArray(credits))
+        return false;
+    if (!hasExactKeys(credits, CREDITS_REQUIRED_KEYS, CREDITS_OPTIONAL_KEYS))
+        return false;
+    if (!isNullableNumber(credits.remaining) || !isPercentOrNull(credits.remainingPercent) || !isNullableDateTimeString(credits.updatedAt))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(credits, 'unit') && !isNullableString(credits.unit))
+        return false;
+    return true;
+}
+
+function validateCost(cost) {
+    if (cost === null)
+        return true;
+    if (!cost || typeof cost !== 'object' || Array.isArray(cost))
+        return false;
+    if (!hasExactKeys(cost, COST_REQUIRED_KEYS, COST_OPTIONAL_KEYS))
+        return false;
+    if (!isNullableDateTimeString(cost.updatedAt)
+        || !isNullableString(cost.currency)
+        || !isNullableNumber(cost.total)
+        || !Array.isArray(cost.items))
+        return false;
+    for (const key of ['periodStartAt', 'periodEndAt']) {
+        if (Object.prototype.hasOwnProperty.call(cost, key) && !isNullableDateTimeString(cost[key]))
+            return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(cost, 'diagnosticCodes') && !isStringArray(cost.diagnosticCodes))
+        return false;
+    return cost.items.every(validateCostItem);
+}
+
+function validateCostItem(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+        return false;
+    if (!hasExactKeys(item, COST_ITEM_REQUIRED_KEYS, COST_ITEM_OPTIONAL_KEYS))
+        return false;
+    if (typeof item.label !== 'string' || !isNullableNumber(item.amount) || !isNullableString(item.currency))
+        return false;
+    if (Object.prototype.hasOwnProperty.call(item, 'detail') && !isNullableString(item.detail))
+        return false;
+    return true;
+}
+
+function isStringArray(value) {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function isDateTimeString(value) {
+    return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+}
+
+function isNullableString(value) {
+    return value === null || typeof value === 'string';
+}
+
+function isNullableNumber(value) {
+    return value === null || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function isPercentOrNull(value) {
+    return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100);
+}
+
+function isNonNegativeIntegerOrNull(value) {
+    return value === null || (Number.isInteger(value) && value >= 0);
+}
+
+function isNullableDateTimeString(value) {
+    return value === null || isDateTimeString(value);
+}
+
+function isSafeDiagnosticDetailValue(value) {
+    return value === null || ['string', 'number', 'boolean'].includes(typeof value);
 }
 
 function hasForbiddenPublicData(value) {
     const queue = [value];
     while (queue.length > 0) {
         const current = queue.shift();
+        if (typeof current === 'string' && looksUnsafePublicString(current))
+            return true;
         if (!current || typeof current !== 'object')
             continue;
         if (Array.isArray(current)) {
@@ -899,10 +1454,16 @@ function looksUnsafePublicString(value) {
         || /\bSet-Cookie\s*:/i.test(value)
         || /\bCookie\s*:/i.test(value)
         || /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(value)
+        || /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/.test(value)
+        || /\bgh[opsu]_[A-Za-z0-9_]{20,}\b/.test(value)
+        || /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/.test(value)
+        || /\bAIza[0-9A-Za-z_-]{20,}\b/.test(value)
+        || /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/.test(value)
         || /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key))\b\s*[:=]/i.test(value)
         || hasRawEmail
-        || /(^|["'\s])\/(?:home|Users)\//.test(value)
-        || /\b(rawPayload|rawResponse|rawOutput|stdout|stderr)\b\s*[:=]/i.test(value)
+        || /(^|["'\s=:/?&#])\/(?:home|Users)\//.test(value)
+        || /\b(rawPayload|rawResponse|rawOutput|stdout|stderr)\b/i.test(value)
+        || /[{[]\s*["'][^"']+["']\s*:/.test(value)
         || ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')));
 }
 
@@ -920,6 +1481,50 @@ function urlHost(url) {
     }
 
     return authority.split(':', 1)[0].toLowerCase();
+}
+
+function hasSecretUrlComponent(url) {
+    const queryOrFragment = url.match(/[?#](.*)$/)?.[1] ?? '';
+    if (!queryOrFragment)
+        return false;
+    return queryOrFragment
+        .split(/[&#]/)
+        .some(part => {
+            const rawName = part.split('=', 1)[0] ?? '';
+            let name = rawName.toLowerCase();
+            try {
+                name = decodeURIComponent(name.replace(/\+/g, ' ')).toLowerCase();
+            } catch (_error) {
+                return true;
+            }
+            const rawValue = part.includes('=') ? part.slice(part.indexOf('=') + 1) : '';
+            let decodedValue = rawValue;
+            try {
+                decodedValue = decodeURIComponent(rawValue.replace(/\+/g, ' '));
+            } catch (_error) {
+                return true;
+            }
+            return /(^|[_-])(token|secret|code|key|api_key|apikey|access_token|refresh_token|session|auth|authorization)([_-]|$)/i.test(name)
+                || looksUnsafePublicString(decodedValue);
+        });
+}
+
+function hasUnsafeUrlPath(url) {
+    const path = url.match(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]+([^?#]*)/i)?.[1] ?? '';
+    if (!path)
+        return false;
+    return path
+        .split('/')
+        .filter(Boolean)
+        .some(segment => {
+            let decoded = segment;
+            try {
+                decoded = decodeURIComponent(segment);
+            } catch (_error) {
+                return true;
+            }
+            return looksUnsafePublicString(decoded);
+        });
 }
 
 function isUnsafeDashboardHost(host) {
@@ -999,7 +1604,9 @@ function diagnosticsCopyProjection(diagnostics) {
         schemaVersion: 1,
         generatedAt: diagnostics.generatedAt,
         scope: diagnostics.scope,
-        provider: diagnostics.provider ?? null,
+        provider: diagnostics.provider === null || diagnostics.provider === undefined
+            ? null
+            : safeDisplay(diagnostics.provider),
         events: diagnostics.events.map(event => ({
             code: safeDisplay(event.code, 'diagnostic_event'),
             severity: Object.prototype.hasOwnProperty.call(DIAGNOSTIC_SEVERITY_RANK, event.severity)
@@ -1007,14 +1614,26 @@ function diagnosticsCopyProjection(diagnostics) {
                 : 'info',
             safeMessage: safeDisplay(event.safeMessage, 'Details unavailable'),
             timestamp: event.timestamp,
-            provider: event.provider ?? null,
-            sourceAdapter: event.sourceAdapter ?? null,
+            provider: event.provider === null || event.provider === undefined
+                ? null
+                : safeDisplay(event.provider),
+            sourceAdapter: event.sourceAdapter === null || event.sourceAdapter === undefined
+                ? null
+                : event.sourceAdapter,
             recoverable: typeof event.recoverable === 'boolean' ? event.recoverable : null,
             details: sanitizeDiagnosticsDetails(event.details),
-            redacted: {applied: true, classes: event.redacted?.classes ?? []},
+            redacted: {applied: true, classes: safeStringList(event.redacted?.classes)},
         })),
         redaction: {applied: true, policyVersion: 1},
     };
+}
+
+function safeStringList(values) {
+    if (!Array.isArray(values))
+        return [];
+    return values
+        .map(value => (typeof value === 'string' ? safeDisplay(value) : ''))
+        .filter(Boolean);
 }
 
 function sanitizeDiagnosticsDetails(details) {
@@ -1071,14 +1690,28 @@ function strongestDiagnosticEvent(events) {
 }
 
 function shortProviderLabel(displayName, providerId) {
-    const source = displayName || providerId || 'CB';
-    const words = source
-        .split(/[\s._-]+/)
-        .map(part => part.trim())
-        .filter(Boolean);
-    if (words.length >= 2)
-        return words.slice(0, 2).map(word => word[0]).join('').toUpperCase();
-    return source.slice(0, 3).toUpperCase();
+    const source = (providerId || displayName || 'cb')
+        .replace(/[^A-Za-z0-9]+/g, '')
+        .toUpperCase();
+    return source.slice(0, 3) || 'CB';
+}
+
+function providerPlanLabel(provider, source, adapter) {
+    if (provider?.source === 'local')
+        return source;
+    if (provider?.sourceAdapter === 'upstream_cli')
+        return adapter;
+    return '';
+}
+
+function usageSectionTitle(row) {
+    if (row?.key === 'primary')
+        return safeDisplay(row.label || 'Session', 'Session');
+    if (row?.key === 'secondary')
+        return safeDisplay(row.label || 'Weekly', 'Weekly');
+    if (row?.key === 'credits')
+        return 'Credits';
+    return safeDisplay(row?.label || 'Usage', 'Usage');
 }
 
 function formatCreditsDetail(credits) {
@@ -1088,6 +1721,60 @@ function formatCreditsDetail(credits) {
     if (typeof credits.remainingPercent === 'number')
         parts.push(`${Math.round(credits.remainingPercent)}% remaining`);
     return parts.join(' · ') || 'Credits available';
+}
+
+function formatMoney(amount, currency) {
+    if (typeof amount !== 'number' || !Number.isFinite(amount))
+        return 'Cost unavailable';
+    if (!currency)
+        return `${roundCurrency(amount)}`;
+    if (currency.toUpperCase() === 'USD')
+        return `$${roundCurrency(amount)}`;
+    return `${roundCurrency(amount)} ${safeDisplay(currency.toUpperCase())}`;
+}
+
+function roundCurrency(amount) {
+    return amount >= 100
+        ? amount.toFixed(0)
+        : amount.toFixed(2);
+}
+
+function calmDaemonState(state) {
+    if (state === 'ok')
+        return 'running';
+    if (state === 'refreshing')
+        return 'refreshing';
+    if (state === 'starting')
+        return 'starting';
+    if (state === 'degraded')
+        return 'degraded';
+    if (state === 'error')
+        return 'unavailable';
+    return 'unknown';
+}
+
+function capabilityStatusText(label, capabilities, key) {
+    if (!capabilities || !Object.prototype.hasOwnProperty.call(capabilities, key))
+        return `${label} unknown`;
+    return `${label} ${capabilities[key] ? 'available' : 'unavailable'}`;
+}
+
+function browserImportStatusText(capabilities) {
+    if (!capabilities || !Object.prototype.hasOwnProperty.call(capabilities, 'browserImport'))
+        return 'Browser import unknown';
+    return capabilities.browserImport ? 'Browser import ready' : 'Browser import unavailable';
+}
+
+function lowerInitial(value) {
+    if (!value)
+        return '';
+    return value[0].toLowerCase() + value.slice(1);
+}
+
+function capitalizeInitial(value) {
+    if (!value)
+        return '';
+    return value[0].toUpperCase() + value.slice(1);
 }
 
 function formatCountdown(diffMs) {

@@ -91,7 +91,8 @@ activation yet; restart the full user session and rerun the discovery checks.
 ## Functional Checks
 
 1. Verify the merged-mode CodexBar item appears in the top bar.
-2. Open the popover and confirm provider cards render from `GetSnapshot`.
+2. Open the popover and confirm the provider strip and selected-provider
+   surface render from `GetSnapshot`.
 3. Press Refresh and confirm the daemon receives `Refresh` with
    `reason=manual`, `force=true`, and `busyBehavior=return_existing`.
 4. If `CODEXBAR_CLI` is configured, verify upstream_cli-normalized Codex data
@@ -120,26 +121,59 @@ activation yet; restart the full user session and rerun the discovery checks.
 
 Use this checklist for Task 03.4 and later visual QA passes. Capture screenshots
 only after masking account identity, diagnostics, and provider-specific secrets.
+Use `docs/gnome-visual-target.md` as the visual acceptance source of truth.
 
-- Merged mode top-bar item is compact and does not crowd adjacent Shell items.
-- Provider mode shows at most a bounded compact group, with a `+N` cue when
-  there are more providers than can fit comfortably.
+- Merged mode top-bar item is naked and compact: provider label, two tiny
+  meters, and a small state dot with no large pill treatment.
+- Provider mode shows at most three compact provider clusters before a `+N`
+  cue when there are more providers than can fit comfortably.
 - Minimal mode shows a single low-noise icon and still opens the full popover.
 - Popover width is stable between loading, refreshed, stale, error, and
   daemon-unavailable states.
-- Provider cards are scannable at a glance: provider label/name, state chip,
-  updated age, identity/source metadata, two usage bars, reset text, and actions
-  are visually distinct.
+- Popover structure is: quiet provider selector, selected-provider title area,
+  meter-first Session/Weekly/Credits sections, secondary diagnostics/settings
+  actions, and calm footer.
+- The provider selector preserves snapshot provider order, marks the selected
+  provider subtly, and dims unavailable providers without hiding them.
+- The selected-provider surface is scannable at a glance: provider name,
+  updated age/state, safe metadata, slim Session and secondary usage meters,
+  credits when present, reset text, and working secondary actions are visually
+  distinct.
 - Refresh remains visible unless a refresh is already in progress.
-- Diagnostics are collapsed by default, one click away from provider cards, and
-  copied text remains redacted.
+- Diagnostics are collapsed by default, one click away from the selected
+  provider, bounded when loaded, and copied text remains redacted.
 - Stale, auth, timeout, parse-error, and daemon-unavailable wording is concise
   and does not repeat the same state twice.
-- `Open` is hidden when no safe dashboard URL is available.
-- Footer is compact and communicates daemon, upstream CLI, cost, and browser
+- `Usage Dashboard` and `Status Page` appear only when safe provider URLs are
+  present; unsafe or absent URLs omit those actions.
+- Footer is one calm line that communicates daemon, CLI, cost, and browser
   import capability without showing raw paths or debug payloads.
 - Disable/re-enable does not leave duplicate top-bar items, timers, signals, or
   stale popover actors behind.
+
+## Visual Sign-Off Screenshot Set
+
+Task 03.6 visual sign-off is blocked until screenshots are captured from a real
+GNOME Shell 46+ session. Static checks can support implementation review, but
+they cannot approve panel density, popover rhythm, alignment, or visual
+hierarchy.
+
+Capture and attach this set after masking account identity, diagnostics,
+provider-specific secrets, and private paths:
+
+1. Merged panel plus closed popover: full top-bar crop with adjacent GNOME
+   indicators visible.
+2. Open popover default state with diagnostics collapsed.
+3. Diagnostics expanded for the selected provider.
+4. Provider mode, including `+N` overflow when more than three providers exist.
+5. Minimal mode closed panel item and the same full popover opened.
+6. Daemon unavailable state after stopping `codexbar-linuxd.service`.
+7. Stale/error state with stale, timeout, parse-error, or hard error copy
+   visible.
+
+Record GNOME Shell version, session type, panel mode, theme setting, fixture vs.
+live data source, display scale if not 100 percent, and whether copied
+diagnostics were separately checked for redaction.
 
 ## Recorded Live Result
 

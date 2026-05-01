@@ -12,7 +12,10 @@ export default class CodexBarExtension extends Extension {
         this._settingsSignals = [];
         this._store = new SnapshotStore();
         this._client = new CodexbarDbusClient();
-        this._actions = new ShellActions(this._client, this._store);
+        const openSettings = typeof this.openPreferences === 'function'
+            ? () => this.openPreferences()
+            : null;
+        this._actions = new ShellActions(this._client, this._store, this._settings, openSettings);
         this._indicator = new CodexbarIndicator(this._actions);
         this._indicator.addToPanel();
 

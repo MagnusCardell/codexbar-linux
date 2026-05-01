@@ -55,7 +55,6 @@ export const MANUAL_REFRESH_OPTIONS = {
     sourceAdapterPolicy: {
         mode: 'only',
         adapters: ['upstream_cli'],
-        allowStaleCacheFallback: true,
     },
 };
 
@@ -66,7 +65,7 @@ export const SIGNALS = {
     refreshFinished: 'RefreshFinished',
 };
 
-export const MAX_PROVIDER_INDICATORS = 4;
+export const MAX_PROVIDER_INDICATORS = 3;
 export const UNKNOWN_TEXT = 'Unknown';
 export const PRODUCT_NAME = 'CodexBar';
 export const EXTENSION_STATUS_AREA_NAME = 'codexbar-linux';

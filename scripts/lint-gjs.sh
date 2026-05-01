@@ -71,6 +71,8 @@ else
 fi
 python3 - "$ROOT/extension" <<'PY'
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -98,10 +100,84 @@ shell_file_read_forbidden = re.compile(
     r"(\bGio\.File\.new_for_path\b|\bnew_for_path\s*\(|\bload_contents\s*\(|\bread\s*\(|\bread_async\s*\()"
 )
 
+named_import = re.compile(
+    r"import\s*\{(?P<names>[^}]*)\}\s*from\s*[\"'](?P<spec>\.{1,2}/[^\"']+)[\"']",
+    re.S,
+)
+local_import = re.compile(
+    r"import\s+(?:[^;]*?)\s+from\s*[\"'](?P<spec>\.{1,2}/[^\"']+)[\"']",
+    re.S,
+)
+export_decl = re.compile(r"\bexport\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)")
+export_list = re.compile(r"\bexport\s*\{(?P<names>.*?)\}", re.S)
+css_class_token = re.compile(r"\bcodexbar-[A-Za-z0-9_-]+")
+
+def resolve_local_module(path, spec):
+    target = (path.parent / spec).resolve()
+    if target.suffix == "":
+        target = target.with_suffix(".js")
+    if target.is_dir():
+        target = target / "index.js"
+    try:
+        target.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return target
+
+def exported_names(text):
+    names = set(export_decl.findall(text))
+    for match in export_list.finditer(text):
+        for part in match.group("names").split(","):
+            item = part.strip()
+            if not item:
+                continue
+            pieces = re.split(r"\s+as\s+", item)
+            names.add(pieces[-1].strip())
+    return names
+
+def imported_names(block):
+    names = []
+    for part in block.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        pieces = re.split(r"\s+as\s+", item)
+        names.append(pieces[0].strip())
+    return names
+
 violations = []
-for path in sorted(root.rglob("*.js")):
+js_files = sorted(root.rglob("*.js"))
+js_texts = {path: path.read_text(encoding="utf-8") for path in js_files}
+exports_by_path = {path.resolve(): exported_names(text) for path, text in js_texts.items()}
+node = shutil.which("node")
+for path in js_files:
     rel = path.relative_to(root)
-    text = path.read_text(encoding="utf-8")
+    text = js_texts[path]
+    if node:
+        check = subprocess.run(
+            [node, "--input-type=module", "--check"],
+            input=text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if check.returncode != 0:
+            violations.append(f"{rel}: ES module parse check failed: {check.stderr.strip()}")
+    for match in local_import.finditer(text):
+        spec = match.group("spec")
+        target = resolve_local_module(path, spec)
+        if not target or not target.is_file():
+            violations.append(f"{rel}: local import target is missing: {spec}")
+    for match in named_import.finditer(text):
+        spec = match.group("spec")
+        target = resolve_local_module(path, spec)
+        if not target or not target.is_file():
+            continue
+        available = exports_by_path.get(target.resolve(), set())
+        for name in imported_names(match.group("names")):
+            if name not in available:
+                violations.append(f"{rel}: imports missing export {name} from {spec}")
     is_test = len(rel.parts) > 1 and rel.parts[0] == "tests"
     if is_test:
         continue
@@ -142,23 +218,130 @@ for needle, reason in {
     "authority.includes('@')": "reject dashboard URLs with credentials",
     "X-API-Key": "redact API key headers",
     "session[_-]?(?:token|key)": "redact session keys",
+    "looksUnsafePublicString(decodedValue)": "reject unsafe dashboard URL query/fragment values",
+    "hasUnsafeUrlPath(text)": "reject unsafe dashboard URL path values",
+    "hasExactKeys(result, REFRESH_RESULT_REQUIRED_KEYS": "validate refresh-result contract shape exactly",
 }.items():
     if needle not in state_js:
         violations.append(f"src/state.js: missing validation for {reason}")
 
 stylesheet = (root / "stylesheet.css").read_text(encoding="utf-8")
-for forbidden in ("codexbar-panel-state-", "codexbar-diagnostics-line"):
+lower_stylesheet = stylesheet.lower()
+for forbidden_color in ("#00ff00", "#0f0", "#00ff41", "#39ff14", " lime"):
+    if forbidden_color in lower_stylesheet:
+        violations.append(f"stylesheet.css: forbidden terminal/neon color remains: {forbidden_color.strip()}")
+stale_selector_families = (
+    "codexbar-panel-state-",
+    "codexbar-diagnostics-line",
+    "codexbar-meter-segment",
+    "codexbar-provider-card",
+    "codexbar-provider-header",
+    "codexbar-provider-list",
+    "codexbar-meter-list",
+    "codexbar-meter-row-compact",
+    "codexbar-secondary-section",
+    "codexbar-credit-section",
+    "codexbar-section-kicker",
+    "codexbar-panel-detail",
+    "codexbar-icon-button",
+    "codexbar-button-content",
+    "codexbar-button-icon",
+    "codexbar-provider-meta",
+    "codexbar-provider-status-box",
+    "codexbar-state-pill",
+    "codexbar-provider-glyph",
+    "codexbar-terminal",
+    "font-family: monospace",
+)
+for forbidden in stale_selector_families:
     if forbidden in stylesheet:
         violations.append(f"stylesheet.css: stale selector family remains: {forbidden}")
+    for path, text in js_texts.items():
+        rel = path.relative_to(root)
+        if len(rel.parts) > 1 and rel.parts[0] == "tests":
+            continue
+        if forbidden in text:
+            violations.append(f"{rel}: stale selector family remains: {forbidden}")
+for path, text in js_texts.items():
+    rel = path.relative_to(root)
+    if len(rel.parts) > 1 and rel.parts[0] == "tests":
+        continue
+    for token in sorted(set(css_class_token.findall(text))):
+        if token == "codexbar-linux" or token.endswith("-"):
+            continue
+        if f".{token}" not in stylesheet:
+            violations.append(f"{rel}: emitted class lacks stylesheet selector: {token}")
 for selector in (
     ".codexbar-panel-content",
+    ".codexbar-panel-status-dot",
     ".codexbar-state-ok .codexbar-panel-icon",
+    ".codexbar-provider-strip",
+    ".codexbar-provider-strip-item",
+    ".codexbar-provider-strip-item-selected",
+    ".codexbar-provider-strip-item-dimmed",
+    ".codexbar-provider-strip-overflow",
+    ".codexbar-provider-strip-empty",
+    ".codexbar-divider",
+    ".codexbar-selected-provider",
+    ".codexbar-selected-provider-title",
+    ".codexbar-selected-provider-heading",
+    ".codexbar-provider-name",
+    ".codexbar-provider-plan",
+    ".codexbar-provider-state-note",
+    ".codexbar-stale",
+    ".codexbar-severity-ok",
+    ".codexbar-severity-warning",
+    ".codexbar-severity-loading",
+    ".codexbar-severity-error",
+    ".codexbar-usage-sections",
+    ".codexbar-usage-section",
+    ".codexbar-action-section",
+    ".codexbar-cost-section",
+    ".codexbar-cost-row",
+    ".codexbar-cost-label",
+    ".codexbar-cost-value",
+    ".codexbar-meter-fill",
+    ".codexbar-meter-fill-ok",
+    ".codexbar-meter-fill-warning",
+    ".codexbar-meter-fill-danger",
+    ".codexbar-meter-fill-unknown",
+    ".codexbar-meter-ok",
+    ".codexbar-meter-detail-row",
+    ".codexbar-meter-detail-left",
+    ".codexbar-meter-detail-right",
+    ".codexbar-diagnostics-row",
+    ".codexbar-diagnostics-row-loaded",
+    ".codexbar-diagnostics-row-collapsed",
+    ".codexbar-diagnostics-detail",
+    ".codexbar-diagnostics-title",
+    ".codexbar-diagnostic-detail-list",
+    ".codexbar-diagnostic-detail",
     ".codexbar-diagnostic-line",
     ".codexbar-section-header",
-    ".codexbar-card-actions",
+    ".codexbar-action-row",
+    ".codexbar-menu-item",
 ):
     if selector not in stylesheet:
         violations.append(f"stylesheet.css: missing selector for emitted class {selector}")
+
+provider_card_js = (root / "src/providerCard.js").read_text(encoding="utf-8")
+if "codexbar-state-pill" in provider_card_js:
+    violations.append("src/providerCard.js: selected provider surface must not render a status pill")
+if "loadDiagnostics(" in provider_card_js:
+    violations.append("src/providerCard.js: diagnostics action belongs in the secondary diagnostics row")
+if "row.shortLabel" in provider_card_js:
+    violations.append("src/providerCard.js: popover must not render provider short-code glyphs")
+if "'Open'" in provider_card_js or '"Open"' in provider_card_js:
+    violations.append("src/providerCard.js: visible dashboard action must not use generic Open wording")
+for action_label in ("Usage Dashboard", "Status Page", "Diagnostics"):
+    if action_label not in provider_card_js:
+        violations.append(f"src/providerCard.js: missing visible secondary action label {action_label!r}")
+if "createDiagnosticsButton" not in provider_card_js:
+    violations.append("src/providerCard.js: missing secondary Diagnostics action")
+if "dashboardUrl: safeUrl(provider?.dashboardUrl || '')" not in state_js:
+    violations.append("src/state.js: Usage Dashboard action must be derived through safeUrl()")
+if "statusPageUrl: safeUrl(provider?.status?.url || '')" not in state_js:
+    violations.append("src/state.js: Status Page action must be derived through safeUrl()")
 
 launch_users = []
 for path in sorted(root.rglob("*.js")):
@@ -179,5 +362,9 @@ PY
 if command -v gjs >/dev/null 2>&1; then
   gjs -m "$ROOT/extension/tests/state.test.js"
 else
+  if [[ "${CI:-}" == "true" ]]; then
+    echo "gjs unavailable in CI; extension pure JS tests must run" >&2
+    exit 1
+  fi
   echo "gjs unavailable; extension pure JS tests not run"
 fi
