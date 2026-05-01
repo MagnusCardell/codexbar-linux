@@ -26,7 +26,7 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 02B upstream CLI daemon adapter** status.
+This repository is at **Task 03 GNOME Shell vertical slice** status.
 
 Present:
 
@@ -43,20 +43,19 @@ Present:
 - Production daemon upstream CLI adapter for targeted provider refresh.
 - Runtime refresh uses targeted usage/status probes and defaults to `codex` when no provider is configured or requested.
 - Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
-- GNOME Shell extension skeleton under `extension/`.
-- Preferences skeleton that exposes only the GSettings-owned UI keys from `docs/CONTRACTS.md`.
+- GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
+- Preferences UI that exposes only the five GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
 - User-scoped systemd/D-Bus and Debian packaging skeleton files.
 - Local install/uninstall bootstrap scripts.
 - Validation scripts and GitHub Actions check workflow.
 
-Not implemented after Task 02B:
+Not implemented after Task 03:
 
 - browser-cookie import, beyond the schema-valid `not_implemented` test stub;
 - provider network calls or Linux web adapters;
 - provider scraping;
 - keyring access;
-- production Shell UI behavior beyond the Task 00 loadable extension skeleton, which remains Task 03;
 - Debian package build wiring.
 
 The upstream CLI adapter does not default production usage/status refresh to
@@ -78,6 +77,8 @@ Useful narrower checks:
 ```bash
 ./scripts/validate-dbus.sh
 ./scripts/validate-schemas.sh
+./scripts/validate-gsettings.sh
+./scripts/validate-packaging.sh
 ./scripts/test-fixtures.sh
 ./scripts/lint-gjs.sh
 cargo fmt --manifest-path daemon/Cargo.toml -- --check
@@ -93,6 +94,29 @@ CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   cargo test --manifest-path daemon/Cargo.toml -- --ignored --test-threads=1
 ```
 
+## Manual GNOME smoke checks
+
+Static checks cannot prove GNOME Shell lifecycle behavior. For Task 03 changes
+to extension runtime code, run the detailed [GNOME smoke checklist](docs/gnome-smoke-test.md)
+on GNOME 46+:
+
+```bash
+./scripts/install-local.sh
+gnome-extensions enable codexbar-linux@codexbar.dev
+gnome-extensions info codexbar-linux@codexbar.dev
+gnome-extensions disable codexbar-linux@codexbar.dev
+gnome-extensions enable codexbar-linux@codexbar.dev
+./scripts/uninstall-local.sh
+```
+
+On Wayland, log out and back in after installing extension files if GNOME Shell
+does not discover the extension immediately. During the smoke, confirm that the
+panel item appears in merged mode, the popover opens, manual refresh reaches
+D-Bus, disabling removes the panel item, and re-enabling does not create duplicate
+panel items or timers. Install scripts and package hooks must not enable the
+extension automatically; the `gnome-extensions enable` command above is the
+explicit user action.
+
 ## Repository layout
 
 ```text
@@ -101,8 +125,8 @@ CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
 ├── .codex/
 │   ├── config.toml                   # Codex project defaults
 │   └── agents/                       # Project-scoped custom Codex agents
-├── daemon/                           # Rust daemon crate bootstrap skeleton
-├── extension/                        # GNOME Shell extension bootstrap skeleton
+├── daemon/                           # Rust daemon crate
+├── extension/                        # GNOME Shell extension vertical slice
 ├── schemas/                          # GSettings schema for Shell UI preferences
 ├── spec/
 │   ├── dbus-org.codexbar.Linux1.xml

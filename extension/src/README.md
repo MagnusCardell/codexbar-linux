@@ -1,8 +1,7 @@
 # Extension Source Modules
 
-Task 00 intentionally keeps the Shell extension as a minimal loadable skeleton.
-
-Future Task 03 modules live here and must preserve these boundaries:
+Task 03 keeps Shell UI, state normalization, and the D-Bus client in small
+ESModule files. These boundaries are intentional:
 
 - Shell-process modules may use GNOME Shell/GJS APIs but must not import `Gtk`,
   `Gdk`, or `Adw`.
@@ -10,5 +9,6 @@ Future Task 03 modules live here and must preserve these boundaries:
   not import Shell-only libraries or Shell UI modules.
 - Production Shell code consumes daemon data only over D-Bus and must not read
   daemon cache files.
-- No provider network calls, browser profile access, subprocesses, or real
-  D-Bus runtime behavior belongs in the Task 00 skeleton.
+- `dbusClient.js` is the only production daemon boundary.
+- No provider network calls, browser profile access, subprocesses, daemon cache
+  reads, or daemon config writes belong in Shell-process modules.

@@ -9,5 +9,5 @@ rm -f "$HOME/.config/systemd/user/codexbar-linuxd.service"
 rm -f "$PREFIX/share/dbus-1/services/org.codexbar.Linux1.service"
 rm -rf "$PREFIX/share/gnome-shell/extensions/$EXTENSION_UUID"
 
-echo "Removed Task 00 bootstrap files installed by scripts/install-local.sh."
+echo "Removed CodexBar GNOME files installed by scripts/install-local.sh."
 echo "User config/cache is left untouched. Task 08 will define package purge behavior."

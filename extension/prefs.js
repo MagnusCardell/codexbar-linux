@@ -7,6 +7,9 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 const PANEL_MODE_VALUES = ['merged', 'provider', 'minimal'];
 const RESET_TIME_FORMAT_VALUES = ['countdown', 'absolute', 'both'];
 const THEME_VALUES = ['system', 'compact', 'high_contrast'];
+const PANEL_MODE_TITLES = ['Merged meters', 'Provider detail', 'Minimal icon'];
+const RESET_TIME_FORMAT_TITLES = ['Countdown', 'Absolute time', 'Both'];
+const THEME_TITLES = ['System', 'Compact', 'High contrast'];
 
 export default class CodexBarPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -27,9 +30,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         });
 
         group.add(this._switchRow(settings, 'start-daemon-on-login', 'Start daemon on login'));
-        group.add(this._comboRow(settings, 'panel-mode', 'Panel mode', PANEL_MODE_VALUES));
-        group.add(this._comboRow(settings, 'reset-time-format', 'Reset time format', RESET_TIME_FORMAT_VALUES));
-        group.add(this._comboRow(settings, 'theme', 'Theme', THEME_VALUES));
+        group.add(this._comboRow(settings, 'panel-mode', 'Panel mode', PANEL_MODE_VALUES, PANEL_MODE_TITLES));
+        group.add(this._comboRow(settings, 'reset-time-format', 'Reset time format', RESET_TIME_FORMAT_VALUES, RESET_TIME_FORMAT_TITLES));
+        group.add(this._comboRow(settings, 'theme', 'Theme', THEME_VALUES, THEME_TITLES));
 
         const selectedProvider = new Adw.EntryRow({
             title: 'Selected provider',
@@ -46,12 +49,12 @@ export default class CodexBarPreferences extends ExtensionPreferences {
     _buildPlaceholderGroup() {
         const group = new Adw.PreferencesGroup({
             title: 'Daemon settings',
-            description: 'Provider, browser import, refresh, and diagnostics settings are daemon-owned and are implemented after Task 00.',
+            description: 'Provider, browser import, refresh, and diagnostics settings are daemon-owned.',
         });
 
         const row = new Adw.ActionRow({
             title: 'Daemon configuration',
-            subtitle: 'Task 01 adds daemon D-Bus runtime; later tasks add editable daemon settings.',
+            subtitle: 'This vertical slice only edits Shell presentation preferences.',
         });
         row.activatable = false;
         group.add(row);
@@ -71,10 +74,10 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         return row;
     }
 
-    _comboRow(settings, key, title, values) {
+    _comboRow(settings, key, title, values, labels = values) {
         const model = new Gtk.StringList();
-        for (const value of values)
-            model.append(value);
+        for (const label of labels)
+            model.append(label);
 
         const row = new Adw.ComboRow({
             title,

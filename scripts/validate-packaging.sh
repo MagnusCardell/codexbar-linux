@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 python3 - "$ROOT" <<'PY'
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +37,36 @@ if "ExecStart=/usr/bin/codexbar-linuxd" not in systemd:
 listener_directives = ("ListenStream=", "ListenDatagram=", "ListenFIFO=", "SocketUser=", "SocketGroup=")
 if any(directive in systemd for directive in listener_directives):
     raise SystemExit("Task 00 service file must not define listener/socket behavior")
+
+debian_install = (root / "packaging/debian/install").read_text(encoding="utf-8")
+expected_install_entries = [
+    "target/release/codexbar-linuxd usr/bin/",
+    "packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/",
+    "packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/",
+    "extension/* usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml usr/share/glib-2.0/schemas/",
+]
+for entry in expected_install_entries:
+    if entry not in debian_install:
+        raise SystemExit(f"packaging/debian/install missing required install mapping: {entry}")
+
+auto_enable = re.compile(
+    r"(?:\bgnome-extensions\s+enable\b|"
+    r"\bgnome-shell-extension-tool\s+-e\b|"
+    r"\bgsettings\s+set\s+org\.gnome\.shell\s+enabled-extensions\b)"
+)
+auto_enable_violations = []
+for path in sorted([root / "scripts/install-local.sh", *list((root / "packaging").rglob("*"))]):
+    if not path.is_file():
+        continue
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith(("echo ", "printf ")):
+            continue
+        if auto_enable.search(stripped):
+            auto_enable_violations.append(f"{path.relative_to(root)}:{line_no}: {stripped}")
+if auto_enable_violations:
+    raise SystemExit("Package/local install paths must not auto-enable the extension:\n" + "\n".join(auto_enable_violations))
 
 build_deb = (root / "scripts/build-deb.sh").read_text(encoding="utf-8")
 if "Task 08 packaging not implemented" not in build_deb:

@@ -8,6 +8,19 @@ REQUIRED_FILES=(
   "$ROOT/extension/prefs.js"
   "$ROOT/extension/stylesheet.css"
   "$ROOT/extension/src/README.md"
+  "$ROOT/extension/src/actions.js"
+  "$ROOT/extension/src/constants.js"
+  "$ROOT/extension/src/dbusClient.js"
+  "$ROOT/extension/src/diagnosticsView.js"
+  "$ROOT/extension/src/indicator.js"
+  "$ROOT/extension/src/logger.js"
+  "$ROOT/extension/src/meterBars.js"
+  "$ROOT/extension/src/popover.js"
+  "$ROOT/extension/src/providerCard.js"
+  "$ROOT/extension/src/snapshotStore.js"
+  "$ROOT/extension/src/state.js"
+  "$ROOT/extension/src/time.js"
+  "$ROOT/extension/tests/state.test.js"
 )
 for file in "${REQUIRED_FILES[@]}"; do
   if [[ ! -f "$file" ]]; then
@@ -64,18 +77,56 @@ from pathlib import Path
 root = Path(sys.argv[1])
 shell_forbidden = re.compile(r"(gi://(Gtk|Gdk|Adw)(?:\?version=[0-9.]+)?|imports\.gi\.(Gtk|Gdk|Adw))")
 prefs_forbidden = re.compile(r"(gi://(St|Clutter|Meta|Shell)(?:\?version=[0-9.]+)?|resource:///org/gnome/shell/|imports\.gi\.(St|Clutter|Meta|Shell))")
+shell_network_forbidden = re.compile(
+    r"(gi://Soup(?:\?version=[0-9.]+)?|imports\.gi\.Soup|\bSoup\.|\bXMLHttpRequest\b|\bfetch\s*\(|"
+    r"\bGio\.SocketClient\b|\bGio\.NetworkAddress\b|\bGio\.TcpConnection\b|\blocalhost\b|\b127\.0\.0\.1\b|"
+    r"[\"']https?://)"
+)
+shell_subprocess_forbidden = re.compile(
+    r"(\bGio\.Subprocess\b|\bGio\.SubprocessLauncher\b|\bGLib\.spawn_(?:async|sync|command_line_async|command_line_sync)\b|"
+    r"\bGLib\.spawn_async_with_pipes\b|\bimports\.misc\.util\.spawn\b|\bUtil\.spawn\b|\bShell\.util_spawn\b)"
+)
+shell_cache_or_fixture_forbidden = re.compile(
+    r"(XDG_CACHE_HOME|get_user_cache_dir|~/\.cache|/\.cache/|codexbar-linux/snapshot\.json|"
+    r"daemon/fixtures|fixtures/snapshots|Network/Cookies|Login Data|\bcookies\.sqlite\b|\bCookies\b)"
+)
+shell_keyring_forbidden = re.compile(
+    r"(gi://(Secret|Gcr|GnomeKeyring)(?:\?version=[0-9.]+)?|imports\.gi\.(Secret|Gcr|GnomeKeyring)|"
+    r"\bSecret\.|\bGcr\.|\bGnomeKeyring\.|\bkeyring\b)"
+)
+shell_file_read_forbidden = re.compile(
+    r"(\bGio\.File\.new_for_path\b|\bnew_for_path\s*\(|\bload_contents\s*\(|\bread\s*\(|\bread_async\s*\()"
+)
 
 violations = []
 for path in sorted(root.rglob("*.js")):
     rel = path.relative_to(root)
     text = path.read_text(encoding="utf-8")
+    is_test = len(rel.parts) > 1 and rel.parts[0] == "tests"
     if rel.name == "prefs.js":
         if prefs_forbidden.search(text):
             violations.append(f"{rel}: Shell-only import used in prefs.js")
-    elif shell_forbidden.search(text):
-        violations.append(f"{rel}: GTK/GDK/Adw import used in Shell-process code")
+    else:
+        if shell_forbidden.search(text):
+            violations.append(f"{rel}: GTK/GDK/Adw import used in Shell-process code")
+        if shell_network_forbidden.search(text):
+            violations.append(f"{rel}: provider network API used in Shell-process code")
+        if shell_subprocess_forbidden.search(text):
+            violations.append(f"{rel}: subprocess API used in Shell-process code")
+        if not is_test and shell_cache_or_fixture_forbidden.search(text):
+            violations.append(f"{rel}: cache, browser-profile, or fixture file path used in Shell-process code")
+        if shell_keyring_forbidden.search(text):
+            violations.append(f"{rel}: keyring API used in Shell-process code")
+        if not is_test and shell_file_read_forbidden.search(text):
+            violations.append(f"{rel}: filesystem read API used in Shell-process code")
 
 if violations:
     raise SystemExit("\n".join(violations))
-print("GJS import boundary smoke check passed")
+print("GJS Shell-process boundary smoke check passed")
 PY
+
+if command -v gjs >/dev/null 2>&1; then
+  gjs -m "$ROOT/extension/tests/state.test.js"
+else
+  echo "gjs unavailable; extension pure JS tests not run"
+fi

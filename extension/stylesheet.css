@@ -1,3 +1,355 @@
-.codexbar-bootstrap-hidden {
-  /* Task 00 creates no visible Shell UI. Task 03 owns production styling. */
+.codexbar-panel {
+  spacing: 6px;
+  padding: 0 3px;
+}
+
+.codexbar-panel-label {
+  font-weight: 700;
+  max-width: 94px;
+}
+
+.codexbar-panel-detail {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82em;
+  max-width: 128px;
+}
+
+.codexbar-panel-state-ok .codexbar-panel-icon {
+  color: #57c785;
+}
+
+.codexbar-panel-state-stale .codexbar-panel-icon,
+.codexbar-panel-state-unauthenticated .codexbar-panel-icon,
+.codexbar-panel-state-cookie_rejected .codexbar-panel-icon,
+.codexbar-panel-state-missing_dependency .codexbar-panel-icon,
+.codexbar-panel-state-provider_unavailable .codexbar-panel-icon,
+.codexbar-panel-state-timeout .codexbar-panel-icon {
+  color: #e5b84a;
+}
+
+.codexbar-panel-state-error .codexbar-panel-icon,
+.codexbar-panel-state-parse_error .codexbar-panel-icon,
+.codexbar-panel-state-daemon_unavailable .codexbar-panel-icon {
+  color: #ef6f6c;
+}
+
+.codexbar-popover {
+  min-width: 380px;
+  max-width: 460px;
+  spacing: 10px;
+  padding: 12px;
+}
+
+.codexbar-popover-header,
+.codexbar-provider-card-header,
+.codexbar-diagnostics-header,
+.codexbar-provider-actions,
+.codexbar-meter-header {
+  spacing: 8px;
+}
+
+.codexbar-popover-title,
+.codexbar-provider-title,
+.codexbar-diagnostics-title {
+  font-weight: 700;
+}
+
+.codexbar-popover-subtitle,
+.codexbar-provider-subtitle,
+.codexbar-provider-meta,
+.codexbar-meter-detail,
+.codexbar-diagnostics-line,
+.codexbar-footer {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.86em;
+}
+
+.codexbar-provider-list {
+  spacing: 8px;
+}
+
+.codexbar-provider-card,
+.codexbar-diagnostics {
+  border-radius: 8px;
+  padding: 10px;
+  spacing: 9px;
+  background-color: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.codexbar-state-ok {
+  border-color: rgba(87, 199, 133, 0.38);
+}
+
+.codexbar-state-stale,
+.codexbar-state-unauthenticated,
+.codexbar-state-cookie_rejected,
+.codexbar-state-missing_dependency,
+.codexbar-state-provider_unavailable,
+.codexbar-state-timeout {
+  border-color: rgba(229, 184, 74, 0.42);
+}
+
+.codexbar-state-error,
+.codexbar-state-parse_error {
+  border-color: rgba(239, 111, 108, 0.48);
+}
+
+.codexbar-state-pill {
+  border-radius: 7px;
+  padding: 3px 7px;
+  font-size: 0.78em;
+  font-weight: 700;
+}
+
+.codexbar-state-pill-ok {
+  color: #102819;
+  background-color: #57c785;
+}
+
+.codexbar-state-pill-warning,
+.codexbar-state-pill-loading {
+  color: #2b230c;
+  background-color: #e5b84a;
+}
+
+.codexbar-state-pill-error {
+  color: #32110f;
+  background-color: #ef6f6c;
+}
+
+.codexbar-meter-list {
+  spacing: 8px;
+}
+
+.codexbar-meter-list-compact {
+  spacing: 3px;
+}
+
+.codexbar-meter-row {
+  spacing: 4px;
+}
+
+.codexbar-meter-row-compact {
+  spacing: 2px;
+}
+
+.codexbar-meter-label {
+  font-weight: 600;
+}
+
+.codexbar-segment-bar {
+  spacing: 2px;
+}
+
+.codexbar-meter-segment {
+  width: 8px;
+  height: 5px;
+  border-radius: 2px;
+}
+
+.codexbar-meter-list-compact .codexbar-meter-segment {
+  width: 6px;
+  height: 4px;
+}
+
+.codexbar-meter-segment-empty {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.codexbar-meter-segment-ok {
+  background-color: #57c785;
+}
+
+.codexbar-meter-segment-warning {
+  background-color: #e5b84a;
+}
+
+.codexbar-meter-segment-danger {
+  background-color: #ef6f6c;
+}
+
+.codexbar-meter-segment-unknown {
+  background-color: #6ea8d6;
+}
+
+.codexbar-button,
+.codexbar-icon-button {
+  border-radius: 7px;
+  padding: 6px 9px;
+  background-color: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.codexbar-icon-button {
+  padding: 6px;
+}
+
+.codexbar-button:hover,
+.codexbar-icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.codexbar-button-busy {
+  color: #e5b84a;
+}
+
+.codexbar-button-content {
+  spacing: 6px;
+}
+
+.codexbar-button-icon {
+  icon-size: 14px;
+}
+
+.codexbar-diagnostics {
+  background-color: rgba(31, 41, 55, 0.44);
+}
+
+.codexbar-footer {
+  padding: 2px 1px 0;
+}
+
+.codexbar-theme-compact .codexbar-popover {
+  min-width: 340px;
+}
+
+.codexbar-popover.codexbar-theme-compact {
+  min-width: 340px;
+}
+
+.codexbar-theme-compact .codexbar-provider-card,
+.codexbar-theme-compact .codexbar-diagnostics {
+  padding: 8px;
+  spacing: 6px;
+}
+
+.codexbar-theme-high_contrast .codexbar-provider-card,
+.codexbar-theme-high_contrast .codexbar-diagnostics {
+  background-color: rgba(0, 0, 0, 0.62);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.codexbar-popover.codexbar-theme-high_contrast .codexbar-provider-card,
+.codexbar-popover.codexbar-theme-high_contrast .codexbar-diagnostics {
+  background-color: rgba(0, 0, 0, 0.62);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.codexbar-panel-content {
+  spacing: 6px;
+}
+
+.codexbar-panel-meter-stack {
+  spacing: 2px;
+  width: 42px;
+}
+
+.codexbar-panel-label-minimal {
+  font-size: 0.82em;
+}
+
+.codexbar-meter {
+  spacing: 2px;
+  min-height: 7px;
+}
+
+.codexbar-meter-compact {
+  min-height: 3px;
+  width: 42px;
+}
+
+.codexbar-meter-compact .codexbar-meter-segment {
+  width: 3px;
+  height: 3px;
+}
+
+.codexbar-meter-segment-active {
+  background-color: #57c785;
+}
+
+.codexbar-meter-warning .codexbar-meter-segment-active {
+  background-color: #e5b84a;
+}
+
+.codexbar-meter-danger .codexbar-meter-segment-active,
+.codexbar-meter-unknown .codexbar-meter-segment-active {
+  background-color: #ef6f6c;
+}
+
+.codexbar-meter-label {
+  max-width: 320px;
+}
+
+.codexbar-header,
+.codexbar-footer,
+.codexbar-diagnostics {
+  spacing: 6px;
+}
+
+.codexbar-header-top,
+.codexbar-provider-header,
+.codexbar-section-header,
+.codexbar-card-actions {
+  spacing: 8px;
+}
+
+.codexbar-title {
+  font-weight: 700;
+  font-size: 1.08em;
+}
+
+.codexbar-provider-glyph {
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 700;
+  background-color: rgba(98, 160, 234, 0.18);
+}
+
+.codexbar-provider-title-box,
+.codexbar-provider-meters {
+  spacing: 3px;
+}
+
+.codexbar-section-title {
+  font-weight: 700;
+}
+
+.codexbar-provider-message,
+.codexbar-diagnostic-line {
+  max-width: 340px;
+}
+
+.codexbar-muted {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.codexbar-small {
+  font-size: 0.82em;
+}
+
+.codexbar-button-primary {
+  background-color: #3584e4;
+  color: #ffffff;
+}
+
+.codexbar-button-secondary {
+  background-color: rgba(255, 255, 255, 0.10);
+}
+
+.codexbar-provider-dot {
+  spacing: 1px;
+  min-width: 30px;
+}
+
+.codexbar-provider-dot-label {
+  font-size: 0.76em;
+  font-weight: 700;
+  text-align: center;
+}
+
+.codexbar-state-daemon_unavailable {
+  border-color: rgba(239, 111, 108, 0.48);
 }
