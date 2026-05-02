@@ -31,6 +31,23 @@ impl SessionMaterial {
     pub fn is_empty(&self) -> bool {
         self.cookies.is_empty()
     }
+
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    pub(crate) fn cookie_header_value(&self) -> Option<String> {
+        if self.cookies.is_empty() {
+            return None;
+        }
+        Some(
+            self.cookies
+                .iter()
+                .map(ScopedCookie::header_pair)
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    }
 }
 
 impl fmt::Debug for SessionMaterial {
@@ -54,6 +71,10 @@ impl ScopedCookie {
             name: name.into(),
             value: value.into(),
         }
+    }
+
+    fn header_pair(&self) -> String {
+        format!("{}={}", self.name, self.value)
     }
 }
 

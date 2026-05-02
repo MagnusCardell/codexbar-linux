@@ -1,5 +1,20 @@
 # Task 04D - Codex/OpenAI Web Adapter
 
+## Task 04D.0 Status
+
+Complete as a fake-only skeleton slice. The daemon now has a `web` module with
+a bounded request/response abstraction, a fake HTTP client, static Codex web
+policy, redaction-safe provider web diagnostics, synthetic Codex fixtures, and
+parser/normalizer tests against existing snapshot/diagnostics contracts.
+
+Production `linux_web` refresh remains disabled by default: there is no live
+HTTP client and no provider endpoint contact. Runtime `Refresh` with
+`sourceAdapterPolicy.mode="only"` and `adapters=["linux_web"]` returns a
+schema-valid disabled provider state unless a test-only fake fixture is injected.
+This task did not add Shell changes, D-Bus XML changes, JSON schema changes,
+production HTTP dependencies, real browser profile scanning, keyring access, raw
+cookie persistence, or a TCP product API.
+
 ## Goal
 
 Implement the first daemon-only Linux web provider adapter using in-memory

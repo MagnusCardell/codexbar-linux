@@ -39,6 +39,17 @@ Constraints:
 - No raw dashboard payload is cached or exposed.
 - Account identity is masked/hash-only.
 
+Task 04D.0 implementation status:
+
+- daemon-only Codex web adapter skeleton exists behind fake HTTP fixtures;
+- static request, redirect, and browser-cookie domain policy is defined;
+- fake fixture responses cover success, rejected session material, provider
+  unavailable, parse error, timeout, redirect rejection, and response-size cap;
+- production `linux_web` refresh has no live HTTP client configured by default
+  and must not contact `chatgpt.com` or `openai.com`;
+- live provider scraping, live provider HTTP, real browser profile scanning, and
+  keyring access remain out of scope.
+
 ## Phase 2 Candidate
 
 ### Claude Web

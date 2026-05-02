@@ -23,6 +23,7 @@ use crate::model::{
 };
 use crate::paths::AppPaths;
 use crate::redact;
+use crate::web::client::{CodexWebFixture, FakeWebClient};
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
 #[derive(Debug)]
@@ -41,6 +42,8 @@ pub struct AppRuntime {
     allow_fixture_source: bool,
     browser_roots: Option<BrowserDiscoveryRoots>,
     browser_decryptor_mode: FakeDecryptorMode,
+    codex_web_fixture: Option<CodexWebFixture>,
+    fake_web_session_available: bool,
 }
 
 impl AppRuntime {
@@ -49,6 +52,8 @@ impl AppRuntime {
             allow_fixture_source: false,
             browser_roots: None,
             browser_decryptor_mode: FakeDecryptorMode::Success,
+            codex_web_fixture: None,
+            fake_web_session_available: false,
         }
     }
 
@@ -57,6 +62,8 @@ impl AppRuntime {
             allow_fixture_source: env_allows_fixture_source(),
             browser_roots: env_browser_roots()?,
             browser_decryptor_mode: FakeDecryptorMode::Success,
+            codex_web_fixture: None,
+            fake_web_session_available: false,
         })
     }
 
@@ -65,6 +72,8 @@ impl AppRuntime {
             allow_fixture_source: true,
             browser_roots: None,
             browser_decryptor_mode: FakeDecryptorMode::Success,
+            codex_web_fixture: None,
+            fake_web_session_available: false,
         }
     }
 
@@ -86,12 +95,32 @@ impl AppRuntime {
         self
     }
 
+    pub fn with_codex_web_fixture_for_tests(fixture: CodexWebFixture) -> Self {
+        Self::production()
+            .with_codex_web_fixture(fixture)
+            .with_fake_web_session_available(true)
+    }
+
+    pub fn with_codex_web_fixture(mut self, fixture: CodexWebFixture) -> Self {
+        self.codex_web_fixture = Some(fixture);
+        self
+    }
+
+    pub fn with_fake_web_session_available(mut self, available: bool) -> Self {
+        self.fake_web_session_available = available;
+        self
+    }
+
     fn browser_roots(&self) -> Option<BrowserDiscoveryRoots> {
         self.browser_roots.clone()
     }
 
     fn browser_decryptor_mode(&self) -> FakeDecryptorMode {
         self.browser_decryptor_mode
+    }
+
+    fn codex_web_fixture(&self) -> Option<CodexWebFixture> {
+        self.codex_web_fixture
     }
 }
 
@@ -362,10 +391,16 @@ impl App {
         };
 
         let finished_at = now_rfc3339();
-        let provider_targets = cli::target_providers(&settings, &active.options.providers);
         let fixture_requested = fixture_requested(&active.options);
         let fixture_only = active.options.source_adapter_policy.allows_fixture()
             && !active.options.source_adapter_policy.allows_upstream_cli();
+        let linux_web_requested = active.options.source_adapter_policy.mode
+            == crate::model::SourceAdapterPolicyMode::Only
+            && active
+                .options
+                .source_adapter_policy
+                .adapters
+                .contains(&RefreshSourceAdapter::LinuxWeb);
 
         let (mut snapshot, mut diagnostics, mut diagnostic_codes) =
             if fixture_requested && !self.runtime.fixture_source_allowed() {
@@ -383,7 +418,39 @@ impl App {
                     Vec::new(),
                     Vec::new(),
                 )
+            } else if linux_web_requested {
+                let provider_targets =
+                    crate::web::target_providers(&settings, &active.options.providers);
+                let mut sessions = std::collections::BTreeMap::new();
+                if self.runtime.fake_web_session_available {
+                    sessions.insert(
+                        "codex".to_string(),
+                        crate::web::fake_codex_session_for_tests(),
+                    );
+                }
+                let request = crate::web::WebRefreshRequest {
+                    refresh_id: refresh_id.to_string(),
+                    started_at: active.started_at.clone(),
+                    finished_at: finished_at.clone(),
+                    providers: provider_targets,
+                    selected_provider: previous_snapshot.selected_provider.clone(),
+                    upstream_cli: cli::resolve_info(&self.paths),
+                    sessions,
+                };
+                let refresh = if let Some(fixture) = self.runtime.codex_web_fixture() {
+                    let client = FakeWebClient::codex_fixture(fixture);
+                    crate::web::refresh_with_client(request, &client)?
+                } else {
+                    crate::web::disabled_refresh(request)?
+                };
+                let diagnostic_codes = refresh
+                    .diagnostics
+                    .iter()
+                    .map(|event| event.code.clone())
+                    .collect::<Vec<_>>();
+                (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
             } else if active.options.source_adapter_policy.allows_upstream_cli() {
+                let provider_targets = cli::target_providers(&settings, &active.options.providers);
                 let adapter = UpstreamCliAdapter::from_paths(&self.paths);
                 let refresh = adapter
                     .refresh(CliRefreshRequest {

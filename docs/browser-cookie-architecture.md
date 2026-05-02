@@ -2,12 +2,15 @@
 
 ## Status
 
-Frozen for Task 04A and partially implemented by Task 04B. Task 04B adds
+Frozen for Task 04A and partially implemented by Task 04B/04D. Task 04B adds
 daemon-only Chromium-family synthetic/fake-root discovery, private SQLite cookie
 DB temp copies, synthetic cookie-row reads, fake decryptor states, in-memory
-session material, and schema-valid `TestBrowserImport` results. It still does
-not implement live browser-profile scanning by default, real keyring access,
-provider HTTP fetches, provider response parsing, or web scraping.
+session material, and schema-valid `TestBrowserImport` results. Task 04D.0 adds
+a daemon-only Codex web adapter skeleton with fake HTTP fixtures, static
+policy/URL allowlists, response-size/redirect/timeout handling, and
+normalization into the existing snapshot provider shape. It still does not
+implement live browser-profile scanning by default, real keyring access, live
+provider HTTP, real provider scraping, or web scraping.
 
 ## Thesis
 
@@ -96,7 +99,10 @@ Existing surfaces are sufficient for the first implementation slice:
 Expected runtime failures must be represented as schema-valid payload states
 and diagnostics. They should not become D-Bus method errors except for invalid
 JSON, invalid settings patches, refresh busy, unimplemented capabilities, or
-redacted internal failures.
+redacted internal failures. In Task 04D.0, production `linux_web` refreshes have
+no live HTTP client configured by default and return redacted
+`linux_web_live_http_disabled` diagnostics instead of contacting provider
+endpoints.
 
 ## Browser Support Sequence
 

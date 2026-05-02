@@ -26,10 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 04B.1 live throwaway Chromium-family verification**
-status. The Task 03 GNOME Shell vertical slice and design gate are complete
-enough for the browser-cookie implementation phase, with live GNOME 46 Wayland
-activation smoke proven.
+This repository is at **Task 04D.0 Codex web adapter skeleton with fake HTTP
+fixtures** status. The Task 03 GNOME Shell vertical slice and design gate are
+complete enough for the browser-cookie implementation phase, with live GNOME 46
+Wayland activation smoke proven.
 
 Present:
 
@@ -76,11 +76,19 @@ Present:
   runs the ignored live `TestBrowserImport` smoke. Fake-home env roots now
   require canonical throwaway homes with `.codexbar-throwaway-browser-root`,
   reject real home/config roots, and keep public results path-free.
+- Task 04D.0 daemon-only Codex web adapter skeleton:
+  `daemon/src/web/` defines a bounded web request/response abstraction, static
+  Codex web policy, redaction-safe web diagnostics, fake HTTP client, and
+  Codex parser/normalizer against synthetic fixture shapes only. Production
+  `linux_web` refresh has no live HTTP client configured by default and returns
+  schema-valid disabled diagnostics instead of contacting provider endpoints.
+  Web fixtures live under `daemon/fixtures/web/codex/` and are checked by
+  `scripts/validate-web-fixtures.sh`.
 
-Not implemented after Task 04B.1:
+Not implemented after Task 04D.0:
 
-- provider network calls or Linux web adapters;
-- provider scraping;
+- live provider network calls or default production Linux web adapters;
+- real provider scraping;
 - real Secret Service/keyring access or interactive keyring prompts;
 - real user browser profile scanning by default;
 - Firefox browser import;
@@ -108,6 +116,7 @@ Useful narrower checks:
 ./scripts/validate-gsettings.sh
 ./scripts/validate-packaging.sh
 ./scripts/validate-browser-fixtures.sh
+./scripts/validate-web-fixtures.sh
 CODEXBAR_BROWSER_LIVE=1 ./scripts/chromium-throwaway-smoke.sh # optional live smoke
 ./scripts/test-fixtures.sh
 ./scripts/lint-gjs.sh
