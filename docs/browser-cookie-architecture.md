@@ -2,9 +2,12 @@
 
 ## Status
 
-Frozen for Task 04A. This document defines the architecture for future
-implementation tasks. It does not implement browser profile discovery, cookie
-reading, keyring access, provider HTTP fetches, or web scraping.
+Frozen for Task 04A and partially implemented by Task 04B. Task 04B adds
+daemon-only Chromium-family synthetic/fake-root discovery, private SQLite cookie
+DB temp copies, synthetic cookie-row reads, fake decryptor states, in-memory
+session material, and schema-valid `TestBrowserImport` results. It still does
+not implement live browser-profile scanning by default, real keyring access,
+provider HTTP fetches, provider response parsing, or web scraping.
 
 ## Thesis
 
@@ -107,8 +110,11 @@ Implementation order is:
 3. Other Chromium forks, Flatpak browsers, Snap variants beyond Chromium, and
    nonstandard profile roots later only after explicit verification.
 
-Task 04B must use fake or throwaway browser profiles first. Real user profile
-discovery remains disabled until reviewed live smoke instructions exist.
+Task 04B uses fake or throwaway browser profiles first. Real user profile
+discovery remains disabled until reviewed live smoke instructions exist. The
+daemon test/runtime gate for this slice is `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`
+or an injected `BrowserDiscoveryRoots` in tests; default `App::new()` does not
+derive browser roots from the real process `HOME` or `XDG_CONFIG_HOME`.
 
 See `docs/browser-support.md` for the support matrix.
 
@@ -401,11 +407,15 @@ environment variables. They must not commit live output.
 
 ## Dependency And Packaging Review
 
-Task 04A adds no dependencies.
+Task 04A added no dependencies. Task 04B adds `rusqlite = 0.32.1` as a normal
+daemon dependency for read-only SQLite cookie DB access against synthetic and
+throwaway browser profiles. The dependency intentionally uses system SQLite,
+not the bundled SQLite feature, so Ubuntu/Debian security updates continue to
+own the SQLite runtime.
 
-Likely future Rust crates or APIs:
+Current and likely future Rust crates or APIs:
 
-- `rusqlite` or another safe SQLite wrapper for cookie DB reads;
+- `rusqlite` for cookie DB reads;
 - existing `zbus` or a small reviewed Secret Service crate for keyring access;
 - narrowly scoped RustCrypto crates only after Chromium behavior is verified;
 - `reqwest` with Rustls-oriented TLS and default features disabled, if used;
@@ -416,8 +426,7 @@ Likely future Rust crates or APIs:
 
 Likely Debian/Ubuntu implications:
 
-- `pkg-config`, `libsqlite3-dev`, and runtime `libsqlite3-0` if system SQLite
-  is used;
+- `pkg-config`, `libsqlite3-dev`, and runtime `libsqlite3-0` for system SQLite;
 - `ca-certificates` for HTTPS;
 - optional `gnome-keyring` or Secret Service tooling for live smoke, not as a
   hard browser-import CI dependency;
@@ -425,17 +434,18 @@ Likely Debian/Ubuntu implications:
 - avoid `libsecret` FFI unless it is safer than direct Secret Service D-Bus,
   because it adds GLib/libsecret development packaging.
 
-CI must not require installed browsers, real profiles, real provider endpoints,
-or an unlocked user keyring.
+CI installs `pkg-config` and `libsqlite3-dev` for Task 04B. It must not require
+installed browsers, real profiles, real provider endpoints, or an unlocked user
+keyring. `tempfile` remains a test dependency only; runtime cookie DB copies use
+standard-library Unix mode controls for `0700` private directories and `0600`
+copied files.
 
 ## Non-Goals
 
-Task 04A and the initial implementation path do not:
+Task 04A and Task 04B do not:
 
-- implement browser-cookie reads;
-- implement SQLite cookie DB access;
-- implement keyring access;
-- implement browser profile discovery;
+- implement real keyring access;
+- enable real user browser profile scanning by default;
 - implement provider HTTP fetches;
 - implement web scraping;
 - add localhost or TCP APIs;

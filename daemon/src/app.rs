@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use crate::browser::keyring::FakeDecryptorMode;
+use crate::browser::profile::BrowserDiscoveryRoots;
+use crate::browser::{self, BrowserImportRequest};
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
 use crate::cli::{self, CliRefreshRequest, UpstreamCliAdapter};
 use crate::clock::{duration_ms, now_rfc3339, Clock};
@@ -12,12 +16,10 @@ use crate::config::{
 use crate::error::{AppError, AppResult};
 use crate::fixtures;
 use crate::model::{
-    BrowserImportOptions, BrowserImportResult, BrowserImportStatus, BrowserProviderResult,
-    BrowserProviderStatus, BrowserSourceAdapter, BusyBehavior, Capabilities, DaemonInfo,
-    DaemonPathsInfo, DaemonState, DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity,
-    EventRedaction, ProviderEvent, ProviderEventReason, RedactionSummary, RefreshOptions,
-    RefreshReason, RefreshResult, RefreshSourceAdapter, RefreshStatus, Settings, Snapshot,
-    SourceAdapter,
+    BrowserImportOptions, BusyBehavior, Capabilities, DaemonInfo, DaemonPathsInfo, DaemonState,
+    DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity, EventRedaction, ProviderEvent,
+    ProviderEventReason, RedactionSummary, RefreshOptions, RefreshReason, RefreshResult,
+    RefreshSourceAdapter, RefreshStatus, Settings, Snapshot, SourceAdapter,
 };
 use crate::paths::AppPaths;
 use crate::redact;
@@ -37,29 +39,59 @@ pub struct App {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppRuntime {
     allow_fixture_source: bool,
+    browser_roots: Option<BrowserDiscoveryRoots>,
+    browser_decryptor_mode: FakeDecryptorMode,
 }
 
 impl AppRuntime {
     pub fn production() -> Self {
         Self {
             allow_fixture_source: false,
+            browser_roots: None,
+            browser_decryptor_mode: FakeDecryptorMode::Success,
         }
     }
 
     pub fn from_env() -> Self {
         Self {
             allow_fixture_source: env_allows_fixture_source(),
+            browser_roots: env_browser_roots(),
+            browser_decryptor_mode: FakeDecryptorMode::Success,
         }
     }
 
     pub fn with_fixture_source_for_tests() -> Self {
         Self {
             allow_fixture_source: true,
+            browser_roots: None,
+            browser_decryptor_mode: FakeDecryptorMode::Success,
         }
     }
 
     pub fn fixture_source_allowed(&self) -> bool {
         self.allow_fixture_source
+    }
+
+    pub fn with_browser_roots_for_tests(roots: BrowserDiscoveryRoots) -> Self {
+        Self::production().with_browser_roots(roots)
+    }
+
+    pub fn with_browser_roots(mut self, roots: BrowserDiscoveryRoots) -> Self {
+        self.browser_roots = Some(roots);
+        self
+    }
+
+    pub fn with_browser_decryptor_mode(mut self, mode: FakeDecryptorMode) -> Self {
+        self.browser_decryptor_mode = mode;
+        self
+    }
+
+    fn browser_roots(&self) -> Option<BrowserDiscoveryRoots> {
+        self.browser_roots.clone()
+    }
+
+    fn browser_decryptor_mode(&self) -> FakeDecryptorMode {
+        self.browser_decryptor_mode
     }
 }
 
@@ -270,24 +302,20 @@ impl App {
                 return Err(AppError::invalid_json());
             }
         }
-        let result = BrowserImportResult {
-            schema_version: 1,
-            tested_at: now_rfc3339(),
-            status: BrowserImportStatus::NotImplemented,
-            policy: options.policy,
-            profiles: Vec::new(),
-            providers: options
-                .providers
-                .into_iter()
-                .map(|provider| BrowserProviderResult {
-                    provider,
-                    status: BrowserProviderStatus::NotImplemented,
-                    source_adapter: BrowserSourceAdapter::None,
-                    diagnostic_codes: vec!["browser_import_not_implemented".to_string()],
-                })
-                .collect(),
-            diagnostic_codes: vec!["browser_import_not_implemented".to_string()],
+        if !browser::validate_profile_ids(&options.profile_ids) {
+            return Err(AppError::invalid_json());
+        }
+        let settings = {
+            let state = self.lock_state()?;
+            state.settings.clone()
         };
+        let result = browser::test_import(BrowserImportRequest {
+            options,
+            settings,
+            roots: self.runtime.browser_roots(),
+            decryptor_mode: self.runtime.browser_decryptor_mode(),
+            tested_at: now_rfc3339(),
+        });
         to_public_json(&result)
     }
 
@@ -505,7 +533,7 @@ impl App {
             },
             capabilities: Capabilities {
                 upstream_cli: upstream_cli_available,
-                browser_import: false,
+                browser_import: true,
                 linux_web_adapters: false,
                 cost: upstream_cli_available,
                 settings_patch: true,
@@ -646,6 +674,14 @@ fn env_allows_fixture_source() -> bool {
             .as_deref(),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
+}
+
+fn env_browser_roots() -> Option<BrowserDiscoveryRoots> {
+    let value = std::env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME")?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(BrowserDiscoveryRoots::synthetic_home(PathBuf::from(value)))
 }
 
 fn parse_input_json<T>(json: &str) -> AppResult<T>

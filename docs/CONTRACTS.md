@@ -131,7 +131,7 @@ Future errors may be added only with docs, tests, and UI fallback behavior.
 - `details` may contain small scalar redacted values only.
 - Copy-diagnostics uses this payload after one more redaction pass.
 
-`TestBrowserImport(options_json)` accepts `spec/browser-import-options.schema.json` and returns `spec/browser-import-result.schema.json`. Until browser import behavior is implemented, the daemon may return a schema-valid result with `status=not_implemented`; it must not inspect browser profiles, keyrings, cookie stores, or provider endpoints during Task 00 or Task 01 stubs.
+`TestBrowserImport(options_json)` accepts `spec/browser-import-options.schema.json` and returns `spec/browser-import-result.schema.json`. Task 04B implements Chromium-family synthetic/fake-root capability checks through this existing method. Default runtime must still avoid real user profile scans unless a reviewed fake/throwaway or live gate is explicitly enabled. Firefox and provider-web validation may still return schema-valid `not_implemented` or unavailable states until their implementation tasks land.
 
 ## Cache contract
 

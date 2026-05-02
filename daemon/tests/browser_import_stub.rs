@@ -2,10 +2,10 @@ mod common;
 
 use codexbar_linuxd::app::App;
 use codexbar_linuxd::error::AppError;
-use codexbar_linuxd::model::BrowserImportResult;
+use codexbar_linuxd::model::{BrowserImportResult, BrowserImportStatus, BrowserProviderStatus};
 
 #[test]
-fn browser_import_stub_returns_not_implemented_without_browser_access() {
+fn browser_import_default_runtime_is_gated_without_browser_access() {
     let (tmp, paths) = common::temp_paths();
     let app = App::new(paths).expect("app");
     let result_json = app
@@ -16,15 +16,15 @@ fn browser_import_stub_returns_not_implemented_without_browser_access() {
     common::assert_schema("browser-import-result.schema.json", &result_json);
     common::assert_public_json_safe(&result_json);
     let result: BrowserImportResult = serde_json::from_str(&result_json).expect("result");
-    assert_eq!(
-        result.status,
-        codexbar_linuxd::model::BrowserImportStatus::NotImplemented
-    );
+    assert_eq!(result.status, BrowserImportStatus::Unavailable);
     assert!(result.profiles.is_empty());
     assert_eq!(result.providers.len(), 2);
     assert!(result.providers.iter().all(|provider| provider.status
-        == codexbar_linuxd::model::BrowserProviderStatus::NotImplemented
+        == BrowserProviderStatus::MissingDependency
         && provider.source_adapter == codexbar_linuxd::model::BrowserSourceAdapter::None));
+    assert!(result
+        .diagnostic_codes
+        .contains(&"browser_live_profiles_disabled".to_string()));
 
     assert!(!tmp.path().join(".config").join("chromium").exists());
     assert!(!tmp.path().join(".config").join("google-chrome").exists());

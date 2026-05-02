@@ -21,10 +21,23 @@ pub fn validate_public_json_text(text: &str) -> Result<(), RedactionFinding> {
         ("access_token", "accesstoken"),
         ("refresh_token", "refresh_token"),
         ("refresh_token", "refreshtoken"),
+        ("session_id", "sessionid"),
+        ("session_id", "sid="),
         ("session_token", "session_token"),
         ("session_key", "sessionkey"),
+        ("secure_cookie_name", "__secure-"),
+        ("host_cookie_name", "__host-"),
+        ("encrypted_cookie_value", "encrypted_value"),
+        ("browser_cookie_db", "/cookies"),
+        ("browser_cookie_db", "cookies.sqlite"),
+        ("browser_profile_path", ".config/google-chrome"),
+        ("browser_profile_path", ".config/chromium"),
+        ("browser_profile_path", "bravesoftware"),
         ("raw_payload", "\"rawpayload\""),
         ("raw_response", "\"rawresponse\""),
+        ("raw_profile_path", "\"rawprofilepath\""),
+        ("raw_cookie", "\"rawcookie\""),
+        ("raw_header", "\"rawheader\""),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
         ("auth_json_path", "auth.json"),
@@ -153,9 +166,15 @@ fn validate_public_key(key: &str) -> Result<(), RedactionFinding> {
         "authorization" | "cookie" | "cookies" | "setcookie" | "xapikey" | "headers" => {
             Some("secret_key")
         }
-        "raw" | "rawpayload" | "rawresponse" => Some("raw_payload"),
-        "accesstoken" | "refreshtoken" | "sessiontoken" | "sessionkey" | "apikey" | "password"
-        | "secret" => Some("token_key"),
+        "cookiename" | "cookienames" | "hostkey" | "domain" | "encryptedvalue" => {
+            Some("browser_cookie_key")
+        }
+        "raw" | "rawpayload" | "rawresponse" | "rawprofilepath" | "rawcookie" | "rawheader" => {
+            Some("raw_payload")
+        }
+        "accesstoken" | "refreshtoken" | "sessiontoken" | "sessionkey" | "sessionid" | "sid"
+        | "apikey" | "password" | "secret" => Some("token_key"),
+        "requestheaders" | "responseheaders" => Some("secret_key"),
         "accountemail" | "signedinemail" | "email" => Some("raw_email_key"),
         "accountorganization" | "organization" | "provideraccountid" => Some("raw_identity_key"),
         _ => None,
@@ -180,7 +199,21 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
         ("access_token", "accesstoken"),
         ("refresh_token", "refresh_token"),
         ("refresh_token", "refreshtoken"),
+        ("session_id", "sessionid"),
+        ("session_id", "sid="),
         ("session_key", "sessionkey"),
+        ("secure_cookie_name", "__secure-"),
+        ("host_cookie_name", "__host-"),
+        ("encrypted_cookie_value", "encrypted_value"),
+        ("browser_cookie_db", "network/cookies"),
+        ("browser_cookie_db", "/cookies"),
+        ("browser_cookie_db", "cookies.sqlite"),
+        ("browser_profile_path", ".config/google-chrome"),
+        ("browser_profile_path", ".config/chromium"),
+        ("browser_profile_path", "bravesoftware"),
+        ("raw_profile_path", "rawprofilepath"),
+        ("raw_cookie", "rawcookie"),
+        ("raw_header", "rawheader"),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
         ("auth_json_path", "auth.json"),

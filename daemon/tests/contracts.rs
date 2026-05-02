@@ -155,6 +155,8 @@ fn app_getters_return_schema_shaped_redacted_json() {
     assert_eq!(info.schema_version, 1);
     assert_eq!(info.dbus.interface, DBUS_INTERFACE);
     assert_eq!(info.capabilities.upstream_cli, info.upstream_cli.available);
+    assert!(info.capabilities.browser_import);
+    assert!(!info.capabilities.linux_web_adapters);
     assert_eq!(info.capabilities.cost, info.upstream_cli.available);
     assert!(info.capabilities.settings_patch);
 
@@ -277,7 +279,7 @@ fn settings_patch_validates_persists_and_rejects_invalid_json() {
 }
 
 #[test]
-fn browser_import_stub_is_schema_valid_and_does_not_probe_browser_state() {
+fn browser_import_default_gate_is_schema_valid_and_does_not_probe_browser_state() {
     let (_tmp, paths) = temp_paths();
     let app = App::new(paths).expect("app starts");
     let result_json = app
@@ -287,9 +289,13 @@ fn browser_import_stub_is_schema_valid_and_does_not_probe_browser_state() {
         .expect("browser import stub");
     let result: BrowserImportResult = serde_json::from_str(&result_json).unwrap();
     assert_eq!(result.schema_version, 1);
-    assert_eq!(result.status, BrowserImportStatus::NotImplemented);
+    assert_eq!(result.status, BrowserImportStatus::Unavailable);
     assert!(result.profiles.is_empty());
     assert_eq!(result.providers[0].provider, "codex");
+    assert_eq!(
+        result.providers[0].status,
+        codexbar_linuxd::model::BrowserProviderStatus::MissingDependency
+    );
 
     let invalid = app
         .test_browser_import_json(r#"{"schemaVersion":1,"profileIds":["/home/maca/profile"]}"#)

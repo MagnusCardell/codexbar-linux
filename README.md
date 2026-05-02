@@ -26,23 +26,23 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 04A browser-cookie architecture freeze** status.
-The Task 03 GNOME Shell vertical slice and design gate are complete enough for
-the browser-cookie planning phase, with live GNOME 46 Wayland activation smoke
-proven.
+This repository is at **Task 04B Chromium-family browser-cookie import
+infrastructure** status. The Task 03 GNOME Shell vertical slice and design gate
+are complete enough for the browser-cookie implementation phase, with live
+GNOME 46 Wayland activation smoke proven.
 
 Present:
 
 - Rust crate `daemon/` named `codexbar-linuxd`.
 - Task 01 daemon runtime that owns the D-Bus session name `org.codexbar.Linux1`.
-- D-Bus methods for snapshots, refresh, diagnostics, daemon info, daemon settings patches, and the browser-import test stub.
+- D-Bus methods for snapshots, refresh, diagnostics, daemon info, daemon settings patches, and browser-import testing.
 - D-Bus refresh signals for started, provider changed, snapshot changed, and finished events.
 - Fixture refresh source for tests and explicit development mode; production
   daemon refresh rejects explicit fixture selection unless
   `CODEXBAR_LINUX_ALLOW_FIXTURE=1` is set.
 - Normalized snapshot cache at `${XDG_CACHE_HOME:-~/.cache}/codexbar-linux/snapshot.json`; no raw provider payloads are cached.
 - Daemon-owned settings at `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json`.
-- Contract, schema-payload, cache, settings, redaction, browser-import stub, and D-Bus runtime tests.
+- Contract, schema-payload, cache, settings, redaction, browser-import, and D-Bus runtime tests.
 - Redacted upstream CLI fixture corpus under `daemon/fixtures/upstream-cli/`.
 - Local-only upstream CLI capture harness and fixture validator.
 - Production daemon upstream CLI adapter for targeted provider refresh.
@@ -63,13 +63,20 @@ Present:
   `docs/browser-cookie-threat-model.md`,
   `docs/browser-support.md`, `docs/provider-roadmap.md`, and
   `docs/adr/0006-linux-browser-cookie-daemon-layer.md`.
+- Task 04B daemon-only Chromium-family browser import infrastructure:
+  bounded fake-root discovery for Chrome, Chromium, Chromium snap-shaped roots,
+  and Brave; private temp-copy SQLite cookie DB reads; synthetic plaintext and
+  fake encrypted cookie-row handling; fake keyring/decryptor states; memory-only
+  session material; redaction-safe `TestBrowserImport` results; and browser
+  fixture validation under `scripts/validate-browser-fixtures.sh`.
 
-Not implemented after Task 04A:
+Not implemented after Task 04B:
 
-- browser-cookie import, beyond the schema-valid `not_implemented` test stub;
 - provider network calls or Linux web adapters;
 - provider scraping;
-- keyring access;
+- real Secret Service/keyring access or interactive keyring prompts;
+- real user browser profile scanning by default;
+- Firefox browser import;
 - Debian package build wiring.
 
 The upstream CLI adapter does not default production usage/status refresh to
@@ -93,6 +100,7 @@ Useful narrower checks:
 ./scripts/validate-schemas.sh
 ./scripts/validate-gsettings.sh
 ./scripts/validate-packaging.sh
+./scripts/validate-browser-fixtures.sh
 ./scripts/test-fixtures.sh
 ./scripts/lint-gjs.sh
 cargo fmt --manifest-path daemon/Cargo.toml -- --check
@@ -113,6 +121,15 @@ UI development against fixture snapshots, start the daemon with:
 
 ```bash
 CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
+```
+
+Chromium-family browser import tests use synthetic or throwaway roots. Default
+daemon startup does not scan real browser profiles. For a development-only
+throwaway browser-import probe, point the daemon at an isolated fake home:
+
+```bash
+CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/path/to/throwaway-home \
+  cargo run --manifest-path daemon/Cargo.toml
 ```
 
 ## Manual GNOME smoke checks

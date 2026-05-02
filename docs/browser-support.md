@@ -2,8 +2,11 @@
 
 ## Status
 
-Task 04A planning document. No browser profile discovery or cookie reading is
-implemented by this file.
+Task 04A planning document updated after Task 04B implementation. Task 04B
+implements daemon-only Chromium-family discovery and cookie DB reads for
+synthetic/fake roots and throwaway fixtures. It does not enable real user
+profile scanning by default, real keyring access, provider web fetches, or
+Firefox import.
 
 ## Implementation Order
 
@@ -23,6 +26,13 @@ implemented by this file.
   reading where live browser locking is possible.
 - Query only provider-required domains and verified cookie names where known.
 - Use synthetic or throwaway profiles for tests.
+- In Task 04B, discovery only runs when the daemon receives injected
+  `BrowserDiscoveryRoots` in tests or `CODEXBAR_BROWSER_IMPORT_FAKE_HOME` in a
+  development process. Default runtime does not scan the real user profile
+  roots.
+- Task 04B fixtures live under `daemon/fixtures/browser/chromium/` as text
+  metadata/SQL definitions. Tests create throwaway SQLite DBs from those files;
+  committed fixtures do not include real or binary browser cookie databases.
 
 ## Google Chrome
 
@@ -61,7 +71,12 @@ Lock/concurrency considerations:
 
 Task 04B/04C decision:
 
-- Implement in the Chromium-family first slice.
+- Implemented for synthetic/fake roots in the Chromium-family first slice.
+- Supported fake-root profile directories are direct known children such as
+  `Default` and `Profile N`; profile IDs are path-free strings like
+  `chrome-default`.
+- Cookie DB lookup supports profile `Network/Cookies` first and legacy
+  profile-level `Cookies` second.
 
 Risks/open questions:
 
@@ -97,8 +112,8 @@ Lock/concurrency considerations:
 
 Task 04B/04C decision:
 
-- Include as a Chromium-family browser after Chrome/Chromium fixture behavior
-  is stable.
+- Included in Task 04B synthetic/fake-root discovery for the stable Brave root
+  only.
 
 Risks/open questions:
 
@@ -135,9 +150,11 @@ Lock/concurrency considerations:
 
 Task 04B/04C decision:
 
-- Implement in the Chromium-family first slice.
-- Verify snap behavior early because Ubuntu commonly routes Chromium through
-  snap.
+- Implemented in the Chromium-family first slice for synthetic/fake roots.
+- Task 04B includes fake-root coverage for both `~/.config/chromium` and
+  `~/snap/chromium/common/chromium`.
+- Live snap behavior still needs throwaway-profile verification before default
+  real-user scanning can be enabled.
 
 Risks/open questions:
 

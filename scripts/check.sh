@@ -10,6 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/scripts/test-fixtures.sh"
 "$ROOT/scripts/validate-upstream-cli-fixtures.sh"
 "$ROOT/scripts/test-upstream-cli-capture.sh"
+"$ROOT/scripts/validate-browser-fixtures.sh"
 
 if [[ ! -f "$ROOT/daemon/Cargo.toml" ]]; then
   echo "daemon/Cargo.toml is required after Task 00" >&2

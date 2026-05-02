@@ -76,6 +76,24 @@ The exact layout may differ if it follows established daemon patterns.
   diagnostic codes.
 - No provider web fetches are implemented.
 
+## Task 04B Result
+
+Implemented as a daemon-only synthetic/fake-root slice:
+
+- `daemon/src/browser/` contains Chromium-family discovery, cookie DB temp-copy
+  and read-only SQLite querying, fake decryptor states, redaction-safe
+  diagnostic-code mapping, and memory-only session material.
+- `TestBrowserImport` uses the existing JSON schema and D-Bus method. No D-Bus
+  XML or JSON schema changes were required.
+- Default runtime does not scan real browser roots. Tests inject
+  `BrowserDiscoveryRoots`; development processes may opt into fake/throwaway
+  roots with `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`.
+- Committed browser fixtures are text metadata/SQL only under
+  `daemon/fixtures/browser/chromium/`; tests create throwaway SQLite DBs.
+- Provider web fetches, real keyring access, Firefox import, live profile
+  scanning by default, Shell changes, and TCP/localhost APIs remain out of
+  scope.
+
 ## Checks To Run
 
 ```bash

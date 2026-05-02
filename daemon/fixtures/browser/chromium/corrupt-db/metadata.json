@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "corrupt-db",
+  "browserFamily": "chromium",
+  "profileShape": "Network/Cookies",
+  "expected": "corrupt",
+  "description": "Tests create invalid throwaway database bytes for this fixture."
+}
