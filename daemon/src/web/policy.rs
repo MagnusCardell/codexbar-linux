@@ -30,11 +30,19 @@ impl CodexWebPolicy {
         Self {
             request_hosts: &["chatgpt.com"],
             redirect_hosts: &["chatgpt.com"],
-            cookie_domains: &["chatgpt.com", "openai.com"],
+            cookie_domains: &["chatgpt.com"],
             dashboard_url: "https://chatgpt.com/codex/settings/usage",
             dashboard_path: "/codex/settings/usage",
             timeout: Duration::from_secs(15),
             response_size_limit: 512 * 1024,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn with_redirect_hosts_for_tests(redirect_hosts: &'static [&'static str]) -> Self {
+        Self {
+            redirect_hosts,
+            ..Self::new()
         }
     }
 

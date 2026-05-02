@@ -8,9 +8,11 @@ DB temp copies, synthetic cookie-row reads, fake decryptor states, in-memory
 session material, and schema-valid `TestBrowserImport` results. Task 04D.0 adds
 a daemon-only Codex web adapter skeleton with fake HTTP fixtures, static
 policy/URL allowlists, response-size/redirect/timeout handling, and
-normalization into the existing snapshot provider shape. It still does not
-implement live browser-profile scanning by default, real keyring access, live
-provider HTTP, real provider scraping, or web scraping.
+normalization into the existing snapshot provider shape. Task 04D.1 adds a
+daemon-only, gated real HTTP transport for opt-in Codex web reconnaissance
+against the single static dashboard URL. It still does not implement live
+browser-profile scanning by default, default live provider fetch, real keyring
+access, real provider scraping, or production web scraping.
 
 ## Thesis
 
@@ -99,10 +101,13 @@ Existing surfaces are sufficient for the first implementation slice:
 Expected runtime failures must be represented as schema-valid payload states
 and diagnostics. They should not become D-Bus method errors except for invalid
 JSON, invalid settings patches, refresh busy, unimplemented capabilities, or
-redacted internal failures. In Task 04D.0, production `linux_web` refreshes have
-no live HTTP client configured by default and return redacted
-`linux_web_live_http_disabled` diagnostics instead of contacting provider
-endpoints.
+redacted internal failures. In Task 04D.1, production `linux_web` refreshes
+still have no default live provider fetch and return redacted
+`linux_web_live_http_disabled` diagnostics unless an explicit reconnaissance
+gate is enabled. The live Codex reconnaissance gate requires
+`CODEXBAR_CODEX_WEB_LIVE=1`, a safe marked throwaway fake home through
+`CODEXBAR_BROWSER_IMPORT_FAKE_HOME`, explicit provider `codex`, and explicit
+source adapter `linux_web`.
 
 ## Browser Support Sequence
 
@@ -218,6 +223,8 @@ Rules:
   diagnostics.
 - Block redirects to unexpected hosts.
 - Bound response bodies.
+- Classify status, redirect, content-type, timeout, and body-size outcomes
+  before parser logic.
 - Do not execute scripts.
 - Treat provider responses as untrusted.
 - Fail closed on unexpected shapes.
@@ -226,6 +233,20 @@ Rules:
 
 The provider adapter consumes in-memory session material. It must not call
 browser discovery, read files, or access keyrings directly.
+
+Task 04D.1 Codex reconnaissance is narrower than future production provider
+web support:
+
+- the only live request target is
+  `https://chatgpt.com/codex/settings/usage`;
+- request, redirect, and cookie policy defaults to `chatgpt.com` only;
+- `openai.com` redirects and cookies are not used unless a future task verifies
+  that they are required and explicitly expands the allowlist;
+- Codex cookie names are not yet verified, so the temporary exception for
+  all `chatgpt.com` cookies is restricted to a marked throwaway fake home and
+  opt-in reconnaissance;
+- live responses may be classified, and fixture-shaped parser success remains
+  the only asserted normalizer.
 
 ## Diagnostics Model
 
@@ -426,13 +447,15 @@ throwaway browser profiles. The dependency intentionally uses system SQLite,
 not the bundled SQLite feature, so Ubuntu/Debian security updates continue to
 own the SQLite runtime.
 
-Current and likely future Rust crates or APIs:
+Current Rust crates and likely future APIs:
 
 - `rusqlite` for cookie DB reads;
+- `reqwest` for the Task 04D.1 daemon-only static Codex GET transport, with
+  default features disabled and Rustls-oriented TLS selected;
+- `url` for resolving and sanitizing redirect targets instead of ad hoc
+  string joining;
 - existing `zbus` or a small reviewed Secret Service crate for keyring access;
 - narrowly scoped RustCrypto crates only after Chromium behavior is verified;
-- `reqwest` with Rustls-oriented TLS and default features disabled, if used;
-- `url` for strict URL construction and host checks;
 - an internal cookie/session material type or a small cookie crate;
 - `secrecy` or `zeroize` only as defense-in-depth, not as a redaction
   substitute.
@@ -440,26 +463,27 @@ Current and likely future Rust crates or APIs:
 Likely Debian/Ubuntu implications:
 
 - `pkg-config`, `libsqlite3-dev`, and runtime `libsqlite3-0` for system SQLite;
-- `ca-certificates` for HTTPS;
+- `cmake` for the current Rustls/AWS-LC dependency graph used by `reqwest`;
+- `ca-certificates` for HTTPS trust roots;
 - optional `gnome-keyring` or Secret Service tooling for live smoke, not as a
   hard browser-import CI dependency;
 - avoid OpenSSL/native TLS unless explicitly justified;
 - avoid `libsecret` FFI unless it is safer than direct Secret Service D-Bus,
   because it adds GLib/libsecret development packaging.
 
-CI installs `pkg-config` and `libsqlite3-dev` for Task 04B. It must not require
-installed browsers, real profiles, real provider endpoints, or an unlocked user
-keyring. `tempfile` remains a test dependency only; runtime cookie DB copies use
-standard-library Unix mode controls for `0700` private directories and `0600`
-copied files.
+CI installs `pkg-config`, `libsqlite3-dev`, `cmake`, and `ca-certificates` for
+the daemon dependency graph. It must not require installed browsers, real
+profiles, real provider endpoints, or an unlocked user keyring. `tempfile`
+remains a test dependency only; runtime cookie DB copies use standard-library
+Unix mode controls for `0700` private directories and `0600` copied files.
 
 ## Non-Goals
 
-Task 04A and Task 04B do not:
+Task 04A through Task 04D.1 do not:
 
 - implement real keyring access;
 - enable real user browser profile scanning by default;
-- implement provider HTTP fetches;
+- enable default provider HTTP fetches;
 - implement web scraping;
 - add localhost or TCP APIs;
 - change Shell behavior;

@@ -5,9 +5,10 @@
 Task 04A planning document updated after Task 04B and Task 04B.1
 implementation. Task 04B implements daemon-only Chromium-family discovery and
 cookie DB reads for synthetic/fake roots and throwaway fixtures. Task 04B.1
-adds opt-in live throwaway Chromium-family verification. Neither task enables
-real user profile scanning by default, real keyring access, provider web
-fetches, or Firefox import.
+adds opt-in live throwaway Chromium-family verification. Task 04D.1 adds
+Codex web live reconnaissance against a marked throwaway fake home only. These
+tasks do not enable real user profile scanning by default, real keyring access,
+default provider web fetches, or Firefox import.
 
 ## Implementation Order
 
@@ -35,6 +36,12 @@ fetches, or Firefox import.
   canonical, throwaway directory with `.codexbar-throwaway-browser-root`; it is
   rejected if it is `/`, the real `$HOME`, under the real config home, missing,
   relative, or symlinked through an escaping `.config`.
+- In Task 04D.1, Codex web live reconnaissance reuses the same throwaway fake
+  home gate and additionally requires `CODEXBAR_CODEX_WEB_LIVE=1`, explicit
+  provider `codex`, and explicit source adapter `linux_web`. It may inspect
+  `chatgpt.com` cookie material from the throwaway profile in memory only and
+  may make one bounded static GET to the Codex dashboard URL. It must not use
+  real default browser profiles.
 - Task 04B fixtures live under `daemon/fixtures/browser/chromium/` as text
   metadata/SQL definitions. Tests create throwaway SQLite DBs from those files;
   committed fixtures do not include real or binary browser cookie databases.

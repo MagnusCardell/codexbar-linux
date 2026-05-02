@@ -26,8 +26,8 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 04D.0 Codex web adapter skeleton with fake HTTP
-fixtures** status. The Task 03 GNOME Shell vertical slice and design gate are
+This repository is at **Task 04D.1 gated Codex web transport and live
+reconnaissance** status. The Task 03 GNOME Shell vertical slice and design gate are
 complete enough for the browser-cookie implementation phase, with live GNOME 46
 Wayland activation smoke proven.
 
@@ -76,18 +76,22 @@ Present:
   runs the ignored live `TestBrowserImport` smoke. Fake-home env roots now
   require canonical throwaway homes with `.codexbar-throwaway-browser-root`,
   reject real home/config roots, and keep public results path-free.
-- Task 04D.0 daemon-only Codex web adapter skeleton:
+- Task 04D.1 daemon-only Codex web transport and reconnaissance:
   `daemon/src/web/` defines a bounded web request/response abstraction, static
-  Codex web policy, redaction-safe web diagnostics, fake HTTP client, and
-  Codex parser/normalizer against synthetic fixture shapes only. Production
-  `linux_web` refresh has no live HTTP client configured by default and returns
-  schema-valid disabled diagnostics instead of contacting provider endpoints.
+  Codex web policy, redaction-safe web diagnostics, fake HTTP client, a gated
+  Rustls-backed static GET client, and Codex parser/normalizer against
+  synthetic fixture shapes only. Production `linux_web` refresh has no live
+  provider fetch configured by default and returns schema-valid disabled
+  diagnostics instead of contacting provider endpoints. Live Codex web
+  reconnaissance is ignored by default and requires `CODEXBAR_CODEX_WEB_LIVE=1`,
+  a marked throwaway fake browser home, explicit provider `codex`, and explicit
+  `sourceAdapterPolicy.only(["linux_web"])`.
   Web fixtures live under `daemon/fixtures/web/codex/` and are checked by
   `scripts/validate-web-fixtures.sh`.
 
-Not implemented after Task 04D.0:
+Not implemented after Task 04D.1:
 
-- live provider network calls or default production Linux web adapters;
+- default production live provider fetch or default `linux_web` refresh;
 - real provider scraping;
 - real Secret Service/keyring access or interactive keyring prompts;
 - real user browser profile scanning by default;
@@ -132,6 +136,22 @@ of `./scripts/check.sh` or CI:
 CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   cargo test --manifest-path daemon/Cargo.toml -- --ignored --test-threads=1
 ```
+
+Optional Codex web live reconnaissance is also ignored by default and is not
+part of `./scripts/check.sh` or CI. It may make one bounded GET to
+`https://chatgpt.com/codex/settings/usage` only when all live gates are set and
+the fake home is a marked throwaway browser root:
+
+```bash
+CODEXBAR_CODEX_WEB_LIVE=1 \
+CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/path/to/throwaway-home \
+cargo test --manifest-path daemon/Cargo.toml -- --ignored codex_web_live
+```
+
+See [Codex web live reconnaissance](docs/codex-web-live-recon.md) before
+signing into ChatGPT/Codex in a throwaway profile. The live test must not print
+or commit raw cookies, request headers, response headers, response bodies,
+profile paths, or provider identity.
 
 Fixture-backed daemon refresh is disabled in production mode. For explicit local
 UI development against fixture snapshots, start the daemon with:

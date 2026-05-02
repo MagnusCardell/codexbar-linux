@@ -25,6 +25,7 @@ pub struct WebRefreshRequest {
     pub selected_provider: Option<String>,
     pub upstream_cli: UpstreamCliInfo,
     pub sessions: BTreeMap<String, SessionMaterial>,
+    pub session_diagnostic_codes: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -59,12 +60,23 @@ where
     let mut providers = Vec::new();
     let mut diagnostics = Vec::new();
     for provider_id in &request.providers {
+        let session_codes = request
+            .session_diagnostic_codes
+            .get(provider_id)
+            .cloned()
+            .unwrap_or_default();
+        diagnostics.extend(session_diagnostic_events(
+            provider_id,
+            &session_codes,
+            &request.finished_at,
+        ));
         if provider_id == providers::codex::PROVIDER_ID {
-            let result = providers::codex::fetch_dashboard_with_client(
+            let result = providers::codex::fetch_dashboard_with_client_with_session_codes(
                 client,
                 request.sessions.get(provider_id),
                 &request.finished_at,
                 None,
+                &session_codes,
             );
             providers.push(result.provider);
             diagnostics.extend(result.diagnostics);
@@ -224,6 +236,52 @@ fn web_diagnostic(
                 "provider_payload".to_string(),
             ],
         },
+    }
+}
+
+fn session_diagnostic_events(
+    provider: &str,
+    codes: &[String],
+    timestamp: &str,
+) -> Vec<DiagnosticEvent> {
+    codes
+        .iter()
+        .map(|code| {
+            web_diagnostic(
+                code,
+                session_code_message(code),
+                provider,
+                timestamp,
+                session_code_severity(code),
+            )
+        })
+        .collect()
+}
+
+fn session_code_message(code: &str) -> &'static str {
+    match code {
+        "browser_cookie_found" => "Provider-scoped browser cookie material was found",
+        "browser_cookie_decrypted" => "Provider-scoped browser cookie material was decrypted",
+        "browser_cookie_missing" => "Provider-scoped browser cookie material was absent",
+        "browser_cookie_db_locked" => "Browser cookie store was locked",
+        "browser_keyring_locked" => "Browser session material could not be unlocked",
+        "browser_keyring_prompt_required" => {
+            "Browser session material would require an interactive keyring prompt"
+        }
+        "browser_profile_not_found" | "browser_not_found" => {
+            "No supported throwaway browser profile was available"
+        }
+        "browser_live_profiles_disabled" => "Live browser profile scanning is disabled",
+        _ => "Browser session preflight completed with a redacted diagnostic",
+    }
+}
+
+fn session_code_severity(code: &str) -> DiagnosticSeverity {
+    match code {
+        "browser_cookie_found" | "browser_cookie_decrypted" | "browser_profile_discovered" => {
+            DiagnosticSeverity::Info
+        }
+        _ => DiagnosticSeverity::Warning,
     }
 }
 

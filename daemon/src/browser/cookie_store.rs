@@ -50,6 +50,17 @@ impl CookieQuery {
         }
     }
 
+    pub fn for_live_web_provider(provider: &str) -> Self {
+        match provider {
+            "codex" => Self {
+                provider: provider.to_string(),
+                domains: vec!["chatgpt.com".to_string()],
+                names: Vec::new(),
+            },
+            _ => Self::for_provider(provider),
+        }
+    }
+
     pub fn provider(&self) -> &str {
         &self.provider
     }
@@ -115,6 +126,11 @@ impl CookieStoreProfileOutcome {
             .or_default() += count;
         self.cookies_found += count;
     }
+}
+
+pub struct CookieStoreSessionOutcome {
+    pub profile: CookieStoreProfileOutcome,
+    pub sessions: BTreeMap<String, SessionMaterial>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -298,6 +314,156 @@ pub fn read_profile_cookies(
     outcome
 }
 
+pub fn read_profile_session_material(
+    profile: &BrowserProfileDescriptor,
+    queries: &[CookieQuery],
+    decryptor: &dyn CookieDecryptor,
+) -> CookieStoreSessionOutcome {
+    let mut outcome = CookieStoreProfileOutcome {
+        keyring_state: KeyringState::NotRequired,
+        ..CookieStoreProfileOutcome::default()
+    };
+    let mut sessions = BTreeMap::new();
+    let Some(db_path) = find_chromium_cookie_db(profile.profile_path()) else {
+        outcome.push_code(diagnostics::COOKIE_DB_MISSING);
+        for query in queries {
+            outcome.push_provider_code(query.provider(), diagnostics::COOKIE_DB_MISSING);
+        }
+        return CookieStoreSessionOutcome {
+            profile: outcome,
+            sessions,
+        };
+    };
+    let temp_copy = match copy_cookie_db_to_private_temp(&db_path) {
+        Ok(copy) => copy,
+        Err(failure) => {
+            outcome.push_code(failure.code());
+            for query in queries {
+                outcome.push_provider_code(query.provider(), failure.code());
+            }
+            return CookieStoreSessionOutcome {
+                profile: outcome,
+                sessions,
+            };
+        }
+    };
+    let connection = match open_read_only(temp_copy.db_path()) {
+        Ok(connection) => connection,
+        Err(failure) => {
+            outcome.push_code(failure.code());
+            for query in queries {
+                outcome.push_provider_code(query.provider(), failure.code());
+            }
+            return CookieStoreSessionOutcome {
+                profile: outcome,
+                sessions,
+            };
+        }
+    };
+    let columns = match cookie_columns(&connection) {
+        Ok(columns) if required_columns_present(&columns) => columns,
+        Ok(_) => {
+            outcome.push_code(diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED);
+            for query in queries {
+                outcome.push_provider_code(
+                    query.provider(),
+                    diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED,
+                );
+            }
+            return CookieStoreSessionOutcome {
+                profile: outcome,
+                sessions,
+            };
+        }
+        Err(failure) => {
+            outcome.push_code(failure.code());
+            for query in queries {
+                outcome.push_provider_code(query.provider(), failure.code());
+            }
+            return CookieStoreSessionOutcome {
+                profile: outcome,
+                sessions,
+            };
+        }
+    };
+
+    for query in queries {
+        match query_cookie_rows(&connection, &columns, query) {
+            Ok(rows) => {
+                let mut cookies = Vec::new();
+                let mut decrypted_cookie = false;
+                for row in rows {
+                    if row.is_expired() {
+                        continue;
+                    }
+                    match row.scoped_cookie(decryptor) {
+                        Ok(Some((was_decrypted, cookie))) => {
+                            decrypted_cookie |= was_decrypted;
+                            cookies.push(cookie);
+                        }
+                        Ok(None) => {}
+                        Err(error) => record_decrypt_error(&mut outcome, query.provider(), error),
+                    }
+                }
+                if !cookies.is_empty() {
+                    let provider_count = cookies.len() as u64;
+                    match SessionMaterial::try_new(query.provider(), cookies) {
+                        Ok(material) => {
+                            outcome.keyring_state = match outcome.keyring_state {
+                                KeyringState::NotRequired | KeyringState::Unknown => {
+                                    if decrypted_cookie {
+                                        KeyringState::Unlocked
+                                    } else {
+                                        KeyringState::NotRequired
+                                    }
+                                }
+                                state => state,
+                            };
+                            outcome.add_provider_count(query.provider(), provider_count);
+                            outcome.push_code(diagnostics::COOKIE_FOUND);
+                            outcome.push_provider_code(query.provider(), diagnostics::COOKIE_FOUND);
+                            if decrypted_cookie {
+                                outcome.push_code(diagnostics::COOKIE_DECRYPTED);
+                                outcome.push_provider_code(
+                                    query.provider(),
+                                    diagnostics::COOKIE_DECRYPTED,
+                                );
+                            }
+                            sessions.insert(query.provider().to_string(), material);
+                        }
+                        Err(_) => {
+                            outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
+                            outcome.push_provider_code(
+                                query.provider(),
+                                diagnostics::COOKIE_DECRYPTION_FAILED,
+                            );
+                        }
+                    }
+                } else if !outcome
+                    .provider_diagnostic_codes
+                    .get(query.provider())
+                    .is_some_and(|codes| diagnostics::contains_dependency_failure(codes))
+                {
+                    outcome.push_provider_code(query.provider(), diagnostics::COOKIE_MISSING);
+                }
+            }
+            Err(failure) => {
+                outcome.push_code(failure.code());
+                outcome.push_provider_code(query.provider(), failure.code());
+            }
+        }
+    }
+    if outcome.cookies_found == 0
+        && !diagnostics::contains_dependency_failure(&outcome.diagnostic_codes)
+    {
+        outcome.push_code(diagnostics::COOKIE_MISSING);
+    }
+    CookieStoreSessionOutcome {
+        profile: outcome,
+        sessions,
+    }
+}
+
 pub fn find_chromium_cookie_db(profile_path: &Path) -> Option<PathBuf> {
     let canonical_profile = fs::canonicalize(profile_path).ok()?;
     [
@@ -361,7 +527,7 @@ pub fn copy_cookie_db_to_private_temp(
     let mut copied_files = vec![db_path.clone()];
     for suffix in ["-wal", "-shm"] {
         let companion = PathBuf::from(format!("{}{}", source_db.display(), suffix));
-        if companion.is_file() {
+        if safe_companion_file(source_db, &companion) {
             let target = dir.join(format!("Cookies{suffix}"));
             copy_file_private(&companion, &target).map_err(|_| {
                 let _ = fs::remove_dir_all(&dir);
@@ -375,6 +541,21 @@ pub fn copy_cookie_db_to_private_temp(
         db_path,
         copied_files,
     })
+}
+
+fn safe_companion_file(source_db: &Path, companion: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(companion) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() {
+        return false;
+    }
+    let Ok(canonical_companion) = fs::canonicalize(companion) else {
+        return false;
+    };
+    source_db
+        .parent()
+        .is_some_and(|parent| canonical_companion.parent() == Some(parent))
 }
 
 fn create_private_temp_dir(temp_root: &Path) -> Result<PathBuf, CookieDbFailure> {
@@ -454,17 +635,21 @@ fn query_cookie_rows(
     query: &CookieQuery,
 ) -> Result<Vec<CookieRow>, CookieDbFailure> {
     let host_keys = query.host_keys();
-    if host_keys.is_empty() || query.names.is_empty() {
+    if host_keys.is_empty() {
         return Ok(Vec::new());
     }
     let host_placeholders = placeholders(host_keys.len());
-    let name_placeholders = placeholders(query.names.len());
     let samesite = optional_column(columns, "samesite");
     let source_scheme = optional_column(columns, "source_scheme");
     let source_port = optional_column(columns, "source_port");
-    let sql = format!(
-        "SELECT host_key, name, path, value, encrypted_value, expires_utc, is_secure, is_httponly, {samesite}, {source_scheme}, {source_port} FROM cookies WHERE host_key IN ({host_placeholders}) AND name IN ({name_placeholders})"
+    let mut sql = format!(
+        "SELECT host_key, name, path, value, encrypted_value, expires_utc, is_secure, is_httponly, {samesite}, {source_scheme}, {source_port} FROM cookies WHERE host_key IN ({host_placeholders})"
     );
+    if !query.names.is_empty() {
+        sql.push_str(" AND name IN (");
+        sql.push_str(&placeholders(query.names.len()));
+        sql.push(')');
+    }
     let params = host_keys.iter().chain(query.names.iter());
     let mut statement = connection.prepare(&sql).map_err(classify_sqlite_error)?;
     let rows = statement
@@ -510,7 +695,9 @@ fn optional_column(columns: &BTreeSet<String>, name: &str) -> &'static str {
 }
 
 struct CookieRow {
+    host_key: String,
     name: String,
+    path: String,
     value: String,
     encrypted_value: Vec<u8>,
     expires_utc: i64,
@@ -518,9 +705,9 @@ struct CookieRow {
 
 impl CookieRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        let _host_key: String = row.get(0)?;
+        let host_key: String = row.get(0)?;
         let name: String = row.get(1)?;
-        let _path: String = row.get(2)?;
+        let path: String = row.get(2)?;
         let value: String = row.get(3)?;
         let encrypted_value: Vec<u8> = row.get(4)?;
         let expires_utc: i64 = row.get(5)?;
@@ -530,7 +717,9 @@ impl CookieRow {
         let _source_scheme: Option<i64> = row.get(9)?;
         let _source_port: Option<i64> = row.get(10)?;
         Ok(Self {
+            host_key,
             name,
+            path,
             value,
             encrypted_value,
             expires_utc,
@@ -549,20 +738,75 @@ impl CookieRow {
         provider: &str,
         decryptor: &dyn CookieDecryptor,
     ) -> Result<Option<SessionMaterial>, DecryptError> {
+        let Some((_was_decrypted, cookie)) = self.scoped_cookie(decryptor)? else {
+            return Ok(None);
+        };
+        Ok(SessionMaterial::try_new(provider, vec![cookie]).ok())
+    }
+
+    fn scoped_cookie(
+        &self,
+        decryptor: &dyn CookieDecryptor,
+    ) -> Result<Option<(bool, ScopedCookie)>, DecryptError> {
         if !self.encrypted_value.is_empty() {
             let value = decryptor.decrypt(&self.encrypted_value)?;
-            return Ok(Some(SessionMaterial::new(
-                provider,
-                vec![ScopedCookie::new(self.name.clone(), value)],
-            )));
+            return Ok(ScopedCookie::try_new_for_domain(
+                &self.host_key,
+                &self.path,
+                self.name.clone(),
+                value,
+            )
+            .ok()
+            .map(|cookie| (true, cookie)));
         }
         if self.value.is_empty() {
             return Ok(None);
         }
-        Ok(Some(SessionMaterial::new(
-            provider,
-            vec![ScopedCookie::new(self.name.clone(), self.value.clone())],
-        )))
+        Ok(ScopedCookie::try_new_for_domain(
+            &self.host_key,
+            &self.path,
+            self.name.clone(),
+            self.value.clone(),
+        )
+        .ok()
+        .map(|cookie| (false, cookie)))
+    }
+}
+
+fn record_decrypt_error(
+    outcome: &mut CookieStoreProfileOutcome,
+    provider: &str,
+    error: DecryptError,
+) {
+    let state = error.keyring_state();
+    if outcome.keyring_state == KeyringState::NotRequired
+        || outcome.keyring_state == KeyringState::Unknown
+    {
+        outcome.keyring_state = state;
+    }
+    match error {
+        DecryptError::Unavailable => {
+            outcome.push_code(diagnostics::KEYRING_UNAVAILABLE);
+            outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            outcome.push_provider_code(provider, diagnostics::KEYRING_UNAVAILABLE);
+            outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+        }
+        DecryptError::Locked => {
+            outcome.push_code(diagnostics::KEYRING_LOCKED);
+            outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            outcome.push_provider_code(provider, diagnostics::KEYRING_LOCKED);
+            outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+        }
+        DecryptError::PromptRequired => {
+            outcome.push_code(diagnostics::KEYRING_PROMPT_REQUIRED);
+            outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            outcome.push_provider_code(provider, diagnostics::KEYRING_PROMPT_REQUIRED);
+            outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+        }
+        DecryptError::Failed => {
+            outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
+            outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_FAILED);
+        }
     }
 }
 
@@ -619,5 +863,14 @@ mod tests {
             .iter()
             .all(|domain| domain.ends_with(".invalid")));
         assert!(query.host_keys().iter().any(|host| host.starts_with('.')));
+    }
+
+    #[test]
+    fn live_codex_query_is_domain_bounded_without_cookie_name_guessing() {
+        let query = CookieQuery::for_live_web_provider("codex");
+        assert_eq!(query.provider(), "codex");
+        assert_eq!(query.domains, vec!["chatgpt.com"]);
+        assert!(query.names.is_empty());
+        assert_eq!(query.host_keys(), vec!["chatgpt.com", ".chatgpt.com"]);
     }
 }

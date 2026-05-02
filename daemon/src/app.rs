@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::browser::keyring::FakeDecryptorMode;
 use crate::browser::profile::BrowserDiscoveryRoots;
-use crate::browser::{self, BrowserImportRequest};
+use crate::browser::{self, BrowserImportRequest, BrowserSessionRequest};
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
 use crate::cli::{self, CliRefreshRequest, UpstreamCliAdapter};
 use crate::clock::{duration_ms, now_rfc3339, Clock};
@@ -23,7 +23,7 @@ use crate::model::{
 };
 use crate::paths::AppPaths;
 use crate::redact;
-use crate::web::client::{CodexWebFixture, FakeWebClient};
+use crate::web::client::{CodexWebFixture, FakeWebClient, ReqwestStaticGetClient};
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
 #[derive(Debug)]
@@ -44,6 +44,7 @@ pub struct AppRuntime {
     browser_decryptor_mode: FakeDecryptorMode,
     codex_web_fixture: Option<CodexWebFixture>,
     fake_web_session_available: bool,
+    codex_web_live_transport: bool,
 }
 
 impl AppRuntime {
@@ -54,16 +55,23 @@ impl AppRuntime {
             browser_decryptor_mode: FakeDecryptorMode::Success,
             codex_web_fixture: None,
             fake_web_session_available: false,
+            codex_web_live_transport: false,
         }
     }
 
     pub fn from_env() -> AppResult<Self> {
+        let browser_roots = env_browser_roots()?;
+        let codex_web_live_transport = env_codex_web_live_transport();
+        if codex_web_live_transport && browser_roots.is_none() {
+            return Err(unsafe_browser_fake_home());
+        }
         Ok(Self {
             allow_fixture_source: env_allows_fixture_source(),
-            browser_roots: env_browser_roots()?,
+            browser_roots,
             browser_decryptor_mode: FakeDecryptorMode::Success,
             codex_web_fixture: None,
             fake_web_session_available: false,
+            codex_web_live_transport,
         })
     }
 
@@ -74,6 +82,7 @@ impl AppRuntime {
             browser_decryptor_mode: FakeDecryptorMode::Success,
             codex_web_fixture: None,
             fake_web_session_available: false,
+            codex_web_live_transport: false,
         }
     }
 
@@ -111,6 +120,11 @@ impl AppRuntime {
         self
     }
 
+    pub fn with_codex_web_live_transport_for_tests(mut self, enabled: bool) -> Self {
+        self.codex_web_live_transport = enabled;
+        self
+    }
+
     fn browser_roots(&self) -> Option<BrowserDiscoveryRoots> {
         self.browser_roots.clone()
     }
@@ -121,6 +135,10 @@ impl AppRuntime {
 
     fn codex_web_fixture(&self) -> Option<CodexWebFixture> {
         self.codex_web_fixture
+    }
+
+    fn codex_web_live_transport(&self) -> bool {
+        self.codex_web_live_transport
     }
 }
 
@@ -421,12 +439,24 @@ impl App {
             } else if linux_web_requested {
                 let provider_targets =
                     crate::web::target_providers(&settings, &active.options.providers);
+                let live_transport_allowed = self.runtime.codex_web_live_transport()
+                    && codex_web_live_request_allowed(&active.options, &provider_targets);
                 let mut sessions = std::collections::BTreeMap::new();
+                let mut session_diagnostic_codes = std::collections::BTreeMap::new();
                 if self.runtime.fake_web_session_available {
                     sessions.insert(
                         "codex".to_string(),
                         crate::web::fake_codex_session_for_tests(),
                     );
+                } else if live_transport_allowed {
+                    let collection = browser::collect_session_material(BrowserSessionRequest {
+                        providers: provider_targets.clone(),
+                        settings: settings.clone(),
+                        roots: self.runtime.browser_roots(),
+                        decryptor_mode: FakeDecryptorMode::Unavailable,
+                    });
+                    sessions = collection.sessions;
+                    session_diagnostic_codes = collection.provider_diagnostic_codes;
                 }
                 let request = crate::web::WebRefreshRequest {
                     refresh_id: refresh_id.to_string(),
@@ -436,9 +466,13 @@ impl App {
                     selected_provider: previous_snapshot.selected_provider.clone(),
                     upstream_cli: cli::resolve_info(&self.paths),
                     sessions,
+                    session_diagnostic_codes,
                 };
                 let refresh = if let Some(fixture) = self.runtime.codex_web_fixture() {
                     let client = FakeWebClient::codex_fixture(fixture);
+                    crate::web::refresh_with_client(request, &client)?
+                } else if live_transport_allowed {
+                    let client = ReqwestStaticGetClient::new();
                     crate::web::refresh_with_client(request, &client)?
                 } else {
                     crate::web::disabled_refresh(request)?
@@ -601,7 +635,8 @@ impl App {
             capabilities: Capabilities {
                 upstream_cli: upstream_cli_available,
                 browser_import: true,
-                linux_web_adapters: false,
+                linux_web_adapters: self.runtime.codex_web_live_transport()
+                    || self.runtime.codex_web_fixture().is_some(),
                 cost: upstream_cli_available,
                 settings_patch: true,
             },
@@ -655,7 +690,14 @@ fn refresh_status(
         .count();
     if ok_count == snapshot.providers.len() && diagnostic_codes.is_empty() && cache_written {
         RefreshStatus::Ok
-    } else if ok_count > 0 {
+    } else if ok_count > 0
+        || (diagnostic_codes
+            .iter()
+            .any(|code| code == "stale_cache_fallback")
+            && !diagnostic_codes
+                .iter()
+                .any(|code| code == "fixture_not_allowed"))
+    {
         RefreshStatus::Partial
     } else {
         RefreshStatus::Error
@@ -690,6 +732,14 @@ fn fixture_requested(options: &RefreshOptions) -> bool {
         .contains(&RefreshSourceAdapter::Fixture)
         || (options.source_adapter_policy.allows_fixture()
             && !options.source_adapter_policy.allows_upstream_cli())
+}
+
+fn codex_web_live_request_allowed(options: &RefreshOptions, provider_targets: &[String]) -> bool {
+    options.providers.len() == 1
+        && options.providers[0] == "codex"
+        && provider_targets.iter().any(|provider| provider == "codex")
+        && options.source_adapter_policy.mode == crate::model::SourceAdapterPolicyMode::Only
+        && options.source_adapter_policy.adapters.as_slice() == [RefreshSourceAdapter::LinuxWeb]
 }
 
 fn fixture_not_allowed_snapshot(
@@ -739,6 +789,13 @@ fn env_allows_fixture_source() -> bool {
         std::env::var("CODEXBAR_LINUX_ALLOW_FIXTURE")
             .ok()
             .as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
+fn env_codex_web_live_transport() -> bool {
+    matches!(
+        std::env::var("CODEXBAR_CODEX_WEB_LIVE").ok().as_deref(),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
 }
@@ -921,6 +978,21 @@ mod tests {
 
         assert!(safe_browser_roots_from_fake_home(
             real_config_child,
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn fake_browser_home_guard_rejects_missing_throwaway_marker() {
+        let real_home = tempfile::tempdir().expect("real home");
+        let fake_home = tempfile::tempdir().expect("fake home");
+        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
+        std::fs::create_dir_all(fake_home.path().join(".config")).expect("fake config");
+
+        assert!(safe_browser_roots_from_fake_home(
+            fake_home.path().to_path_buf(),
             Some(real_home.path().to_path_buf()),
             Some(real_home.path().join(".config"))
         )

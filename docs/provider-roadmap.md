@@ -2,8 +2,10 @@
 
 ## Status
 
-Task 04A provider-priority decision. This roadmap does not promise support for
-every upstream provider and does not implement provider web adapters.
+Task 04A provider-priority decision, updated through Task 04D.1. This roadmap
+does not promise support for every upstream provider, and the current Codex web
+path is still opt-in reconnaissance rather than default production `linux_web`
+support.
 
 ## Principles
 
@@ -39,16 +41,28 @@ Constraints:
 - No raw dashboard payload is cached or exposed.
 - Account identity is masked/hash-only.
 
-Task 04D.0 implementation status:
+Task 04D.1 implementation status:
 
 - daemon-only Codex web adapter skeleton exists behind fake HTTP fixtures;
 - static request, redirect, and browser-cookie domain policy is defined;
 - fake fixture responses cover success, rejected session material, provider
   unavailable, parse error, timeout, redirect rejection, and response-size cap;
-- production `linux_web` refresh has no live HTTP client configured by default
-  and must not contact `chatgpt.com` or `openai.com`;
-- live provider scraping, live provider HTTP, real browser profile scanning, and
-  keyring access remain out of scope.
+- a daemon-only real HTTP transport exists for one bounded static GET to
+  `https://chatgpt.com/codex/settings/usage`;
+- production `linux_web` refresh has no live provider fetch configured by
+  default and returns `linux_web_live_http_disabled` unless the explicit live
+  reconnaissance gates are set;
+- live reconnaissance requires `CODEXBAR_CODEX_WEB_LIVE=1`, a marked throwaway
+  fake home in `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`, explicit provider `codex`,
+  and explicit `sourceAdapterPolicy.only(["linux_web"])`;
+- the live reconnaissance path classifies status, redirect, timeout,
+  response-size, content-type, and parse outcomes safely without storing raw
+  bodies or headers;
+- Codex live cookie scope is temporarily `chatgpt.com` domain-wide because
+  required cookie names have not been verified; this is not production
+  enablement;
+- live provider scraping, default live provider HTTP, real browser profile
+  scanning, and keyring access remain out of scope.
 
 ## Phase 2 Candidate
 

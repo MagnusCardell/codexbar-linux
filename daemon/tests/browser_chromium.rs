@@ -10,6 +10,7 @@ use codexbar_linuxd::app::{App, AppRuntime};
 use codexbar_linuxd::browser::cookie_store::copy_cookie_db_to_private_temp;
 use codexbar_linuxd::browser::keyring::FakeDecryptorMode;
 use codexbar_linuxd::browser::profile::BrowserDiscoveryRoots;
+use codexbar_linuxd::browser::{self, BrowserSessionRequest};
 use codexbar_linuxd::model::{
     BrowserFamily, BrowserImportResult, BrowserImportStatus, BrowserProviderStatus, KeyringState,
 };
@@ -243,6 +244,36 @@ fn cookie_db_temp_copy_has_private_permissions_and_cleans_up() {
 }
 
 #[test]
+#[cfg(unix)]
+fn cookie_db_temp_copy_skips_symlinked_companions() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "plaintext-default/schema.sql",
+    );
+    let outside = tmp.path().join("outside-wal-marker");
+    fs::write(&outside, b"outside marker").expect("outside marker");
+    symlink(&outside, PathBuf::from(format!("{}-wal", db.display()))).expect("wal symlink");
+
+    let copy = copy_cookie_db_to_private_temp(&db).expect("copy");
+    assert!(copy
+        .copied_files()
+        .iter()
+        .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("Cookies")));
+    assert!(!copy
+        .copied_files()
+        .iter()
+        .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("Cookies-wal")));
+    for path in copy.copied_files() {
+        let text = fs::read(path).expect("copied file");
+        assert!(!text
+            .windows(b"outside marker".len())
+            .any(|window| window == b"outside marker"));
+    }
+}
+
+#[test]
 fn wal_companion_rows_are_available_after_private_copy() {
     let (tmp, paths) = common::temp_paths();
     let profile_dir = tmp.path().join(".config/google-chrome/Default/Network");
@@ -426,6 +457,43 @@ fn disabled_and_provider_gates_do_not_probe_cookie_values() {
         provider_disabled.providers[0].source_adapter,
         codexbar_linuxd::model::BrowserSourceAdapter::None
     );
+}
+
+#[test]
+fn live_codex_session_collection_reads_chatgpt_domain_only() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "plaintext-default/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open live-scope fixture db");
+    for (host, name, value) in [
+        (".chatgpt.com", "chatgpt_session", "fixture-chatgpt-live"),
+        (".openai.com", "openai_session", "fixture-openai-live"),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, ?1, ?2, ?3, X'', '/', 20000000000000000, 1, 1, 1)",
+                [host, name, value],
+            )
+            .expect("insert live-scope cookie");
+    }
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: FakeDecryptorMode::Success,
+    });
+    let material = collection.sessions.get("codex").expect("codex material");
+
+    assert_eq!(material.cookie_count(), 1);
+    assert!(collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .is_some_and(|codes| codes.contains(&"browser_cookie_found".to_string())));
 }
 
 #[test]

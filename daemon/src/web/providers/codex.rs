@@ -1,9 +1,8 @@
-use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
-
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
+use crate::browser;
 use crate::browser::session_material::SessionMaterial;
 use crate::model::{
     Credits, DiagnosticEvent, DiagnosticSeverity, Identity, Meter, Provider, ProviderState,
@@ -32,32 +31,54 @@ pub fn fetch_dashboard_with_client<C>(
 where
     C: WebClient,
 {
+    fetch_dashboard_with_client_with_session_codes(
+        client,
+        session,
+        now,
+        expected_account_email,
+        &[],
+    )
+}
+
+pub fn fetch_dashboard_with_client_with_session_codes<C>(
+    client: &C,
+    session: Option<&SessionMaterial>,
+    now: &str,
+    expected_account_email: Option<&str>,
+    session_diagnostic_codes: &[String],
+) -> CodexWebFetchResult
+where
+    C: WebClient,
+{
     let policy = CodexWebPolicy::new();
+    let preflight_codes = unique_string_codes(session_diagnostic_codes);
     let Some(material) =
         session.filter(|material| material.provider() == PROVIDER_ID && !material.is_empty())
     else {
-        return failure(
-            ProviderState::Unauthenticated,
+        return failure_with_extra_codes(
+            state_from_session_codes(&preflight_codes),
             diagnostics::COOKIE_ABSENT,
             "Browser session material was not available for Codex web",
             now,
             Vec::new(),
+            &preflight_codes,
         );
     };
-    let Some(session_header) = material.cookie_header_value() else {
-        return failure(
-            ProviderState::Unauthenticated,
+    let Some(session_header) = material.cookie_header_value_for_url(policy.dashboard_url()) else {
+        return failure_with_extra_codes(
+            state_from_session_codes(&preflight_codes),
             diagnostics::COOKIE_ABSENT,
             "Browser session material was not available for Codex web",
             now,
             Vec::new(),
+            &preflight_codes,
         );
     };
 
     let mut events = vec![diagnostics::event(
         diagnostics::FETCH_STARTED,
         DiagnosticSeverity::Info,
-        "Codex web fixture fetch started",
+        "Codex web fetch started",
         now,
         PROVIDER_ID,
         BTreeMap::new(),
@@ -71,46 +92,63 @@ where
             events.push(diagnostics::event(
                 diagnostics::FETCH_TIMEOUT,
                 DiagnosticSeverity::Warning,
-                "Codex web fixture fetch timed out",
+                "Codex web fetch timed out",
                 now,
                 PROVIDER_ID,
                 BTreeMap::new(),
             ));
-            return failure(
+            return failure_with_extra_codes(
                 ProviderState::Timeout,
                 diagnostics::FETCH_TIMEOUT,
-                "Codex web fixture fetch timed out",
+                "Codex web fetch timed out",
                 now,
                 events,
+                &preflight_codes,
+            );
+        }
+        Err(WebClientError::ResponseTooLarge) => {
+            events.push(diagnostics::event(
+                diagnostics::RESPONSE_TOO_LARGE,
+                DiagnosticSeverity::Warning,
+                "Codex web response exceeded the configured size limit",
+                now,
+                PROVIDER_ID,
+                BTreeMap::new(),
+            ));
+            return failure_with_extra_codes(
+                ProviderState::ParseError,
+                diagnostics::RESPONSE_TOO_LARGE,
+                "Codex web response exceeded the configured size limit",
+                now,
+                events,
+                &preflight_codes,
             );
         }
         Err(WebClientError::TransportUnavailable) => {
             events.push(diagnostics::event(
                 diagnostics::FETCH_FINISHED,
                 DiagnosticSeverity::Warning,
-                "Codex web fixture fetch failed safely",
+                "Codex web fetch failed safely",
                 now,
                 PROVIDER_ID,
                 BTreeMap::new(),
             ));
-            return failure(
+            return failure_with_extra_codes(
                 ProviderState::ProviderUnavailable,
                 diagnostics::FETCH_FINISHED,
-                "Codex web fixture fetch failed safely",
+                "Codex web fetch failed safely",
                 now,
                 events,
+                &preflight_codes,
             );
         }
     };
 
-    if response
+    let final_url_allowed = policy.validate_dashboard_url(response.final_url()).is_ok();
+    let redirect_allowed = response
         .redirect_url()
-        .map_or_else(
-            || policy.validate_candidate_url(response.final_url()),
-            |url| policy.validate_redirect_url(url),
-        )
-        .is_err()
-    {
+        .is_none_or(|url| policy.validate_redirect_url(url).is_ok());
+    if !final_url_allowed || !redirect_allowed {
         events.push(diagnostics::event(
             diagnostics::REDIRECT_BLOCKED,
             DiagnosticSeverity::Warning,
@@ -119,12 +157,48 @@ where
             PROVIDER_ID,
             diagnostics::details(&[("redirectBlocked", Value::Bool(true))]),
         ));
-        return failure(
+        return failure_with_extra_codes(
             ProviderState::ProviderUnavailable,
             diagnostics::REDIRECT_BLOCKED,
             "Codex web redirect target was blocked by policy",
             now,
             events,
+            &preflight_codes,
+        );
+    }
+
+    if response
+        .redirect_url()
+        .is_some_and(looks_like_login_redirect_url)
+    {
+        if !(200..=299).contains(&response.status()) {
+            events.push(diagnostics::event(
+                diagnostics::FETCH_NONZERO_STATUS,
+                DiagnosticSeverity::Warning,
+                "Codex web fetch returned an authentication redirect status",
+                now,
+                PROVIDER_ID,
+                diagnostics::details(&[(
+                    "httpStatusClass",
+                    Value::from(status_class(response.status())),
+                )]),
+            ));
+        }
+        events.push(diagnostics::event(
+            diagnostics::COOKIE_REJECTED,
+            DiagnosticSeverity::Warning,
+            "Codex web redirected to an authentication flow",
+            now,
+            PROVIDER_ID,
+            BTreeMap::new(),
+        ));
+        return failure_with_extra_codes(
+            ProviderState::CookieRejected,
+            diagnostics::COOKIE_REJECTED,
+            "Codex web rejected the supplied browser session material",
+            now,
+            events,
+            &preflight_codes,
         );
     }
 
@@ -132,17 +206,18 @@ where
         events.push(diagnostics::event(
             diagnostics::RESPONSE_TOO_LARGE,
             DiagnosticSeverity::Warning,
-            "Codex web fixture response exceeded the configured size limit",
+            "Codex web response exceeded the configured size limit",
             now,
             PROVIDER_ID,
             diagnostics::details(&[("responseBytes", Value::from(response.body().len() as u64))]),
         ));
-        return failure(
+        return failure_with_extra_codes(
             ProviderState::ParseError,
             diagnostics::RESPONSE_TOO_LARGE,
             "Codex web fixture response exceeded the configured size limit",
             now,
             events,
+            &preflight_codes,
         );
     }
 
@@ -150,25 +225,26 @@ where
         events.push(diagnostics::event(
             diagnostics::FETCH_RATE_LIMITED,
             DiagnosticSeverity::Warning,
-            "Codex web fixture fetch was rate limited",
+            "Codex web fetch was rate limited",
             now,
             PROVIDER_ID,
             diagnostics::details(&[("httpStatusClass", Value::from("4xx"))]),
         ));
-        return failure(
+        return failure_with_extra_codes(
             ProviderState::ProviderUnavailable,
             diagnostics::FETCH_RATE_LIMITED,
-            "Codex web fixture fetch was rate limited",
+            "Codex web fetch was rate limited",
             now,
             events,
+            &preflight_codes,
         );
     }
 
-    if !(200..=299).contains(&response.status()) {
+    if provider_rejected_status(response.status()) {
         events.push(diagnostics::event(
             diagnostics::FETCH_NONZERO_STATUS,
             DiagnosticSeverity::Warning,
-            "Codex web fixture fetch returned an unsuccessful status",
+            "Codex web fetch returned an authentication rejection status",
             now,
             PROVIDER_ID,
             diagnostics::details(&[(
@@ -176,32 +252,85 @@ where
                 Value::from(status_class(response.status())),
             )]),
         ));
-        return failure(
-            ProviderState::ProviderUnavailable,
-            diagnostics::FETCH_NONZERO_STATUS,
-            "Codex web fixture fetch returned an unsuccessful status",
+        events.push(diagnostics::event(
+            diagnostics::COOKIE_REJECTED,
+            DiagnosticSeverity::Warning,
+            "Codex web rejected the supplied browser session material",
+            now,
+            PROVIDER_ID,
+            BTreeMap::new(),
+        ));
+        return failure_with_extra_codes(
+            ProviderState::CookieRejected,
+            diagnostics::COOKIE_REJECTED,
+            "Codex web rejected the supplied browser session material",
             now,
             events,
+            &preflight_codes,
+        );
+    }
+
+    if !(200..=299).contains(&response.status()) {
+        events.push(diagnostics::event(
+            diagnostics::FETCH_NONZERO_STATUS,
+            DiagnosticSeverity::Warning,
+            "Codex web fetch returned an unsuccessful status",
+            now,
+            PROVIDER_ID,
+            diagnostics::details(&[(
+                "httpStatusClass",
+                Value::from(status_class(response.status())),
+            )]),
+        ));
+        return failure_with_extra_codes(
+            ProviderState::ProviderUnavailable,
+            diagnostics::FETCH_NONZERO_STATUS,
+            "Codex web fetch returned an unsuccessful status",
+            now,
+            events,
+            &preflight_codes,
+        );
+    }
+
+    let content_type_class = response_content_type_class(response.content_type());
+    if !content_type_allowed(content_type_class) {
+        events.push(diagnostics::event(
+            diagnostics::FETCH_PARSE_ERROR,
+            DiagnosticSeverity::Warning,
+            "Codex web response content type was not supported",
+            now,
+            PROVIDER_ID,
+            diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
+        ));
+        return failure_with_extra_codes(
+            ProviderState::ParseError,
+            diagnostics::FETCH_PARSE_ERROR,
+            "Codex web response content type was not supported",
+            now,
+            events,
+            &preflight_codes,
         );
     }
 
     let parsed = match parse_dashboard_response(response.body()) {
         Ok(parsed) => parsed,
+        Err(()) if looks_like_login_required(response.body()) => ParsedDashboard::LoginRequired,
         Err(()) => {
             events.push(diagnostics::event(
                 diagnostics::FETCH_PARSE_ERROR,
                 DiagnosticSeverity::Warning,
-                "Codex web fixture response could not be parsed",
+                "Codex web response could not be parsed",
                 now,
                 PROVIDER_ID,
-                BTreeMap::new(),
+                diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
             ));
-            return failure(
+            return failure_with_extra_codes(
                 ProviderState::ParseError,
                 diagnostics::FETCH_PARSE_ERROR,
-                "Codex web fixture response could not be parsed",
+                "Codex web response could not be parsed",
                 now,
                 events,
+                &preflight_codes,
             );
         }
     };
@@ -216,12 +345,13 @@ where
                 PROVIDER_ID,
                 BTreeMap::new(),
             ));
-            failure(
+            failure_with_extra_codes(
                 ProviderState::CookieRejected,
                 diagnostics::COOKIE_REJECTED,
                 "Codex web rejected the supplied browser session material",
                 now,
                 events,
+                &preflight_codes,
             )
         }
         ParsedDashboard::Success(payload) => {
@@ -234,45 +364,47 @@ where
                     PROVIDER_ID,
                     diagnostics::details(&[("accountMismatch", Value::Bool(true))]),
                 ));
-                return failure(
+                return failure_with_extra_codes(
                     ProviderState::CookieRejected,
                     diagnostics::ACCOUNT_MISMATCH,
                     "Codex web account identity did not match the expected account",
                     now,
                     events,
+                    &preflight_codes,
                 );
             }
             events.push(diagnostics::event(
                 diagnostics::FETCH_FINISHED,
                 DiagnosticSeverity::Info,
-                "Codex web fixture fetch finished",
+                "Codex web fetch finished",
                 now,
                 PROVIDER_ID,
-                BTreeMap::new(),
+                diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
             ));
             events.push(diagnostics::event(
                 diagnostics::FETCH_REDACTION_APPLIED,
                 DiagnosticSeverity::Info,
-                "Codex web fixture output was normalized with redaction",
+                "Codex web output was normalized with redaction",
                 now,
                 PROVIDER_ID,
                 BTreeMap::new(),
             ));
             let codes = event_codes(&events);
             CodexWebFetchResult {
-                provider: success_provider(*payload, now, codes),
+                provider: success_provider(*payload, now, merged_codes(codes, &preflight_codes)),
                 diagnostics: events,
             }
         }
     }
 }
 
-fn failure(
+fn failure_with_extra_codes(
     state: ProviderState,
     code: &'static str,
     message: &'static str,
     timestamp: &str,
     mut diagnostics_events: Vec<DiagnosticEvent>,
+    extra_codes: &[String],
 ) -> CodexWebFetchResult {
     if !diagnostics_events
         .iter()
@@ -281,13 +413,13 @@ fn failure(
         diagnostics_events.push(diagnostics::event(
             diagnostics::FETCH_REDACTION_APPLIED,
             DiagnosticSeverity::Info,
-            "Codex web fixture output was normalized with redaction",
+            "Codex web output was normalized with redaction",
             timestamp,
             PROVIDER_ID,
             BTreeMap::new(),
         ));
     }
-    let mut codes = event_codes(&diagnostics_events);
+    let mut codes = merged_codes(event_codes(&diagnostics_events), extra_codes);
     diagnostics::push_code(&mut codes, code);
     CodexWebFetchResult {
         provider: Provider {
@@ -350,14 +482,14 @@ fn success_provider(payload: DashboardPayload, timestamp: &str, codes: Vec<Strin
         identity: payload.signed_in_email.as_deref().map(|email| Identity {
             provider_account_id_hash: None,
             account_email_display: Some(mask_email_display(email)),
-            account_email_hash: Some(local_hash(email)),
+            account_email_hash: None,
             account_organization_display: None,
             account_organization_hash: None,
             login_method: Some("browser_cookie".to_string()),
         }),
         status: Some(ProviderStatus {
             indicator: Some("ok".to_string()),
-            description: Some("Codex web fixture normalized".to_string()),
+            description: Some("Codex web normalized".to_string()),
             updated_at: Some(timestamp.to_string()),
             url: None,
         }),
@@ -390,6 +522,20 @@ fn embedded_fixture_json(text: &str) -> Option<&str> {
     let rest = &text[start..];
     let end = rest.find("</script>")?;
     Some(rest[..end].trim())
+}
+
+fn looks_like_login_required(body: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    (lower.contains("login_required") || lower.contains("/auth/login") || lower.contains("log in"))
+        && (lower.contains("chatgpt") || lower.contains("openai"))
+}
+
+fn looks_like_login_redirect_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("/auth/") || lower.contains("/login") || lower.contains("/log-in")
 }
 
 #[derive(Debug)]
@@ -495,6 +641,30 @@ fn status_class(status: u16) -> &'static str {
     }
 }
 
+fn provider_rejected_status(status: u16) -> bool {
+    matches!(status, 401 | 403)
+}
+
+fn response_content_type_class(content_type: Option<&str>) -> &'static str {
+    let Some(content_type) = content_type else {
+        return "missing";
+    };
+    let lower = content_type.to_ascii_lowercase();
+    if lower.contains("text/html") {
+        "html"
+    } else if lower.contains("application/json") || lower.ends_with("+json") {
+        "json"
+    } else if lower.starts_with("text/") {
+        "text"
+    } else {
+        "other"
+    }
+}
+
+fn content_type_allowed(class: &str) -> bool {
+    matches!(class, "missing" | "html" | "json")
+}
+
 fn event_codes(events: &[DiagnosticEvent]) -> Vec<String> {
     let mut codes = Vec::new();
     for event in events {
@@ -503,6 +673,57 @@ fn event_codes(events: &[DiagnosticEvent]) -> Vec<String> {
         }
     }
     codes
+}
+
+fn merged_codes(mut codes: Vec<String>, extra_codes: &[String]) -> Vec<String> {
+    for code in extra_codes {
+        if !codes.iter().any(|existing| existing == code) {
+            codes.push(code.clone());
+        }
+    }
+    codes
+}
+
+fn unique_string_codes(codes: &[String]) -> Vec<String> {
+    let mut unique = Vec::new();
+    for code in codes {
+        if !unique.iter().any(|existing| existing == code) {
+            unique.push(code.clone());
+        }
+    }
+    unique
+}
+
+fn state_from_session_codes(codes: &[String]) -> ProviderState {
+    if codes
+        .iter()
+        .any(|code| code == browser::diagnostics::COOKIE_DB_LOCKED)
+    {
+        ProviderState::ProviderUnavailable
+    } else if codes
+        .iter()
+        .any(|code| code == browser::diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED)
+    {
+        ProviderState::ParseError
+    } else if codes.iter().any(|code| {
+        matches!(
+            code.as_str(),
+            browser::diagnostics::COOKIE_DB_UNREADABLE
+                | browser::diagnostics::COOKIE_DECRYPTION_UNAVAILABLE
+                | browser::diagnostics::COOKIE_DECRYPTION_FAILED
+                | browser::diagnostics::KEYRING_UNAVAILABLE
+                | browser::diagnostics::KEYRING_LOCKED
+                | browser::diagnostics::KEYRING_PROMPT_REQUIRED
+                | browser::diagnostics::LIVE_PROFILES_DISABLED
+                | browser::diagnostics::NOT_FOUND
+                | browser::diagnostics::PROFILE_NOT_FOUND
+                | browser::diagnostics::PROFILE_UNREADABLE
+        )
+    }) {
+        ProviderState::MissingDependency
+    } else {
+        ProviderState::Unauthenticated
+    }
 }
 
 fn account_mismatched(expected: Option<&str>, actual: Option<&str>) -> bool {
@@ -525,11 +746,4 @@ fn mask_email_display(value: &str) -> String {
     };
     let first = local.chars().next().unwrap_or('m');
     format!("{first}***@{domain}")
-}
-
-fn local_hash(value: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "codexbar-linux-v1".hash(&mut hasher);
-    value.hash(&mut hasher);
-    format!("local-hash-{:016x}", hasher.finish())
 }

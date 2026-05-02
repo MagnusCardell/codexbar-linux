@@ -1,15 +1,19 @@
 mod common;
 
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
+use std::path::PathBuf;
 
 use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
 use codexbar_linuxd::browser::session_material::{ScopedCookie, SessionMaterial};
 use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{
-    ProviderState, RefreshResult, SemanticSource, Snapshot, SourceAdapter,
+    ProviderState, RefreshResult, RefreshStatus, SemanticSource, Snapshot, SourceAdapter,
 };
-use codexbar_linuxd::web::client::{CodexWebFixture, FakeWebClient, WebClientError, WebResponse};
+use codexbar_linuxd::web::client::{
+    CodexWebFixture, FakeWebClient, ReqwestStaticGetClient, WebClientError, WebRequest, WebResponse,
+};
 use codexbar_linuxd::web::diagnostics;
 use codexbar_linuxd::web::policy::CodexWebPolicy;
 use codexbar_linuxd::web::providers::codex;
@@ -17,6 +21,7 @@ use codexbar_linuxd::web::{self, WebRefreshRequest};
 
 const NOW: &str = "2026-05-02T12:00:00Z";
 const LINUX_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
+const CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"providers":["codex"],"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
 
 #[test]
 fn codex_policy_allows_only_static_dashboard_target() {
@@ -28,7 +33,7 @@ fn codex_policy_allows_only_static_dashboard_target() {
     );
     assert_eq!(policy.request_hosts(), ["chatgpt.com"]);
     assert_eq!(policy.redirect_hosts(), ["chatgpt.com"]);
-    assert_eq!(policy.cookie_domains(), ["chatgpt.com", "openai.com"]);
+    assert_eq!(policy.cookie_domains(), ["chatgpt.com"]);
     assert!(policy
         .validate_dashboard_url(policy.dashboard_url())
         .is_ok());
@@ -77,6 +82,29 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
 }
 
 #[test]
+fn codex_policy_allows_openai_redirect_only_when_explicitly_configured() {
+    let default_policy = CodexWebPolicy::new();
+    assert!(default_policy
+        .validate_redirect_url("https://openai.com/codex/settings/usage")
+        .is_err());
+
+    let openai_policy =
+        CodexWebPolicy::with_redirect_hosts_for_tests(&["chatgpt.com", "openai.com"]);
+    assert!(openai_policy
+        .validate_redirect_url("https://openai.com/codex/settings/usage")
+        .is_ok());
+}
+
+#[test]
+fn reqwest_live_client_rejects_non_static_hosts_before_network() {
+    let request = WebRequest::new("https://attacker.example.invalid/codex/settings/usage");
+    assert_eq!(
+        ReqwestStaticGetClient::validate_request_for_tests(&request).unwrap_err(),
+        WebClientError::TransportUnavailable
+    );
+}
+
+#[test]
 fn fake_success_response_normalizes_to_schema_valid_linux_web_snapshot() {
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
     let refresh =
@@ -119,6 +147,70 @@ fn absent_session_material_maps_to_unauthenticated_without_client_call() {
     assert!(provider
         .diagnostic_codes
         .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn browser_preflight_no_profile_maps_to_missing_dependency_without_client_call() {
+    let client = FakeWebClient::responding(html_response("dashboard_success.html"));
+    let mut request = web_request(None);
+    request.session_diagnostic_codes.insert(
+        "codex".to_string(),
+        vec!["browser_profile_not_found".to_string()],
+    );
+    let refresh = web::refresh_with_client(request, &client).expect("web refresh");
+
+    assert!(client.requests().is_empty());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::MissingDependency);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&"browser_profile_not_found".to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn browser_preflight_cookie_decrypted_code_is_preserved_on_success() {
+    let client = FakeWebClient::responding(html_response("dashboard_success.html"));
+    let mut request = web_request(Some(session()));
+    request.session_diagnostic_codes.insert(
+        "codex".to_string(),
+        vec![
+            "browser_cookie_found".to_string(),
+            "browser_cookie_decrypted".to_string(),
+        ],
+    );
+    let refresh = web::refresh_with_client(request, &client).expect("web refresh");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&"browser_cookie_decrypted".to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn openai_scoped_cookie_is_not_sent_to_chatgpt_static_get() {
+    let material = SessionMaterial::new(
+        "codex",
+        vec![
+            ScopedCookie::try_new_for_domain(".openai.com", "/", "openai_only", "fixture-value")
+                .expect("openai scoped cookie"),
+        ],
+    );
+    let client = FakeWebClient::responding(html_response("dashboard_success.html"));
+    let refresh =
+        web::refresh_with_client(web_request(Some(material)), &client).expect("web refresh");
+
+    assert!(client.requests().is_empty());
+    assert_eq!(
+        refresh.snapshot.providers[0].state,
+        ProviderState::Unauthenticated
+    );
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
@@ -173,6 +265,32 @@ fn non_200_response_maps_to_provider_unavailable() {
 }
 
 #[test]
+fn auth_rejection_status_maps_to_cookie_rejected_without_body_exposure() {
+    for status in [401, 403] {
+        let refresh = refresh_for_response(WebResponse::new(
+            status,
+            CodexWebPolicy::new().dashboard_url(),
+            "Authorization: Bearer fixture-secret",
+        ));
+        let payload = serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics))
+            .expect("refresh json");
+        let provider = &refresh.snapshot.providers[0];
+
+        assert_eq!(provider.state, ProviderState::CookieRejected);
+        assert!(provider
+            .diagnostic_codes
+            .contains(&diagnostics::COOKIE_REJECTED.to_string()));
+        assert!(provider
+            .diagnostic_codes
+            .contains(&diagnostics::FETCH_NONZERO_STATUS.to_string()));
+        assert!(!payload.contains("Authorization"));
+        assert!(!payload.contains("Bearer"));
+        assert!(!payload.contains("fixture-secret"));
+        assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+    }
+}
+
+#[test]
 fn timeout_maps_to_timeout_state() {
     let client = FakeWebClient::failing(WebClientError::Timeout);
     let refresh =
@@ -182,6 +300,20 @@ fn timeout_maps_to_timeout_state() {
     assert!(provider
         .diagnostic_codes
         .contains(&diagnostics::FETCH_TIMEOUT.to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn transport_body_cap_error_maps_to_response_too_large() {
+    let client = FakeWebClient::failing(WebClientError::ResponseTooLarge);
+    let refresh =
+        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::RESPONSE_TOO_LARGE.to_string()));
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
@@ -226,11 +358,94 @@ fn parse_error_response_never_exposes_raw_body() {
 }
 
 #[test]
+fn unsupported_content_type_maps_to_parse_error_without_body_leakage() {
+    let refresh = refresh_for_response(
+        WebResponse::new(
+            200,
+            CodexWebPolicy::new().dashboard_url(),
+            "codexbar-unsupported-content-type-body-marker",
+        )
+        .with_content_type("application/octet-stream"),
+    );
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_PARSE_ERROR.to_string()));
+    assert!(refresh.diagnostics.iter().any(|event| {
+        event.details.get("contentTypeClass") == Some(&serde_json::Value::from("other"))
+    }));
+    assert!(!payload.contains("codexbar-unsupported-content-type-body-marker"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
 fn redirect_to_wrong_host_is_blocked_without_following() {
     let descriptor = fixture_json("redirect_wrong_host.json");
     let location = descriptor["location"].as_str().expect("location");
     let client = FakeWebClient::responding(
         WebResponse::new(200, CodexWebPolicy::new().dashboard_url(), "{}").with_redirect(location),
+    );
+    let refresh =
+        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn allowed_login_redirect_maps_to_cookie_rejected_without_location_exposure() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect("https://chatgpt.com/auth/login"),
+    );
+    let refresh =
+        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::CookieRejected);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_REJECTED.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_NONZERO_STATUS.to_string()));
+    assert!(!payload.contains("auth/login"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn final_url_same_host_wrong_path_is_blocked() {
+    let client = FakeWebClient::responding(WebResponse::new(
+        200,
+        "https://chatgpt.com/not-codex/settings/usage",
+        "{}",
+    ));
+    let refresh =
+        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let provider = &refresh.snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn redirect_allowed_host_cannot_mask_disallowed_final_url() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(200, "https://attacker.example.invalid/final", "{}")
+            .with_redirect("https://chatgpt.com/codex/settings/usage"),
     );
     let refresh =
         web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
@@ -284,6 +499,34 @@ fn session_material_debug_is_redacted_and_fake_request_records_only_counts() {
     assert!(!request_debug.contains("fixture-value"));
 }
 
+#[test]
+fn web_request_and_response_debug_redact_url_secrets_and_bodies() {
+    let request_debug = format!(
+        "{:?}",
+        WebRequest::new("https://user@chatgpt.com/codex/settings/usage?token=fixture-secret")
+    );
+    assert!(request_debug.contains("chatgpt.com/codex/settings/usage"));
+    assert!(!request_debug.contains("user@"));
+    assert!(!request_debug.contains("token="));
+    assert!(!request_debug.contains("fixture-secret"));
+
+    let response_debug = format!(
+        "{:?}",
+        WebResponse::new(
+            302,
+            "https://chatgpt.com/codex/settings/usage?token=fixture-secret",
+            "raw-body-marker",
+        )
+        .with_redirect("https://attacker.example.invalid/callback?token=fixture-secret")
+        .with_content_type("text/html; charset=utf-8")
+    );
+    assert!(response_debug.contains("redirect_present"));
+    assert!(!response_debug.contains("attacker.example.invalid"));
+    assert!(!response_debug.contains("token="));
+    assert!(!response_debug.contains("fixture-secret"));
+    assert!(!response_debug.contains("raw-body-marker"));
+}
+
 #[tokio::test]
 async fn production_linux_web_refresh_has_no_live_client_by_default() {
     let (_tmp, paths) = common::temp_paths();
@@ -313,6 +556,32 @@ async fn production_linux_web_refresh_has_no_live_client_by_default() {
         .contains(&"linux_web_live_http_disabled".to_string()));
     common::assert_public_json_safe(&completion.snapshot_json);
     common::assert_public_json_safe(&completion.result_json);
+    let diagnostics_json = app.get_diagnostics_json("codex").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+}
+
+#[tokio::test]
+async fn live_transport_gate_requires_explicit_codex_provider() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production().with_codex_web_live_transport_for_tests(true),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(LINUX_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+
+    assert!(snapshot.providers[0]
+        .diagnostic_codes
+        .contains(&"linux_web_live_http_disabled".to_string()));
+    common::assert_public_json_safe(&completion.snapshot_json);
 }
 
 #[tokio::test]
@@ -334,6 +603,12 @@ async fn failed_linux_web_refresh_preserves_previous_stale_snapshot() {
         serde_json::from_str(&successful.result_json).expect("successful result");
     assert!(successful_result.cache_written);
     assert!(fake_app.cache_file_path().is_file());
+    let fake_diagnostics_json = fake_app.get_diagnostics_json("codex").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &fake_diagnostics_json);
+    common::assert_public_json_safe(&fake_diagnostics_json);
+    for (_provider, event_json) in &successful.provider_events {
+        common::assert_public_json_safe(event_json);
+    }
 
     let production_app = App::new(paths).expect("production app");
     let start = production_app
@@ -356,6 +631,7 @@ async fn failed_linux_web_refresh_preserves_previous_stale_snapshot() {
         SourceAdapter::LinuxWeb
     );
     assert!(!result.cache_written);
+    assert_eq!(result.status, RefreshStatus::Partial);
     assert!(result
         .diagnostic_codes
         .contains(&"stale_cache_fallback".to_string()));
@@ -363,9 +639,159 @@ async fn failed_linux_web_refresh_preserves_previous_stale_snapshot() {
     common::assert_public_json_safe(&fallback.result_json);
 }
 
+#[tokio::test]
+#[ignore = "requires CODEXBAR_CODEX_WEB_LIVE=1 and CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/tmp/... throwaway profile"]
+async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
+    let Some(_fake_home) = live_throwaway_fake_home() else {
+        return;
+    };
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::from_env().expect("live Codex web runtime"),
+    )
+    .expect("live Codex web app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("live web refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("live web refresh should start");
+    };
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("live web refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+    common::assert_public_json_safe(&completion.snapshot_json);
+    common::assert_public_json_safe(&completion.result_json);
+    assert_no_live_web_secret_markers("live Codex web snapshot", &completion.snapshot_json);
+    assert_no_live_web_secret_markers("live Codex web result", &completion.result_json);
+    assert!(!result.cache_written || app.cache_file_path().is_file());
+
+    let provider = snapshot
+        .providers
+        .iter()
+        .find(|provider| provider.provider == "codex")
+        .expect("codex provider");
+    assert_eq!(provider.source, SemanticSource::Web);
+    assert_eq!(provider.source_adapter, SourceAdapter::LinuxWeb);
+    assert!(
+        matches!(
+            provider.state,
+            ProviderState::Ok
+                | ProviderState::Unauthenticated
+                | ProviderState::CookieRejected
+                | ProviderState::MissingDependency
+                | ProviderState::ProviderUnavailable
+                | ProviderState::ParseError
+                | ProviderState::Timeout
+        ),
+        "unexpected live Codex web state: {:?}",
+        provider.state
+    );
+    assert!(provider.diagnostic_codes.iter().any(|code| matches!(
+        code.as_str(),
+        "browser_live_profiles_disabled"
+            | "browser_profile_not_found"
+            | "browser_cookie_db_locked"
+            | "browser_keyring_locked"
+            | "browser_cookie_missing"
+            | "browser_cookie_found"
+            | "browser_cookie_decrypted"
+            | "provider_cookie_absent"
+            | "provider_cookie_rejected"
+            | "provider_redirect_blocked"
+            | "provider_web_fetch_nonzero_status"
+            | "provider_web_fetch_parse_error"
+            | "provider_web_fetch_finished"
+            | "provider_web_fetch_timeout"
+            | "provider_response_too_large"
+    )));
+
+    let diagnostics_json = app.get_diagnostics_json("codex").expect("diagnostics");
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_no_live_web_secret_markers("live Codex web diagnostics", &diagnostics_json);
+    for (_provider, event_json) in completion.provider_events {
+        common::assert_public_json_safe(&event_json);
+        assert_no_live_web_secret_markers("live Codex web event", &event_json);
+    }
+    if app.cache_file_path().is_file() {
+        let cache_json = fs::read_to_string(app.cache_file_path()).expect("cache");
+        common::assert_public_json_safe(&cache_json);
+        assert_no_live_web_secret_markers("live Codex web cache", &cache_json);
+    }
+}
+
 fn refresh_for_response(response: WebResponse) -> codexbar_linuxd::web::WebRefresh {
     let client = FakeWebClient::responding(response);
     web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh")
+}
+
+fn live_throwaway_fake_home() -> Option<PathBuf> {
+    if env::var("CODEXBAR_CODEX_WEB_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("skipping live Codex web recon: CODEXBAR_CODEX_WEB_LIVE=1 is not set");
+        return None;
+    }
+    let Some(value) = env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME") else {
+        eprintln!("skipping live Codex web recon: CODEXBAR_BROWSER_IMPORT_FAKE_HOME is not set");
+        return None;
+    };
+    let fake_home = fs::canonicalize(PathBuf::from(value)).expect("throwaway fake home must exist");
+    assert_ne!(
+        fake_home,
+        PathBuf::from("/"),
+        "throwaway fake home must not be /"
+    );
+    if let Some(real_home) = env::var_os("HOME").and_then(|path| fs::canonicalize(path).ok()) {
+        assert_ne!(fake_home, real_home, "throwaway fake home must not be HOME");
+        assert!(
+            !fake_home.starts_with(real_home.join(".config")),
+            "throwaway fake home must not be under the real config home"
+        );
+    }
+    assert!(
+        fake_home.join(".codexbar-throwaway-browser-root").is_file(),
+        "throwaway fake home marker is required"
+    );
+    Some(fake_home)
+}
+
+fn assert_no_live_web_secret_markers(label: &str, text: &str) {
+    let lower = text.to_ascii_lowercase();
+    for needle in [
+        "/home/",
+        "~/.local/share",
+        "auth.json",
+        "authorization:",
+        "bearer ",
+        "cookie:",
+        "set-cookie",
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "session_token",
+        "sessionkey",
+        "sessiontoken",
+        "apikey",
+        "api_key",
+        "ghp_",
+        "github_pat",
+        "xoxb-",
+        "rawresponse",
+        "raw_response",
+        "rawpayload",
+        "raw_payload",
+    ] {
+        assert!(
+            !lower.contains(needle),
+            "{label} contains forbidden live secret marker {needle:?}"
+        );
+    }
 }
 
 fn html_response(name: &str) -> WebResponse {
@@ -390,6 +816,7 @@ fn web_request(session: Option<SessionMaterial>) -> WebRefreshRequest {
         selected_provider: None,
         upstream_cli: fixtures::task01_upstream_cli(),
         sessions,
+        session_diagnostic_codes: BTreeMap::new(),
     }
 }
 

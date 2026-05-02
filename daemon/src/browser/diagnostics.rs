@@ -20,6 +20,7 @@ pub const KEYRING_UNAVAILABLE: &str = "browser_keyring_unavailable";
 pub const KEYRING_LOCKED: &str = "browser_keyring_locked";
 pub const KEYRING_PROMPT_REQUIRED: &str = "browser_keyring_prompt_required";
 pub const COOKIE_FOUND: &str = "browser_cookie_found";
+pub const COOKIE_DECRYPTED: &str = "browser_cookie_decrypted";
 pub const COOKIE_MISSING: &str = "browser_cookie_missing";
 
 pub fn push_code(codes: &mut Vec<String>, code: &'static str) {

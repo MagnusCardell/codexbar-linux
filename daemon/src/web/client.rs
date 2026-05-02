@@ -1,6 +1,12 @@
 use std::fmt;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use reqwest::blocking::Client;
+use reqwest::header::{HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, LOCATION, USER_AGENT};
+
+use crate::web::policy::CodexWebPolicy;
 
 #[derive(Clone)]
 pub struct WebRequest {
@@ -65,7 +71,7 @@ impl WebRequest {
 impl fmt::Debug for WebRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebRequest")
-            .field("url", &self.url)
+            .field("url", &redacted_url_shape(&self.url))
             .field("user_agent", &self.user_agent)
             .field("accept", &self.accept)
             .field("accept_language", &self.accept_language)
@@ -73,7 +79,10 @@ impl fmt::Debug for WebRequest {
                 "session_material_attached",
                 &self.session_material_attached(),
             )
-            .field("session_material_bytes", &self.session_material_bytes())
+            .field(
+                "session_material_size",
+                &session_material_size_class(self.session_material_bytes()),
+            )
             .field("timeout", &self.timeout)
             .field("response_size_limit", &self.response_size_limit)
             .finish()
@@ -110,6 +119,16 @@ impl WebResponse {
         self
     }
 
+    pub fn with_optional_redirect(mut self, redirect_url: Option<String>) -> Self {
+        self.redirect_url = redirect_url;
+        self
+    }
+
+    pub fn with_optional_content_type(mut self, content_type: Option<String>) -> Self {
+        self.content_type = content_type;
+        self
+    }
+
     pub fn status(&self) -> u16 {
         self.status
     }
@@ -135,11 +154,14 @@ impl fmt::Debug for WebResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebResponse")
             .field("status", &self.status)
-            .field("final_url", &self.final_url)
-            .field("redirect_url", &self.redirect_url)
+            .field("final_url", &redacted_url_shape(&self.final_url))
+            .field("redirect_present", &self.redirect_url.is_some())
             .field("body_bytes", &self.body.len())
             .field("body", &"[redacted]")
-            .field("content_type", &self.content_type)
+            .field(
+                "content_type_class",
+                &content_type_class(self.content_type()),
+            )
             .finish()
     }
 }
@@ -147,6 +169,7 @@ impl fmt::Debug for WebResponse {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WebClientError {
     Timeout,
+    ResponseTooLarge,
     TransportUnavailable,
 }
 
@@ -265,19 +288,165 @@ impl WebClient for FakeWebClient {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ReqwestStaticGetClient;
+
+impl ReqwestStaticGetClient {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn validate_request_for_tests(request: &WebRequest) -> Result<(), WebClientError> {
+        Self::validate_request(request)
+    }
+
+    fn validate_request(request: &WebRequest) -> Result<(), WebClientError> {
+        CodexWebPolicy::new()
+            .validate_dashboard_url(request.url())
+            .map_err(|_| WebClientError::TransportUnavailable)
+    }
+}
+
+impl WebClient for ReqwestStaticGetClient {
+    fn request(&self, request: WebRequest) -> Result<WebResponse, WebClientError> {
+        Self::validate_request(&request)?;
+        let Some(session_header) = request.session_header.as_deref() else {
+            return Err(WebClientError::TransportUnavailable);
+        };
+
+        let client = Client::builder()
+            .timeout(request.timeout())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| WebClientError::TransportUnavailable)?;
+        let mut builder = client
+            .get(request.url())
+            .header(USER_AGENT, header_value(&request.user_agent)?)
+            .header(ACCEPT, header_value(&request.accept)?)
+            .header(COOKIE, header_value(session_header)?);
+        if let Some(accept_language) = &request.accept_language {
+            builder = builder.header(ACCEPT_LANGUAGE, header_value(accept_language)?);
+        }
+
+        let response = builder.send().map_err(classify_reqwest_error)?;
+        let status = response.status().as_u16();
+        let final_url = response.url().as_str().to_string();
+        let redirect_url = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|location| resolve_redirect_url(&final_url, location));
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = read_limited_body(response, request.response_size_limit())?;
+
+        Ok(WebResponse::new(status, final_url, body)
+            .with_optional_redirect(redirect_url)
+            .with_optional_content_type(content_type))
+    }
+}
+
+fn header_value(value: &str) -> Result<HeaderValue, WebClientError> {
+    HeaderValue::from_str(value).map_err(|_| WebClientError::TransportUnavailable)
+}
+
+fn classify_reqwest_error(error: reqwest::Error) -> WebClientError {
+    if error.is_timeout() {
+        WebClientError::Timeout
+    } else {
+        WebClientError::TransportUnavailable
+    }
+}
+
+fn resolve_redirect_url(base: &str, location: &str) -> Option<String> {
+    let base = url::Url::parse(base).ok()?;
+    base.join(location).ok().map(|url| url.to_string())
+}
+
+fn read_limited_body<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, WebClientError>
+where
+    R: Read,
+{
+    let mut body = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|_| WebClientError::TransportUnavailable)?;
+        if read == 0 {
+            return Ok(body);
+        }
+        if body.len() + read > limit {
+            return Err(WebClientError::ResponseTooLarge);
+        }
+        body.extend_from_slice(&buffer[..read]);
+    }
+}
+
+fn redacted_url_shape(url: &str) -> String {
+    let Ok(url) = url::Url::parse(url) else {
+        return "[redacted-url]".to_string();
+    };
+    let host = url.host_str().unwrap_or("unknown");
+    let path = url.path();
+    format!("{}://{}{}", url.scheme(), host, path)
+}
+
+fn content_type_class(content_type: Option<&str>) -> &'static str {
+    let Some(content_type) = content_type else {
+        return "missing";
+    };
+    let lower = content_type.to_ascii_lowercase();
+    if lower.contains("text/html") {
+        "html"
+    } else if lower.contains("application/json") || lower.ends_with("+json") {
+        "json"
+    } else if lower.starts_with("text/") {
+        "text"
+    } else {
+        "other"
+    }
+}
+
+fn session_material_size_class(bytes: usize) -> &'static str {
+    if bytes == 0 {
+        "absent"
+    } else {
+        "present"
+    }
+}
+
 #[derive(Clone, Debug)]
 enum FakeWebOutcome {
     Response(WebResponse),
     Error(WebClientError),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct FakeRecordedRequest {
     pub url: String,
     pub session_material_attached: bool,
     pub session_material_bytes: usize,
     pub timeout_ms: u64,
     pub response_size_limit: usize,
+}
+
+impl fmt::Debug for FakeRecordedRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FakeRecordedRequest")
+            .field("url", &redacted_url_shape(&self.url))
+            .field("session_material_attached", &self.session_material_attached)
+            .field(
+                "session_material_size",
+                &session_material_size_class(self.session_material_bytes),
+            )
+            .field("timeout_ms", &self.timeout_ms)
+            .field("response_size_limit", &self.response_size_limit)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
