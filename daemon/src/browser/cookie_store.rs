@@ -10,7 +10,7 @@ use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 use crate::browser::diagnostics;
 use crate::browser::keyring::{CookieDecryptor, DecryptError};
-use crate::browser::profile::BrowserProfileDescriptor;
+use crate::browser::profile::{path_is_under, BrowserProfileDescriptor};
 use crate::browser::session_material::{ScopedCookie, SessionMaterial};
 use crate::model::KeyringState;
 
@@ -299,12 +299,24 @@ pub fn read_profile_cookies(
 }
 
 pub fn find_chromium_cookie_db(profile_path: &Path) -> Option<PathBuf> {
+    let canonical_profile = fs::canonicalize(profile_path).ok()?;
     [
         profile_path.join("Network").join("Cookies"),
         profile_path.join("Cookies"),
     ]
     .into_iter()
-    .find(|path| path.is_file())
+    .find_map(|path| {
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if !metadata.file_type().is_file() {
+            return None;
+        }
+        let canonical_db = fs::canonicalize(path).ok()?;
+        if path_is_under(&canonical_db, &canonical_profile) {
+            Some(canonical_db)
+        } else {
+            None
+        }
+    })
 }
 
 pub struct TempCookieDbCopy {

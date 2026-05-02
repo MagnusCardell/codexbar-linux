@@ -1,5 +1,6 @@
 mod common;
 
+use std::env;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -10,7 +11,7 @@ use codexbar_linuxd::browser::cookie_store::copy_cookie_db_to_private_temp;
 use codexbar_linuxd::browser::keyring::FakeDecryptorMode;
 use codexbar_linuxd::browser::profile::BrowserDiscoveryRoots;
 use codexbar_linuxd::model::{
-    BrowserImportResult, BrowserImportStatus, BrowserProviderStatus, KeyringState,
+    BrowserFamily, BrowserImportResult, BrowserImportStatus, BrowserProviderStatus, KeyringState,
 };
 use rusqlite::Connection;
 
@@ -157,6 +158,56 @@ fn symlink_profile_escape_is_skipped_without_public_path_leakage() {
         .diagnostic_codes
         .contains(&"browser_profile_skipped".to_string()));
     assert_public_browser_json_safe(tmp.path(), &result_json);
+}
+
+#[test]
+#[cfg(unix)]
+fn cookie_db_symlink_escape_is_skipped_without_public_path_leakage() {
+    let (tmp, paths) = common::temp_paths();
+    let outside_dir = tmp.path().join("outside-cookie-db");
+    fs::create_dir_all(&outside_dir).expect("outside");
+    let outside_db = outside_dir.join("Cookies");
+    let connection = Connection::open(&outside_db).expect("outside db");
+    connection
+        .execute_batch(&fixture_sql("plaintext-default/schema.sql"))
+        .expect("outside fixture sql");
+    drop(connection);
+
+    let network = tmp.path().join(".config/google-chrome/Default/Network");
+    fs::create_dir_all(&network).expect("network");
+    symlink(&outside_db, network.join("Cookies")).expect("cookie db symlink");
+
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
+    let result_json = app
+        .test_browser_import_json(r#"{"schemaVersion":1,"providers":["codex"]}"#)
+        .expect("result json");
+    common::assert_schema("browser-import-result.schema.json", &result_json);
+    common::assert_public_json_safe(&result_json);
+    let result: BrowserImportResult = serde_json::from_str(&result_json).expect("result");
+
+    assert_eq!(result.profiles.len(), 1);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_db_missing".to_string()));
+    assert_public_browser_json_safe(tmp.path(), &result_json);
+    assert!(!result_json.contains(&outside_db.display().to_string()));
+}
+
+#[test]
+fn test_browser_import_does_not_write_snapshot_cache() {
+    let (tmp, paths) = common::temp_paths();
+    let cache_file = paths.cache_file.clone();
+    create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "plaintext-default/schema.sql",
+    );
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
+    assert!(!cache_file.exists());
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+
+    assert_eq!(result.status, BrowserImportStatus::Success);
+    assert!(!cache_file.exists());
 }
 
 #[test]
@@ -377,6 +428,91 @@ fn disabled_and_provider_gates_do_not_probe_cookie_values() {
     );
 }
 
+#[test]
+#[ignore = "requires CODEXBAR_BROWSER_LIVE=1 and CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/tmp/..."]
+fn live_throwaway_browser_profile_smoke() {
+    let Some(fake_home) = live_throwaway_fake_home() else {
+        return;
+    };
+    assert!(
+        observed_live_cookie_db_shape(&fake_home).is_some(),
+        "live throwaway profile did not contain Cookies in a supported relative shape"
+    );
+
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::from_env().expect("live throwaway browser runtime"),
+    )
+    .expect("live browser app");
+    let provider =
+        env::var("CODEXBAR_BROWSER_IMPORT_LIVE_PROVIDER").unwrap_or_else(|_| "smoke".to_string());
+    assert!(
+        codexbar_linuxd::config::is_safe_id(&provider),
+        "live smoke provider id must be safe"
+    );
+    let options = serde_json::json!({
+        "schemaVersion": 1,
+        "providers": [provider],
+        "includeDiagnostics": true
+    });
+    let result_json = app
+        .test_browser_import_json(&options.to_string())
+        .expect("live browser import result");
+    common::assert_schema("browser-import-result.schema.json", &result_json);
+    common::assert_public_json_safe(&result_json);
+    assert_public_browser_json_safe(&fake_home, &result_json);
+
+    let result: BrowserImportResult = serde_json::from_str(&result_json).expect("result");
+    assert!(
+        !result.profiles.is_empty(),
+        "live throwaway import did not discover a Chromium-family profile"
+    );
+    assert!(result.profiles.iter().any(|profile| matches!(
+        profile.browser_family,
+        BrowserFamily::Chrome | BrowserFamily::Chromium | BrowserFamily::Brave
+    )));
+    assert!(result.profiles.iter().all(|profile| {
+        !profile.profile_id.contains('/')
+            && !profile.profile_id.contains('\\')
+            && !profile.profile_id.contains("..")
+            && !profile.profile_id.to_ascii_lowercase().contains(".config")
+    }));
+    assert!(result.profiles.iter().all(|profile| {
+        matches!(
+            profile.profile_display_name.as_str(),
+            "Chrome Default"
+                | "Chrome Profile 1"
+                | "Chromium Default"
+                | "Chromium Profile 1"
+                | "Brave Default"
+                | "Brave Profile 1"
+        )
+    }));
+    assert!(result
+        .diagnostic_codes
+        .contains(&"browser_profile_discovered".to_string()));
+    if env::var("CODEXBAR_BROWSER_IMPORT_EXPECT_COOKIE")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        assert_eq!(
+            result.providers[0].status,
+            BrowserProviderStatus::Success,
+            "seeded throwaway cookie should be found"
+        );
+    } else {
+        assert!(
+            matches!(
+                result.providers[0].status,
+                BrowserProviderStatus::Success | BrowserProviderStatus::Unauthenticated
+            ),
+            "live throwaway provider status should be success or unauthenticated"
+        );
+    }
+}
+
 fn browser_app(
     paths: codexbar_linuxd::paths::AppPaths,
     home: &Path,
@@ -453,4 +589,75 @@ fn assert_public_browser_json_safe(tmp_home: &Path, text: &str) {
         !text.contains('@'),
         "browser result should not contain raw email-like data"
     );
+}
+
+fn live_throwaway_fake_home() -> Option<PathBuf> {
+    if env::var("CODEXBAR_BROWSER_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("skipping live throwaway browser smoke: CODEXBAR_BROWSER_LIVE=1 is not set");
+        return None;
+    }
+    let value = env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME")
+        .expect("CODEXBAR_BROWSER_IMPORT_FAKE_HOME is required when CODEXBAR_BROWSER_LIVE=1");
+    assert!(
+        !value.is_empty(),
+        "CODEXBAR_BROWSER_IMPORT_FAKE_HOME must not be empty"
+    );
+    let fake_home = fs::canonicalize(PathBuf::from(value))
+        .expect("CODEXBAR_BROWSER_IMPORT_FAKE_HOME must exist");
+    assert_ne!(
+        fake_home,
+        PathBuf::from("/"),
+        "CODEXBAR_BROWSER_IMPORT_FAKE_HOME must not be /"
+    );
+    if let Some(real_home) = env::var_os("HOME").and_then(|path| fs::canonicalize(path).ok()) {
+        assert_ne!(
+            fake_home, real_home,
+            "CODEXBAR_BROWSER_IMPORT_FAKE_HOME must not be the real HOME"
+        );
+        assert!(
+            !fake_home.starts_with(real_home.join(".config")),
+            "CODEXBAR_BROWSER_IMPORT_FAKE_HOME must not be under the real ~/.config"
+        );
+    }
+    assert!(
+        fake_home.join(".codexbar-throwaway-browser-root").is_file(),
+        "CODEXBAR_BROWSER_IMPORT_FAKE_HOME must include the throwaway marker file"
+    );
+    Some(fake_home)
+}
+
+fn observed_live_cookie_db_shape(fake_home: &Path) -> Option<&'static str> {
+    for (relative, shape) in [
+        (
+            ".config/google-chrome/Default/Network/Cookies",
+            "chrome-network",
+        ),
+        (".config/google-chrome/Default/Cookies", "chrome-legacy"),
+        (
+            ".config/chromium/Default/Network/Cookies",
+            "chromium-network",
+        ),
+        (".config/chromium/Default/Cookies", "chromium-legacy"),
+        (
+            ".config/BraveSoftware/Brave-Browser/Default/Network/Cookies",
+            "brave-network",
+        ),
+        (
+            ".config/BraveSoftware/Brave-Browser/Default/Cookies",
+            "brave-legacy",
+        ),
+        (
+            "snap/chromium/common/chromium/Default/Network/Cookies",
+            "chromium-snap-network",
+        ),
+        (
+            "snap/chromium/common/chromium/Default/Cookies",
+            "chromium-snap-legacy",
+        ),
+    ] {
+        if fake_home.join(relative).is_file() {
+            return Some(shape);
+        }
+    }
+    None
 }

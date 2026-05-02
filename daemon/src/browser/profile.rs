@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::model::BrowserFamily;
@@ -22,6 +23,30 @@ impl BrowserDiscoveryRoots {
             xdg_config_home: home.join(".config"),
             home,
         }
+    }
+
+    pub fn canonicalized(&self) -> Option<Self> {
+        let home = fs::canonicalize(&self.home).ok()?;
+        if !home.is_dir() {
+            return None;
+        }
+
+        let xdg_config_home = if self.xdg_config_home.exists() {
+            fs::canonicalize(&self.xdg_config_home).ok()?
+        } else {
+            home.join(".config")
+        };
+        if xdg_config_home.exists() && !xdg_config_home.is_dir() {
+            return None;
+        }
+        if !path_is_under(&xdg_config_home, &home) {
+            return None;
+        }
+
+        Some(Self {
+            home,
+            xdg_config_home,
+        })
     }
 
     pub fn home(&self) -> &Path {

@@ -402,8 +402,15 @@ Required tests for Task 04B and later:
 - same-user D-Bus `TestBrowserImport` returns public-copy-safe payloads;
 - cache contains normalized snapshots only.
 
-Live tests, when added, must be ignored by default and gated with explicit
-environment variables. They must not commit live output.
+Live tests are ignored by default and gated with explicit environment
+variables. Task 04B.1 adds `scripts/chromium-throwaway-smoke.sh`, which requires
+`CODEXBAR_BROWSER_LIVE=1`, creates a marked throwaway fake home, launches only a
+Chromium-family browser with a throwaway user-data-dir, seeds only a synthetic
+`.example.invalid` cookie through a local test-only server, and runs an ignored
+`TestBrowserImport` integration test. The script is not a daemon runtime API, is
+not part of `./scripts/check.sh` or CI, binds its test server only to
+`127.0.0.1`, and must not contact provider endpoints or read default user
+profiles. It must not commit live output.
 
 ## Dependency And Packaging Review
 

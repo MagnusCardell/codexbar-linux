@@ -2,11 +2,12 @@
 
 ## Status
 
-Task 04A planning document updated after Task 04B implementation. Task 04B
-implements daemon-only Chromium-family discovery and cookie DB reads for
-synthetic/fake roots and throwaway fixtures. It does not enable real user
-profile scanning by default, real keyring access, provider web fetches, or
-Firefox import.
+Task 04A planning document updated after Task 04B and Task 04B.1
+implementation. Task 04B implements daemon-only Chromium-family discovery and
+cookie DB reads for synthetic/fake roots and throwaway fixtures. Task 04B.1
+adds opt-in live throwaway Chromium-family verification. Neither task enables
+real user profile scanning by default, real keyring access, provider web
+fetches, or Firefox import.
 
 ## Implementation Order
 
@@ -30,9 +31,46 @@ Firefox import.
   `BrowserDiscoveryRoots` in tests or `CODEXBAR_BROWSER_IMPORT_FAKE_HOME` in a
   development process. Default runtime does not scan the real user profile
   roots.
+- In Task 04B.1, `CODEXBAR_BROWSER_IMPORT_FAKE_HOME` must be an absolute,
+  canonical, throwaway directory with `.codexbar-throwaway-browser-root`; it is
+  rejected if it is `/`, the real `$HOME`, under the real config home, missing,
+  relative, or symlinked through an escaping `.config`.
 - Task 04B fixtures live under `daemon/fixtures/browser/chromium/` as text
   metadata/SQL definitions. Tests create throwaway SQLite DBs from those files;
   committed fixtures do not include real or binary browser cookie databases.
+
+## Task 04B.1 Live Throwaway Observations
+
+Local opt-in smoke command:
+
+```bash
+CODEXBAR_BROWSER_LIVE=1 ./scripts/chromium-throwaway-smoke.sh
+```
+
+Observed on the local Ubuntu 24.04 host:
+
+- Browser binary used: `google-chrome`.
+- Browser family: Chrome.
+- Headless mode: `--headless=new` worked.
+- Password storage flag: `--password-store=basic` was used.
+- Keyring prompt: none observed.
+- Throwaway user-data shape: `$TMP_HOME/.config/google-chrome`.
+- Profile shape: `$TMP_HOME/.config/google-chrome/Default`.
+- Cookie DB shape observed: `$TMP_HOME/.config/google-chrome/Default/Cookies`.
+- `Default/Network/Cookies`: not observed for this Chrome run.
+- WAL companion: not observed.
+- SHM companion: not observed.
+- Cookie values: not printed or inspected by the smoke output; only the daemon
+  synthetic query result was checked.
+- `TestBrowserImport`: schema-valid and redaction-safe ignored live test passed
+  against the throwaway fake home.
+
+The smoke script is not part of `./scripts/check.sh` or CI because it requires
+an installed browser. It can use Chrome, Chromium, Chromium snap wrapper, or
+Brave if available. Snap Chromium is detected separately and uses a
+throwaway-shaped fake home under the snap-visible common area so the daemon can
+see the generated profile files; normal smoke output still reports only shape
+labels, not absolute paths.
 
 ## Google Chrome
 

@@ -3,6 +3,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use crate::browser;
 use crate::cache::ensure_private_dir;
 use crate::clock;
 use crate::error::{AppError, AppResult};
@@ -144,10 +145,8 @@ pub fn validate_settings(settings: &Settings) -> AppResult<()> {
             ));
         }
     }
-    for profile_id in &settings.browser_import.profile_id_allowlist {
-        if !is_safe_id(profile_id) {
-            return Err(AppError::invalid_json());
-        }
+    if !browser::validate_profile_ids(&settings.browser_import.profile_id_allowlist) {
+        return Err(AppError::invalid_json());
     }
     let value = serde_json::to_value(settings).map_err(|_| AppError::internal_redacted())?;
     redact::validate_public_json_value(&value).map_err(|_| AppError::internal_redacted())?;
@@ -166,10 +165,8 @@ fn validate_settings_patch_policy(patch: &SettingsPatch) -> AppResult<()> {
     }
     if let Some(browser_import) = &patch.browser_import {
         if let Some(profile_ids) = &browser_import.profile_id_allowlist {
-            for profile_id in profile_ids {
-                if !is_safe_id(profile_id) {
-                    return Err(AppError::invalid_json());
-                }
+            if !browser::validate_profile_ids(profile_ids) {
+                return Err(AppError::invalid_json());
             }
         }
     }
@@ -214,10 +211,8 @@ fn apply_browser_import_patch(
         settings.browser_import.policy = value;
     }
     if let Some(value) = patch.profile_id_allowlist {
-        for profile_id in &value {
-            if !is_safe_id(profile_id) {
-                return Err(AppError::invalid_json());
-            }
+        if !browser::validate_profile_ids(&value) {
+            return Err(AppError::invalid_json());
         }
         settings.browser_import.profile_id_allowlist = value;
     }

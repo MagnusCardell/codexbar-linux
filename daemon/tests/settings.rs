@@ -67,6 +67,25 @@ fn profile_id_allowlist_rejects_absolute_paths() {
 }
 
 #[test]
+fn profile_id_allowlist_rejects_path_like_opaque_values() {
+    for value in [
+        "chromium..default",
+        "chromium-Network-Cookies",
+        "chromium-.config",
+        "chromium\\Default",
+        "~chromium",
+    ] {
+        let encoded = serde_json::to_string(value).expect("json string");
+        let patch = format!(
+            r#"{{"schemaVersion":1,"browserImport":{{"profileIdAllowlist":[{encoded}]}}}}"#
+        );
+        let err = config::parse_settings_patch(&patch)
+            .expect_err("path-like profile id rejected before persistence");
+        assert!(matches!(err, AppError::InvalidJson(_)), "{value}");
+    }
+}
+
+#[test]
 fn null_fields_do_not_delete_or_reset() {
     let err =
         config::parse_settings_patch(r#"{"schemaVersion":1,"refresh":{"intervalSeconds":null}}"#)

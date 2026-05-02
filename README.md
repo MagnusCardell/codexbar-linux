@@ -26,10 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 04B Chromium-family browser-cookie import
-infrastructure** status. The Task 03 GNOME Shell vertical slice and design gate
-are complete enough for the browser-cookie implementation phase, with live
-GNOME 46 Wayland activation smoke proven.
+This repository is at **Task 04B.1 live throwaway Chromium-family verification**
+status. The Task 03 GNOME Shell vertical slice and design gate are complete
+enough for the browser-cookie implementation phase, with live GNOME 46 Wayland
+activation smoke proven.
 
 Present:
 
@@ -69,8 +69,15 @@ Present:
   fake encrypted cookie-row handling; fake keyring/decryptor states; memory-only
   session material; redaction-safe `TestBrowserImport` results; and browser
   fixture validation under `scripts/validate-browser-fixtures.sh`.
+- Task 04B.1 opt-in throwaway browser verification:
+  `scripts/chromium-throwaway-smoke.sh` creates a private temp home, launches a
+  Chromium-family browser only with a throwaway user-data-dir, seeds only a
+  synthetic `smoke.example.invalid` cookie through a local test server, and
+  runs the ignored live `TestBrowserImport` smoke. Fake-home env roots now
+  require canonical throwaway homes with `.codexbar-throwaway-browser-root`,
+  reject real home/config roots, and keep public results path-free.
 
-Not implemented after Task 04B:
+Not implemented after Task 04B.1:
 
 - provider network calls or Linux web adapters;
 - provider scraping;
@@ -101,6 +108,7 @@ Useful narrower checks:
 ./scripts/validate-gsettings.sh
 ./scripts/validate-packaging.sh
 ./scripts/validate-browser-fixtures.sh
+CODEXBAR_BROWSER_LIVE=1 ./scripts/chromium-throwaway-smoke.sh # optional live smoke
 ./scripts/test-fixtures.sh
 ./scripts/lint-gjs.sh
 cargo fmt --manifest-path daemon/Cargo.toml -- --check
@@ -124,10 +132,21 @@ CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
 ```
 
 Chromium-family browser import tests use synthetic or throwaway roots. Default
-daemon startup does not scan real browser profiles. For a development-only
-throwaway browser-import probe, point the daemon at an isolated fake home:
+daemon startup does not scan real browser profiles. For a development-only live
+throwaway browser-import probe, run:
 
 ```bash
+CODEXBAR_BROWSER_LIVE=1 ./scripts/chromium-throwaway-smoke.sh
+```
+
+The smoke script is not part of `./scripts/check.sh` or CI. It deletes its temp
+profile unless `KEEP_CODEXBAR_BROWSER_LIVE=1` is set, and its normal output
+uses shape labels instead of absolute profile paths. Direct fake-home daemon
+runs must use an isolated, canonical temp directory containing the marker file:
+
+```bash
+printf 'codexbar throwaway browser smoke\n' \
+  > /path/to/throwaway-home/.codexbar-throwaway-browser-root
 CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/path/to/throwaway-home \
   cargo run --manifest-path daemon/Cargo.toml
 ```

@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -52,12 +52,12 @@ impl AppRuntime {
         }
     }
 
-    pub fn from_env() -> Self {
-        Self {
+    pub fn from_env() -> AppResult<Self> {
+        Ok(Self {
             allow_fixture_source: env_allows_fixture_source(),
-            browser_roots: env_browser_roots(),
+            browser_roots: env_browser_roots()?,
             browser_decryptor_mode: FakeDecryptorMode::Success,
-        }
+        })
     }
 
     pub fn with_fixture_source_for_tests() -> Self {
@@ -77,7 +77,7 @@ impl AppRuntime {
     }
 
     pub fn with_browser_roots(mut self, roots: BrowserDiscoveryRoots) -> Self {
-        self.browser_roots = Some(roots);
+        self.browser_roots = roots.canonicalized();
         self
     }
 
@@ -128,7 +128,7 @@ pub struct RefreshCompletion {
 
 impl App {
     pub fn from_env() -> AppResult<Self> {
-        Self::new_with_runtime(AppPaths::from_env(), AppRuntime::from_env())
+        Self::new_with_runtime(AppPaths::from_env(), AppRuntime::from_env()?)
     }
 
     pub fn new(paths: AppPaths) -> AppResult<Self> {
@@ -676,12 +676,61 @@ fn env_allows_fixture_source() -> bool {
     )
 }
 
-fn env_browser_roots() -> Option<BrowserDiscoveryRoots> {
-    let value = std::env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME")?;
+fn env_browser_roots() -> AppResult<Option<BrowserDiscoveryRoots>> {
+    let Some(value) = std::env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME") else {
+        return Ok(None);
+    };
     if value.is_empty() {
-        return None;
+        return Err(unsafe_browser_fake_home());
     }
-    Some(BrowserDiscoveryRoots::synthetic_home(PathBuf::from(value)))
+    safe_browser_roots_from_fake_home(
+        PathBuf::from(value),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+    )
+}
+
+fn safe_browser_roots_from_fake_home(
+    fake_home: PathBuf,
+    real_home: Option<PathBuf>,
+    real_xdg_config_home: Option<PathBuf>,
+) -> AppResult<Option<BrowserDiscoveryRoots>> {
+    if fake_home.as_os_str().is_empty() || fake_home == Path::new("/") || !fake_home.is_absolute() {
+        return Err(unsafe_browser_fake_home());
+    }
+    let fake_home = std::fs::canonicalize(fake_home).map_err(|_| unsafe_browser_fake_home())?;
+    if fake_home == Path::new("/") || !fake_home.is_dir() {
+        return Err(unsafe_browser_fake_home());
+    }
+
+    if let Some(real_home) = real_home.and_then(|path| std::fs::canonicalize(path).ok()) {
+        if fake_home == real_home {
+            return Err(unsafe_browser_fake_home());
+        }
+        let real_config = real_home.join(".config");
+        if fake_home.starts_with(&real_config) {
+            return Err(unsafe_browser_fake_home());
+        }
+    }
+    if let Some(real_xdg_config_home) =
+        real_xdg_config_home.and_then(|path| std::fs::canonicalize(path).ok())
+    {
+        if fake_home == real_xdg_config_home || fake_home.starts_with(&real_xdg_config_home) {
+            return Err(unsafe_browser_fake_home());
+        }
+    }
+    if !fake_home.join(".codexbar-throwaway-browser-root").is_file() {
+        return Err(unsafe_browser_fake_home());
+    }
+
+    let Some(roots) = BrowserDiscoveryRoots::synthetic_home(fake_home).canonicalized() else {
+        return Err(unsafe_browser_fake_home());
+    };
+    Ok(Some(roots))
+}
+
+fn unsafe_browser_fake_home() -> AppError {
+    AppError::DependencyUnavailable("unsafe browser fake home; details redacted".to_string())
 }
 
 fn parse_input_json<T>(json: &str) -> AppResult<T>
@@ -760,5 +809,90 @@ fn redaction_summary() -> RedactionSummary {
         applied: true,
         policy_version: 1,
         notes: vec!["Task 01 diagnostics are redacted before D-Bus output".to_string()],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fake_browser_home_guard_rejects_real_home_and_unsafe_roots() {
+        let real_home = tempfile::tempdir().expect("real home");
+        let fake_home = tempfile::tempdir().expect("fake home");
+        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
+        std::fs::create_dir_all(fake_home.path().join(".config")).expect("fake config");
+        std::fs::write(
+            fake_home.path().join(".codexbar-throwaway-browser-root"),
+            b"throwaway",
+        )
+        .expect("fake marker");
+
+        assert!(safe_browser_roots_from_fake_home(
+            fake_home.path().to_path_buf(),
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .expect("safe fake home")
+        .is_some());
+        assert!(safe_browser_roots_from_fake_home(
+            real_home.path().to_path_buf(),
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .is_err());
+        assert!(safe_browser_roots_from_fake_home(PathBuf::from("/"), None, None).is_err());
+        assert!(safe_browser_roots_from_fake_home(PathBuf::new(), None, None).is_err());
+        assert!(safe_browser_roots_from_fake_home(PathBuf::from("relative"), None, None).is_err());
+    }
+
+    #[test]
+    fn fake_browser_home_guard_rejects_real_config_descendants() {
+        let real_home = tempfile::tempdir().expect("real home");
+        let real_config_child = real_home.path().join(".config").join("throwaway");
+        std::fs::create_dir_all(real_config_child.join(".config")).expect("config child");
+
+        assert!(safe_browser_roots_from_fake_home(
+            real_config_child,
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn fake_browser_home_guard_rejects_home_and_config_symlink_escapes() {
+        use std::os::unix::fs::symlink;
+
+        let real_home = tempfile::tempdir().expect("real home");
+        let symlink_home = tempfile::tempdir().expect("link holder");
+        let home_link = symlink_home.path().join("home-link");
+        symlink(real_home.path(), &home_link).expect("home symlink");
+        assert!(safe_browser_roots_from_fake_home(
+            home_link,
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .is_err());
+
+        let fake_home = tempfile::tempdir().expect("fake home");
+        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
+        symlink(
+            real_home.path().join(".config"),
+            fake_home.path().join(".config"),
+        )
+        .expect("config symlink");
+        std::fs::write(
+            fake_home.path().join(".codexbar-throwaway-browser-root"),
+            b"throwaway",
+        )
+        .expect("fake marker");
+        assert!(safe_browser_roots_from_fake_home(
+            fake_home.path().to_path_buf(),
+            Some(real_home.path().to_path_buf()),
+            Some(real_home.path().join(".config"))
+        )
+        .is_err());
     }
 }

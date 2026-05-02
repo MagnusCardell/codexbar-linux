@@ -94,6 +94,28 @@ Implemented as a daemon-only synthetic/fake-root slice:
   scanning by default, Shell changes, and TCP/localhost APIs remain out of
   scope.
 
+## Task 04B.1 Result
+
+Added opt-in live throwaway Chromium-family verification without changing the
+Task 04B runtime contract:
+
+- `scripts/chromium-throwaway-smoke.sh` refuses to run unless
+  `CODEXBAR_BROWSER_LIVE=1` is set, creates a marked throwaway fake home, and
+  launches Chrome/Chromium/Brave only with a throwaway user-data-dir.
+- The smoke uses a local `127.0.0.1` test-only server and
+  `smoke.example.invalid` host mapping to seed a synthetic cookie; it does not
+  contact provider endpoints.
+- The ignored `live_throwaway_browser_profile_smoke` integration test validates
+  schema-safe `TestBrowserImport` output against the throwaway fake home and is
+  excluded from default `cargo test`, `./scripts/check.sh`, and CI.
+- `CODEXBAR_BROWSER_IMPORT_FAKE_HOME` now fails closed unless it is an
+  absolute, canonical throwaway directory with
+  `.codexbar-throwaway-browser-root`; real `$HOME`, real config descendants,
+  `/`, empty, relative, and escaping roots are rejected.
+- Cookie DB symlink escapes are skipped before temp-copy reads.
+- Local Chrome verification observed legacy `Default/Cookies` with no WAL/SHM;
+  `Default/Network/Cookies` was not observed in that throwaway run.
+
 ## Checks To Run
 
 ```bash
