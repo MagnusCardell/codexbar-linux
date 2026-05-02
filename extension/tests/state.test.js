@@ -11,11 +11,19 @@ import {
     diagnosticsCopyText,
     diagnosticsSummaryLine,
     footerStatusText,
+    meterClassNames,
+    meterFillFraction,
+    meterFillClassNames,
+    meterFillFractionFromPercent,
     headerStatusText,
     meterRow,
     meterRemainingPercent,
     normalizeViewState,
+    panelAccessibleName,
+    panelButtonClassNames,
+    panelContentClassNames,
     panelMeters,
+    panelProviderItemClassNames,
     refreshButtonLabel,
     safeUrl,
     selectProvider,
@@ -45,8 +53,13 @@ function main() {
     assertViewModelBuildsProviderStripAndSelectedSurface();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
     assertPanelViewModelBoundsProviderMode();
+    assertPanelViewModelStaysCompactProgressOnly();
+    assertPanelClassNamesAreStable();
+    assertPanelAccessibleNameIncludesHiddenUsageDetails();
     assertViewModelKeepsSemanticSourceSeparateFromAdapter();
     assertMeterRowsClampAndCostSummariesRender();
+    assertMeterFractionsAreClampedAndProportional();
+    assertMeterCssClassNamesMatchStylesheet();
     assertSnapshotRejectsSchemaDrift();
     assertFooterStatusIncludesCostCapability();
     assertHeaderStatusPreservesNonOkStates();
@@ -178,9 +191,11 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     assertEqual(view.selectedRow.meterRows[0].usedPercent, 18);
     assertEqual(view.selectedRow.meterRows[0].remainingPercent, 82);
     assertEqual(view.selectedRow.meterRows[0].fillPercent, 82);
+    assertEqual(view.selectedRow.meterRows[0].fillFraction, 0.82);
     assertEqual(view.selectedRow.meterRows[1].label, 'Weekly');
     assertEqual(view.selectedRow.meterRows[1].remainingPercent, 9);
     assertEqual(view.selectedRow.meterRows[1].fillPercent, 9);
+    assertEqual(view.selectedRow.meterRows[1].fillFraction, 0.09);
     assertArrayEqual(
         view.selectedRow.usageSections.map(section => section.key),
         ['primary', 'secondary', 'credits'],
@@ -192,6 +207,7 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     assertEqual(view.selectedRow.usageSections[2].meter.label, 'Credits');
     assert(!view.selectedRow.usageSections[2].meter.label.includes('(credits)'), 'credits label should not duplicate unit');
     assertEqual(view.selectedRow.usageSections[2].meter.fillPercent, 50);
+    assertEqual(view.selectedRow.usageSections[2].meter.fillFraction, 0.5);
     assertEqual(view.selectedRow.costRows.length, 1);
     assertEqual(view.selectedRow.costRows[0].label, 'Today');
     assertEqual(view.providerSelectorRows.length, 2);
@@ -281,6 +297,94 @@ function assertPanelViewModelBoundsProviderMode() {
     assertEqual(view.panel.overflowCount, 2);
 }
 
+function assertPanelViewModelStaysCompactProgressOnly() {
+    const snapshot = readJson('fixtures/snapshots/ok.json');
+    for (let index = 1; index <= 2; index++) {
+        snapshot.providers.push(cloneProvider(snapshot.providers[0], {
+            provider: `compact-provider${index}`,
+            displayName: `Compact Provider ${index}`,
+            primaryUsed: index * 12,
+            primaryRemaining: 100 - (index * 12),
+            secondaryUsed: index * 18,
+            secondaryRemaining: 100 - (index * 18),
+        }));
+    }
+
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    const mergedView = normalizeViewState(state, {panelMode: 'merged'});
+    const providerView = normalizeViewState(state, {panelMode: 'provider'});
+    const minimalView = normalizeViewState(state, {panelMode: 'minimal'});
+
+    for (const view of [mergedView, providerView, minimalView]) {
+        assertEqual(view.panel.compact, true);
+        assertEqual(view.panel.showText, false);
+        assertEqual(view.panel.meterCount, 2);
+        assertEqual(view.panel.meters.length, 2);
+    }
+
+    assertEqual(providerView.panel.visibleProviders.length, 3);
+    for (const row of providerView.panel.visibleProviders) {
+        assertEqual(row.compact, true);
+        assertEqual(row.showText, false);
+        assertEqual(row.meterCount, 2);
+        assertEqual(row.meters.length, 2);
+        assert(row.label.length <= 3, 'provider labels should remain bounded for accessibility only');
+    }
+}
+
+function assertPanelClassNamesAreStable() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {panelMode: 'provider', theme: 'compact'});
+    const panelClasses = panelButtonClassNames(view, {theme: 'compact'}, {open: true});
+
+    for (const expected of [
+        'panel-button',
+        'codexbar-panel',
+        'codexbar-theme-compact',
+        'codexbar-state-ok',
+        'codexbar-panel-open',
+    ])
+        assert(panelClasses.split(' ').includes(expected), `panel class missing ${expected}`);
+    assert(!panelClasses.includes('undefined'), 'panel classes should not include undefined');
+
+    assertEqual(
+        panelContentClassNames(view.panel),
+        'codexbar-panel-content codexbar-panel-content-provider',
+    );
+    assertEqual(
+        panelContentClassNames({mode: 'minimal'}),
+        'codexbar-panel-content codexbar-panel-content-minimal',
+    );
+    assertEqual(
+        panelProviderItemClassNames(view.panel.visibleProviders[0]),
+        'codexbar-panel-provider-item codexbar-state-ok codexbar-severity-ok',
+    );
+    assertEqual(
+        panelProviderItemClassNames({state: 'not_real', severity: 'not_real'}),
+        'codexbar-panel-provider-item codexbar-state-error codexbar-severity-error',
+    );
+}
+
+function assertPanelAccessibleNameIncludesHiddenUsageDetails() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    const label = panelAccessibleName(view);
+
+    for (const expected of [
+        'CodexBar: Codex',
+        'Up to date',
+        'Session',
+        '58% remaining',
+        'Weekly',
+        '36% remaining',
+        'resets',
+    ])
+        assert(label.includes(expected), `panel accessible name missing ${expected}`);
+    assert(!label.includes('rawPayload'), 'panel accessible name must stay normalized');
+}
+
 function assertViewModelKeepsSemanticSourceSeparateFromAdapter() {
     const ok = readJson('fixtures/snapshots/ok.json');
     const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
@@ -296,9 +400,11 @@ function assertMeterRowsClampAndCostSummariesRender() {
     assertEqual(clamped.usedPercent, 100);
     assertEqual(clamped.remainingPercent, 0);
     assertEqual(clamped.fillPercent, 0);
+    assertEqual(clamped.fillFraction, 0);
 
     const missing = meterRow(null, 'countdown', 0);
     assertEqual(missing.detail, 'No usage data');
+    assertEqual(missing.fillFraction, null);
 
     const rows = costSummaryRows({
         total: 12.345,
@@ -326,6 +432,43 @@ function assertMeterRowsClampAndCostSummariesRender() {
     assertEqual(fallbackRows.length, 1);
     assertEqual(fallbackRows[0].label, 'Cost');
     assertEqual(fallbackRows[0].value, '$12.35');
+}
+
+function assertMeterFractionsAreClampedAndProportional() {
+    const highRemaining = meterRow({remainingPercent: 97, usedPercent: 3, label: 'Session'}, 'countdown', 0);
+    assertEqual(highRemaining.fillPercent, 97);
+    assertEqual(highRemaining.fillFraction, 0.97);
+
+    const halfRemaining = meterRow({remainingPercent: 57, usedPercent: 43, label: 'Weekly'}, 'countdown', 0);
+    assertEqual(halfRemaining.fillPercent, 57);
+    assertEqual(halfRemaining.fillFraction, 0.57);
+
+    const usedOnly = meterRow({usedPercent: 25, label: 'Session'}, 'countdown', 0);
+    assertEqual(usedOnly.remainingPercent, 75);
+    assertEqual(usedOnly.fillPercent, 75);
+    assertEqual(usedOnly.fillFraction, 0.75);
+
+    assertEqual(meterFillFraction({remainingPercent: 120}), 1);
+    assertEqual(meterFillFraction({usedPercent: 150}), 0);
+    assertEqual(meterFillFraction({remainingPercent: -4}), 0);
+    assertEqual(meterFillFraction(null), null);
+    assertEqual(meterFillFractionFromPercent(58), 0.58);
+    assertEqual(meterFillFractionFromPercent(57), 0.57);
+    assertEqual(meterFillFractionFromPercent(Number.POSITIVE_INFINITY), null);
+}
+
+function assertMeterCssClassNamesMatchStylesheet() {
+    const stylesheet = readText('extension/stylesheet.css');
+    for (const tone of ['ok', 'warning', 'danger', 'unknown', 'invalid']) {
+        const classNames = [
+            ...meterClassNames(tone, {compact: true}).split(' '),
+            ...meterFillClassNames(tone).split(' '),
+        ];
+        for (const className of classNames)
+            assert(stylesheet.includes(`.${className}`), `stylesheet missing selector for ${className}`);
+    }
+    assert(meterClassNames('invalid').endsWith('codexbar-meter-unknown'), 'invalid meter tone should fall back to unknown');
+    assert(meterFillClassNames('invalid').endsWith('codexbar-meter-fill-unknown'), 'invalid fill tone should fall back to unknown');
 }
 
 function assertSnapshotRejectsSchemaDrift() {
@@ -697,12 +840,16 @@ function collectMainViewLabels(view) {
 }
 
 function readJson(relativePath) {
+    return JSON.parse(readText(relativePath));
+}
+
+function readText(relativePath) {
     const path = GLib.build_filenamev([GLib.get_current_dir(), relativePath]);
     const file = Gio.File.new_for_path(path);
     const [ok, contents] = file.load_contents(null);
     if (!ok)
         throw new Error(`failed to load ${relativePath}`);
-    return JSON.parse(new TextDecoder('utf-8').decode(contents));
+    return new TextDecoder('utf-8').decode(contents);
 }
 
 function cloneProvider(provider, overrides) {

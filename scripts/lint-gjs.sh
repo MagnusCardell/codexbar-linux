@@ -325,6 +325,8 @@ for selector in (
         violations.append(f"stylesheet.css: missing selector for emitted class {selector}")
 
 provider_card_js = (root / "src/providerCard.js").read_text(encoding="utf-8")
+if "sectionTitle(" in provider_card_js and not re.search(r"\b(?:function\s+sectionTitle|(?:const|let|var)\s+sectionTitle\s*=)", provider_card_js):
+    violations.append("src/providerCard.js: sectionTitle() is called but no local helper is defined")
 if "codexbar-state-pill" in provider_card_js:
     violations.append("src/providerCard.js: selected provider surface must not render a status pill")
 if "loadDiagnostics(" in provider_card_js:

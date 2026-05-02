@@ -199,11 +199,17 @@ export class CodexbarDbusClient {
             () => {
                 if (this._destroyed)
                     return;
+
                 this.available = true;
+
+                // Critical: the daemon may have appeared after the initial
+                // startup GetSnapshot attempt failed or timed out.
+                this.refreshSnapshot().catch(error => Log.warn(error.message));
             },
             () => {
                 if (this._destroyed)
                     return;
+
                 this.available = false;
                 this._emit('unavailable', 'Daemon D-Bus service is unavailable');
             }

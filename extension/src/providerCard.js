@@ -243,6 +243,19 @@ function createCostSection(costRows) {
     return box;
 }
 
+function sectionTitle(text) {
+    const header = new St.BoxLayout({
+        style_class: 'codexbar-section-header',
+        x_expand: true,
+    });
+    header.add_child(new St.Label({
+        text,
+        style_class: 'codexbar-diagnostics-title',
+        x_expand: true,
+    }));
+    return header;
+}
+
 function actionButton(label, callback, {primary = false, reactive = true} = {}) {
     const button = new St.Button({
         label,

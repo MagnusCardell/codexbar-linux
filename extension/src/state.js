@@ -648,6 +648,9 @@ export function panelViewModel(providerRows, selectedRow, viewState, stale, opti
             state: row.state,
             severity: row.severity,
             meters: panelMeters(row.provider),
+            compact: true,
+            showText: false,
+            meterCount: 2,
         }));
 
     return {
@@ -659,7 +662,65 @@ export function panelViewModel(providerRows, selectedRow, viewState, stale, opti
         meters: panelMeters(selectedRow?.provider),
         visibleProviders,
         overflowCount: Math.max(0, providerRows.length - visibleProviders.length),
+        compact: true,
+        showText: false,
+        meterCount: 2,
     };
+}
+
+export function panelButtonClassNames(view, options = {}, {open = false} = {}) {
+    const uiOptions = normalizeUiOptions(options);
+    const state = normalizeStateName(view?.state);
+    const classes = [
+        'panel-button',
+        'codexbar-panel',
+        `codexbar-theme-${uiOptions.theme}`,
+        `codexbar-state-${state}`,
+    ];
+
+    if (view?.stale)
+        classes.push('codexbar-stale');
+    if (open)
+        classes.push('codexbar-panel-open');
+
+    return classes.join(' ');
+}
+
+export function panelContentClassNames(panel) {
+    const mode = PANEL_MODES.includes(panel?.mode) ? panel.mode : 'merged';
+    const modeClass = {
+        merged: 'codexbar-panel-content-merged',
+        provider: 'codexbar-panel-content-provider',
+        minimal: 'codexbar-panel-content-minimal',
+    }[mode];
+
+    return ['codexbar-panel-content', modeClass].join(' ');
+}
+
+export function panelProviderItemClassNames(row) {
+    const state = normalizeStateName(row?.state);
+    const severity = ['ok', 'warning', 'loading', 'error'].includes(row?.severity)
+        ? row.severity
+        : stateMeta(state).severity;
+
+    return [
+        'codexbar-panel-provider-item',
+        `codexbar-state-${state}`,
+        `codexbar-severity-${severity}`,
+    ].join(' ');
+}
+
+export function panelAccessibleName(view) {
+    const row = view?.selectedRow ?? null;
+    const providerName = row?.displayName || view?.panel?.label || view?.panelLabel || PRODUCT_PANEL_PLACEHOLDER;
+    const pieces = [
+        `${PRODUCT_NAME}: ${providerName}`,
+        row?.statusLabel || view?.stateLabel || view?.panelStatus,
+        view?.headerStatus || row?.titleStatusText,
+        ...panelAccessibleMeterTexts(row),
+    ].filter(Boolean);
+
+    return safeDisplay(uniqueStrings(pieces).join(' · '), PRODUCT_NAME);
 }
 
 export function panelMeters(provider) {
@@ -728,6 +789,31 @@ export function meterRemainingPercent(meter) {
     return null;
 }
 
+export function meterFillFraction(meter) {
+    return meterFillFractionFromPercent(meterRemainingPercent(meter));
+}
+
+export function meterFillFractionFromPercent(percent) {
+    const clamped = clampPercent(percent);
+    return clamped === null ? null : clamped / 100;
+}
+
+export function meterClassNames(tone, {compact = false} = {}) {
+    return [
+        'codexbar-meter',
+        compact ? 'codexbar-meter-compact' : '',
+        `codexbar-meter-${safeMeterTone(tone)}`,
+    ].filter(Boolean).join(' ');
+}
+
+export function meterFillClassNames(tone) {
+    return `codexbar-meter-fill codexbar-meter-fill-${safeMeterTone(tone)}`;
+}
+
+export function safeMeterTone(tone) {
+    return ['ok', 'warning', 'danger', 'unknown'].includes(tone) ? tone : 'unknown';
+}
+
 export function meterTone(meter) {
     const remaining = meterRemainingPercent(meter);
     if (remaining === null)
@@ -750,6 +836,7 @@ export function meterRow(meter, resetTimeFormat = 'countdown', nowMs = Date.now(
         usedPercent: used,
         remainingPercent: remaining,
         fillPercent: remaining,
+        fillFraction: meterFillFraction(meter),
         tone: meterTone(meter),
         resetText: formatResetTime(meter?.resetsAt, resetTimeFormat, nowMs),
     };
@@ -835,6 +922,34 @@ export function formatUpdatedAt(isoString, nowMs = Date.now()) {
 
 export function stateMeta(state) {
     return STATE_META[state] ?? STATE_META.error;
+}
+
+function normalizeStateName(state) {
+    return Object.prototype.hasOwnProperty.call(STATE_META, state) ? state : 'error';
+}
+
+function panelAccessibleMeterTexts(row) {
+    const meterRows = Array.isArray(row?.meterRows) ? row.meterRows : [];
+    return meterRows.slice(0, 2)
+        .map(meter => {
+            const pieces = [
+                safeDisplay(meter?.label || 'Usage'),
+                safeDisplay(meter?.detail || ''),
+                meter?.resetText ? `resets ${safeDisplay(meter.resetText)}` : '',
+            ].filter(Boolean);
+            return pieces.join(' ');
+        })
+        .filter(Boolean);
+}
+
+function uniqueStrings(values) {
+    const seen = new Set();
+    return values.filter(value => {
+        if (seen.has(value))
+            return false;
+        seen.add(value);
+        return true;
+    });
 }
 
 export function sourceLabel(source) {

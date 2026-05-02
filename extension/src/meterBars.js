@@ -1,27 +1,59 @@
+import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import {
+    meterFillFractionFromPercent,
+    meterClassNames,
+    meterFillClassNames,
     meterTone,
     meterRemainingPercent,
+    safeMeterTone,
     safeDisplay,
 } from './state.js';
 
 const PANEL_METER_WIDTH = 30;
+const PANEL_METER_HEIGHT = 3;
 const PROVIDER_METER_WIDTH = 330;
+const PROVIDER_METER_HEIGHT = 6;
 
 export function createMicroMeterStack(meters) {
+    const rows = Array.isArray(meters) ? meters : [];
+
     const box = new St.BoxLayout({
         vertical: true,
         style_class: 'codexbar-panel-meter-stack',
+        x_align: Clutter.ActorAlign.CENTER,
+        y_align: Clutter.ActorAlign.CENTER,
     });
 
-    for (const meter of meters.slice(0, 2))
-        box.add_child(createContinuousMeter(meterRemainingPercent(meter), meterTone(meter), {compact: true}));
+    for (const meter of rows.slice(0, 2)) {
+        box.add_child(createContinuousMeter(
+            meterVisualPercent(meter),
+            meterVisualTone(meter),
+            {compact: true}
+        ));
+    }
 
     while (box.get_n_children() < 2)
         box.add_child(createContinuousMeter(null, 'unknown', {compact: true}));
 
     return box;
+}
+
+function meterVisualPercent(meter) {
+    if (Number.isFinite(meter?.fillPercent))
+        return meter.fillPercent;
+    if (Number.isFinite(meter?.remainingPercent))
+        return meter.remainingPercent;
+    if (Number.isFinite(meter?.usedPercent))
+        return 100 - meter.usedPercent;
+    return null;
+}
+
+function meterVisualTone(meter) {
+    if (meter?.tone)
+        return meter.tone;
+    return meterTone(meter);
 }
 
 export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable', limit = 4} = {}) {
@@ -76,29 +108,75 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
 
 export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = false} = {}) {
     const width = compact ? PANEL_METER_WIDTH : PROVIDER_METER_WIDTH;
-    const normalized = normalizedPercent(fillPercent);
-    const fillWidth = normalized === null ? 0 : Math.round((normalized / 100) * width);
-    const safeTone = ['ok', 'warning', 'danger', 'unknown'].includes(tone) ? tone : 'unknown';
-    const box = new St.BoxLayout({
-        style_class: compact
-            ? `codexbar-meter codexbar-meter-compact codexbar-meter-${safeTone}`
-            : `codexbar-meter codexbar-meter-${safeTone}`,
+    const height = compact ? PANEL_METER_HEIGHT : PROVIDER_METER_HEIGHT;
+    const fillWidth = fillWidthForPercent(fillPercent, width);
+    const restWidth = Math.max(0, width - fillWidth);
+    const safeTone = safeMeterTone(tone);
+
+    const track = new St.BoxLayout({
+        vertical: false,
+        style_class: meterClassNames(safeTone, {compact}),
         x_expand: !compact,
-        style: `width: ${width}px;`,
+        x_align: Clutter.ActorAlign.CENTER,
+        y_align: Clutter.ActorAlign.CENTER,
+        style: [
+            `width: ${width}px`,
+            `min-width: ${width}px`,
+            `max-width: ${width}px`,
+            `height: ${height}px`,
+            `min-height: ${height}px`,
+            `max-height: ${height}px`,
+        ].join('; '),
     });
 
-    box.add_child(new St.Widget({
-        style_class: `codexbar-meter-fill codexbar-meter-fill-${safeTone}`,
-        style: `width: ${fillWidth}px; background-color: ${meterColor(safeTone)};`,
-    }));
+    track.set_width(width);
+    track.set_height(height);
 
-    return box;
+    if (fillWidth > 0) {
+        const fill = new St.Widget({
+            style_class: meterFillClassNames(safeTone),
+            style: [
+                `width: ${fillWidth}px`,
+                `min-width: ${fillWidth}px`,
+                `max-width: ${fillWidth}px`,
+                `height: ${height}px`,
+                `min-height: ${height}px`,
+                `max-height: ${height}px`,
+                `background-color: ${meterColor(safeTone)}`,
+            ].join('; '),
+        });
+
+        fill.set_width(fillWidth);
+        fill.set_height(height);
+        track.add_child(fill);
+    }
+
+    if (restWidth > 0) {
+        const rest = new St.Widget({
+            style: [
+                `width: ${restWidth}px`,
+                `min-width: ${restWidth}px`,
+                `max-width: ${restWidth}px`,
+                `height: ${height}px`,
+                `min-height: ${height}px`,
+                `max-height: ${height}px`,
+                'background-color: transparent',
+            ].join('; '),
+        });
+
+        rest.set_width(restWidth);
+        rest.set_height(height);
+        track.add_child(rest);
+    }
+
+    return track;
 }
 
-function normalizedPercent(value) {
-    if (!Number.isFinite(value))
-        return null;
-    return Math.max(0, Math.min(100, value));
+function fillWidthForPercent(value, width) {
+    const fraction = meterFillFractionFromPercent(value);
+    if (fraction === null || fraction <= 0)
+        return 0;
+    return Math.max(1, Math.round(fraction * width));
 }
 
 function remainingVisualPercent(meter) {

@@ -1,3 +1,4 @@
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -11,6 +12,12 @@ import {
 } from './constants.js';
 import {createMicroMeterStack} from './meterBars.js';
 import {CodexbarPopover} from './popover.js';
+import {
+    panelAccessibleName,
+    panelButtonClassNames,
+    panelContentClassNames,
+    panelProviderItemClassNames,
+} from './state.js';
 
 export const CodexbarIndicator = GObject.registerClass(
 class CodexbarIndicator extends PanelMenu.Button {
@@ -19,6 +26,8 @@ class CodexbarIndicator extends PanelMenu.Button {
         this._actions = actions;
         this._content = new St.BoxLayout({
             style_class: 'codexbar-panel-content',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
         });
         this.add_child(this._content);
 
@@ -30,20 +39,31 @@ class CodexbarIndicator extends PanelMenu.Button {
         });
         item.add_child(this._popover.actor);
         this.menu.addMenuItem(item);
+
+        this._menuOpen = false;
+        this._menuOpenSignal = this.menu.connect('open-state-changed', (_menu, open) => {
+            this._menuOpen = open;
+            this._syncPanelStyle();
+        });
     }
 
     addToPanel() {
+        const existing = Main.panel.statusArea[EXTENSION_STATUS_AREA_NAME];
+        if (existing && existing !== this)
+            existing.destroy();
+
         Main.panel.addToStatusArea(EXTENSION_STATUS_AREA_NAME, this, 0, 'right');
     }
 
     update(view, options) {
+        this._view = view;
+        this._options = options;
         this._content.destroy_all_children();
-        this.style_class = `panel-button codexbar-panel codexbar-theme-${options.theme} codexbar-state-${view.state}${view.stale ? ' codexbar-stale' : ''}`;
-        this.accessible_name = `${PRODUCT_NAME}: ${view.panel?.label ?? view.panelLabel} ${view.headerStatus ?? view.panelStatus}`;
+        this._content.style_class = panelContentClassNames(view.panel);
+        this._syncPanelStyle();
+        this.accessible_name = panelAccessibleName(view);
 
-        if (options.panelMode === 'minimal')
-            this._renderMinimal(view);
-        else if (options.panelMode === 'provider')
+        if (options.panelMode === 'provider')
             this._renderProviderGroup(view);
         else
             this._renderMerged(view);
@@ -52,20 +72,19 @@ class CodexbarIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        if (this._menuOpenSignal) {
+            this.menu.disconnect(this._menuOpenSignal);
+            this._menuOpenSignal = null;
+        }
         this._popover?.destroy();
         this._popover = null;
+        this._view = null;
+        this._options = null;
         super.destroy();
     }
 
     _renderMerged(view) {
         const panel = view.panel ?? {};
-        this._content.add_child(new St.Widget({
-            style_class: 'codexbar-panel-status-dot',
-        }));
-        this._content.add_child(new St.Label({
-            text: panel.label ?? view.panelLabel ?? 'CB',
-            style_class: 'codexbar-panel-label',
-        }));
         this._content.add_child(createMicroMeterStack(panel.meters ?? []));
     }
 
@@ -73,23 +92,13 @@ class CodexbarIndicator extends PanelMenu.Button {
         const panel = view.panel ?? {};
         const rows = panel.visibleProviders ?? [];
         for (const row of rows) {
-            const item = new St.BoxLayout({
-                vertical: true,
-                style_class: `codexbar-provider-dot codexbar-panel-provider-item codexbar-state-${row.state}`,
+            const item = new St.Bin({
+                style_class: panelProviderItemClassNames(row),
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
             });
-            item.add_child(new St.Label({
-                text: row.label,
-                style_class: 'codexbar-provider-dot-label',
-            }));
-            item.add_child(createMicroMeterStack(row.meters ?? []));
+            item.set_child(createMicroMeterStack(row.meters ?? []));
             this._content.add_child(item);
-        }
-        const extra = panel.overflowCount ?? 0;
-        if (extra > 0) {
-            this._content.add_child(new St.Label({
-                text: `+${extra}`,
-                style_class: 'codexbar-panel-label codexbar-muted',
-            }));
         }
         if (rows.length === 0)
             this._renderMinimal(view);
@@ -97,9 +106,12 @@ class CodexbarIndicator extends PanelMenu.Button {
 
     _renderMinimal(view) {
         const panel = view.panel ?? {};
-        this._content.add_child(new St.Icon({
-            icon_name: panel.iconName ?? 'emblem-ok-symbolic',
-            style_class: 'system-status-icon codexbar-panel-icon',
-        }));
+        this._content.add_child(createMicroMeterStack(panel.meters ?? []));
+    }
+
+    _syncPanelStyle() {
+        if (!this._view || !this._options)
+            return;
+        this.style_class = panelButtonClassNames(this._view, this._options, {open: this._menuOpen});
     }
 });
