@@ -80,6 +80,11 @@ Required flow:
 8. Drop cookie jar and decrypted values.
 9. Cache only normalized output.
 
+The Task 04A browser-cookie-specific threat model is maintained in
+`docs/browser-cookie-threat-model.md`. It is authoritative for future browser
+profile discovery, cookie DB copying, keyring/decryption, provider web fetch,
+diagnostics, and fixture-safety work.
+
 ## D-Bus security
 
 D-Bus API is session-scoped. Do not expose secrets over D-Bus. The session bus is not a secret vault; any user process may be able to call the service. Therefore all D-Bus outputs must be safe to display or copy after redaction.

@@ -1,0 +1,203 @@
+# Browser Support Matrix
+
+## Status
+
+Task 04A planning document. No browser profile discovery or cookie reading is
+implemented by this file.
+
+## Implementation Order
+
+1. Chromium-family first.
+2. Firefox second.
+3. Other browsers, Flatpak variants, and unusual profile roots later only after
+   verification.
+
+## Common Rules
+
+- Discover only known browser roots.
+- Do not recursively scan the home directory.
+- Do not accept arbitrary profile paths from D-Bus.
+- Use opaque profile IDs, not paths.
+- Use safe display labels, not path fragments.
+- Copy cookie DBs and required companion files to private temp storage before
+  reading where live browser locking is possible.
+- Query only provider-required domains and verified cookie names where known.
+- Use synthetic or throwaway profiles for tests.
+
+## Google Chrome
+
+Expected Linux profile roots:
+
+- `~/.config/google-chrome`
+- `~/.config/google-chrome-beta`
+- `~/.config/google-chrome-unstable`
+- `~/.config/google-chrome-for-testing`
+
+Chromium documentation also notes `$CHROME_CONFIG_HOME`, `$XDG_CONFIG_HOME`,
+`$CHROME_USER_DATA_DIR`, and `--user-data-dir` behavior. The daemon may only use
+environment-derived roots when they are safe, canonicalized, and bounded by
+policy.
+
+Cookie DB shape at a high level:
+
+- Chromium-family profile directories contain SQLite cookie stores.
+- Newer Chromium-family builds may place cookies under profile `Network`
+  storage.
+- Cookie rows contain host/domain, name, path, expiry, security flags, and
+  encrypted or plaintext value fields depending on browser/keyring behavior.
+
+Encryption/decryption dependency:
+
+- Linux Chromium-family secrets may depend on GNOME Secret Service/libsecret,
+  KWallet, or basic fallback behavior.
+- GNOME target path is Secret Service first.
+- KWallet support is later unless verified as required for Ubuntu/GNOME MVP.
+
+Lock/concurrency considerations:
+
+- Browser may hold SQLite locks.
+- Copy the cookie DB plus WAL/SHM companions where needed before reading.
+- Locked or inconsistent copies map to diagnostics, not panics.
+
+Task 04B/04C decision:
+
+- Implement in the Chromium-family first slice.
+
+Risks/open questions:
+
+- Exact encrypted cookie format and key derivation must be verified on Ubuntu
+  24.04 and 26.04.
+- Secret Service prompt behavior must be noninteractive for background refresh.
+- Chrome channel roots and command-line override roots need bounded support.
+
+## Brave
+
+Expected Linux profile roots:
+
+- `~/.config/BraveSoftware/Brave-Browser`
+- `~/.config/BraveSoftware/Brave-Browser-Beta`
+- `~/.config/BraveSoftware/Brave-Browser-Dev`
+
+These candidate roots must be verified with throwaway profiles before live
+enablement.
+
+Cookie DB shape at a high level:
+
+- Brave is Chromium-family and is expected to use Chromium-style profile and
+  cookie store structures.
+
+Encryption/decryption dependency:
+
+- Treat as Chromium-family Secret Service/keyring behavior until verified.
+
+Lock/concurrency considerations:
+
+- Same as Chromium-family: use private temp copies and handle WAL/SHM
+  companions.
+
+Task 04B/04C decision:
+
+- Include as a Chromium-family browser after Chrome/Chromium fixture behavior
+  is stable.
+
+Risks/open questions:
+
+- Package-specific profile roots need Ubuntu verification.
+- Keyring service labels may differ from Chrome/Chromium.
+
+## Chromium
+
+Expected Linux profile roots:
+
+- `~/.config/chromium`
+- `~/snap/chromium/common/chromium`
+
+Chromium documentation covers the standard `~/.config/chromium` root and XDG or
+Chrome-specific overrides. Ubuntu packages may install Chromium as a snap
+transition, so snap roots must be verified on target Ubuntu releases before
+they are enabled.
+
+Cookie DB shape at a high level:
+
+- Chromium-family SQLite cookie stores with host/domain, name, path, expiry,
+  security flags, and encrypted/plain value fields.
+
+Encryption/decryption dependency:
+
+- Secret Service/libsecret, KWallet, or basic fallback depending on browser and
+  environment.
+
+Lock/concurrency considerations:
+
+- Live DB may be locked.
+- Copy DB and companion files to private temp storage.
+- Snap confinement may affect profile root access and path layout.
+
+Task 04B/04C decision:
+
+- Implement in the Chromium-family first slice.
+- Verify snap behavior early because Ubuntu commonly routes Chromium through
+  snap.
+
+Risks/open questions:
+
+- Snap paths and confinement behavior need live Ubuntu verification.
+- Keyring integration may differ between deb and snap builds.
+
+## Firefox
+
+Expected Linux profile roots:
+
+- `~/.mozilla/firefox`
+- snap-specific roots such as `~/snap/firefox/common/.mozilla/firefox` after
+  verification.
+
+Firefox profile metadata is managed through profile configuration such as
+`profiles.ini`; discovery should read known metadata rather than recursively
+walking arbitrary directories.
+
+Cookie DB shape at a high level:
+
+- Firefox stores cookies in `cookies.sqlite` inside the profile directory.
+- Cookie rows include base domain, host, name, value, path, expiry, security
+  flags, and origin attributes.
+
+Encryption/decryption dependency:
+
+- Firefox cookies are not treated as Chromium OSCrypt encrypted values in this
+  design. Password storage is separate from cookie storage.
+
+Lock/concurrency considerations:
+
+- Firefox may lock or update the SQLite DB while running.
+- Use private temp copies before reading.
+- WAL/SHM companion handling must be verified.
+
+Task 04B/04C decision:
+
+- Implement after Chromium-family path is stable.
+
+Risks/open questions:
+
+- Firefox container/origin attributes may affect provider cookies.
+- Snap path behavior needs Ubuntu verification.
+- Provider sessions may behave differently across Firefox and Chromium-family
+  browsers.
+
+## Out Of Scope Until Later
+
+- Safari: macOS-only, not a Linux browser target.
+- Edge, Vivaldi, Arc, Dia, and other Chromium-family browsers: later only after
+  explicit roots, keyring labels, and fixtures are verified.
+- Flatpak browsers: later only after confinement and profile roots are
+  documented.
+- Manual pasted cookie headers: not part of Task 04B; would require a separate
+  settings and redaction review.
+
+## References
+
+- Chromium user data directory: `https://chromium.googlesource.com/chromium/src/+/main/docs/user_data_dir.md`
+- Chromium Linux password storage: `https://chromium.googlesource.com/chromium/src/+/main/docs/linux/password_storage.md`
+- Mozilla Firefox profiles: `https://support.mozilla.org/en-US/kb/profiles-where-firefox-stores-user-data`
+- Secret Service API: `https://specifications.freedesktop.org/secret-service-spec/latest-single/`
+- SQLite WAL: `https://www.sqlite.org/wal.html`

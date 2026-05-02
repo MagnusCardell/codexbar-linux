@@ -109,6 +109,10 @@ The adapter does four things:
 
 The adapter must not persist raw cookies or full cookie headers.
 
+Task 04A freezes the detailed Linux browser-cookie and web-fetch architecture
+in `docs/browser-cookie-architecture.md`, with the related threat model in
+`docs/browser-cookie-threat-model.md`.
+
 ### 6. Provider web adapters
 
 Provider web adapters are thin Linux shims, not a new provider framework. They exist only where upstream Linux CLI cannot yet provide web-backed data.

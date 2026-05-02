@@ -26,8 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 03 GNOME Shell vertical slice** status, with live
-GNOME 46 Wayland activation smoke proven.
+This repository is at **Task 04A browser-cookie architecture freeze** status.
+The Task 03 GNOME Shell vertical slice and design gate are complete enough for
+the browser-cookie planning phase, with live GNOME 46 Wayland activation smoke
+proven.
 
 Present:
 
@@ -47,14 +49,22 @@ Present:
 - Runtime refresh uses targeted usage/status probes and defaults to `codex` when no provider is configured or requested.
 - Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
 - GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
+- Task 03 visual design accepted at baseline commit
+  `9a47457c6d776923ada6f24694e444539d852da7`; the Shell remains D-Bus-only.
 - Preferences UI that exposes only the five GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
 - User-scoped systemd/D-Bus and Debian packaging skeleton files.
 - Local install/uninstall bootstrap scripts.
 - Validation scripts and GitHub Actions check workflow.
 - Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
+- Task 04A architecture freeze docs for daemon-only Linux browser-cookie import
+  and provider web-fetch adapters:
+  `docs/browser-cookie-architecture.md`,
+  `docs/browser-cookie-threat-model.md`,
+  `docs/browser-support.md`, `docs/provider-roadmap.md`, and
+  `docs/adr/0006-linux-browser-cookie-daemon-layer.md`.
 
-Not implemented after Task 03:
+Not implemented after Task 04A:
 
 - browser-cookie import, beyond the schema-valid `not_implemented` test stub;
 - provider network calls or Linux web adapters;
