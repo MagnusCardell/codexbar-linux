@@ -6,10 +6,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
+use codexbar_linuxd::browser::diagnostics as browser_diagnostics;
 use codexbar_linuxd::browser::session_material::{ScopedCookie, SessionMaterial};
 use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{
-    ProviderState, RefreshResult, RefreshStatus, SemanticSource, Snapshot, SourceAdapter,
+    Provider, ProviderState, RefreshProviderResult, RefreshProviderStatus, RefreshReason,
+    RefreshResult, RefreshStatus, SemanticSource, Snapshot, SourceAdapter,
 };
 use codexbar_linuxd::web::client::{
     CodexWebFixture, FakeWebClient, ReqwestStaticGetClient, WebClientError, WebRequest, WebResponse,
@@ -20,6 +22,7 @@ use codexbar_linuxd::web::providers::codex;
 use codexbar_linuxd::web::{self, WebRefreshRequest};
 
 const NOW: &str = "2026-05-02T12:00:00Z";
+const LINUX_WEB_LIVE_HTTP_DISABLED: &str = "linux_web_live_http_disabled";
 const LINUX_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
 const CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"providers":["codex"],"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
 
@@ -527,6 +530,284 @@ fn web_request_and_response_debug_redact_url_secrets_and_bodies() {
     assert!(!response_debug.contains("raw-body-marker"));
 }
 
+#[test]
+fn live_recon_summary_filters_to_safe_stable_fields() {
+    let refresh = refresh_for_response(html_response("dashboard_success.html"));
+    let mut provider = refresh.snapshot.providers[0].clone();
+    provider.diagnostic_codes.extend([
+        browser_diagnostics::COOKIE_DECRYPTED.to_string(),
+        diagnostics::FETCH_FINISHED.to_string(),
+        "Authorization: Bearer fixture-secret".to_string(),
+        "https://chatgpt.com/codex/settings/usage?token=fixture-secret".to_string(),
+        "/home/example/.config/google-chrome/Default/Network/Cookies".to_string(),
+        "rawResponse".to_string(),
+        "user@example.invalid".to_string(),
+    ]);
+    let result = recon_refresh_result(
+        RefreshStatus::Partial,
+        false,
+        [
+            browser_diagnostics::COOKIE_DECRYPTED,
+            diagnostics::FETCH_REDACTION_APPLIED,
+            "Set-Cookie: fixture-secret",
+        ],
+    );
+
+    let summary = LiveReconSummary::from_provider_and_result(&provider, &result);
+    let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    assert_eq!(summary.provider, "codex");
+    assert_eq!(summary.provider_state, ProviderState::Ok);
+    assert_eq!(summary.source, SemanticSource::Web);
+    assert_eq!(summary.source_adapter, SourceAdapter::LinuxWeb);
+    assert_eq!(
+        summary.classification,
+        LiveReconClassification::ParserSucceeded
+    );
+    assert_eq!(summary.cookie_presence, LiveReconCookiePresence::Decrypted);
+    assert_eq!(summary.web_fetch, LiveReconWebFetch::Finished);
+    assert_eq!(
+        summary.diagnostic_codes,
+        vec![
+            diagnostics::FETCH_STARTED.to_string(),
+            diagnostics::FETCH_FINISHED.to_string(),
+            diagnostics::FETCH_REDACTION_APPLIED.to_string(),
+            browser_diagnostics::COOKIE_DECRYPTED.to_string(),
+        ]
+    );
+    assert!(summary.redaction_applied);
+    assert!(!summary_json.contains("Authorization"));
+    assert!(!summary_json.contains("Bearer"));
+    assert!(!summary_json.contains("fixture-secret"));
+    assert!(!summary_json.contains("Set-Cookie"));
+    assert!(!summary_json.contains("token="));
+    assert!(!summary_json.contains("/home/"));
+    assert!(!summary_json.contains("Network/Cookies"));
+    assert!(!summary_json.contains("rawResponse"));
+    assert!(!summary_json.contains("user@example.invalid"));
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
+}
+
+#[test]
+fn live_recon_summary_classifies_required_outcomes() {
+    for (state, codes, classification, cookie_presence, web_fetch) in [
+        (
+            ProviderState::MissingDependency,
+            vec![LINUX_WEB_LIVE_HTTP_DISABLED],
+            LiveReconClassification::LinuxWebLiveHttpDisabled,
+            LiveReconCookiePresence::Unknown,
+            LiveReconWebFetch::Blocked,
+        ),
+        (
+            ProviderState::MissingDependency,
+            vec![
+                browser_diagnostics::PROFILE_NOT_FOUND,
+                diagnostics::COOKIE_ABSENT,
+            ],
+            LiveReconClassification::BrowserProfileNotFound,
+            LiveReconCookiePresence::Unavailable,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::ProviderUnavailable,
+            vec![
+                browser_diagnostics::COOKIE_DB_LOCKED,
+                diagnostics::COOKIE_ABSENT,
+            ],
+            LiveReconClassification::UnknownSafeFailure,
+            LiveReconCookiePresence::Unavailable,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::MissingDependency,
+            vec![
+                browser_diagnostics::KEYRING_UNAVAILABLE,
+                diagnostics::COOKIE_ABSENT,
+            ],
+            LiveReconClassification::BrowserKeyringUnavailable,
+            LiveReconCookiePresence::Unavailable,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::Unauthenticated,
+            vec![
+                browser_diagnostics::COOKIE_MISSING,
+                diagnostics::COOKIE_ABSENT,
+            ],
+            LiveReconClassification::BrowserCookieMissing,
+            LiveReconCookiePresence::None,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::ProviderUnavailable,
+            vec![
+                browser_diagnostics::COOKIE_FOUND,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_FINISHED,
+            ],
+            LiveReconClassification::BrowserCookieFound,
+            LiveReconCookiePresence::Found,
+            LiveReconWebFetch::Finished,
+        ),
+        (
+            ProviderState::CookieRejected,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::COOKIE_REJECTED,
+            ],
+            LiveReconClassification::ProviderCookieRejected,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::CookieRejected,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::COOKIE_REJECTED,
+            ],
+            LiveReconClassification::LoginRequired,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::Attempted,
+        ),
+        (
+            ProviderState::ProviderUnavailable,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::REDIRECT_BLOCKED,
+            ],
+            LiveReconClassification::RedirectBlocked,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::Blocked,
+        ),
+        (
+            ProviderState::ProviderUnavailable,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_NONZERO_STATUS,
+            ],
+            LiveReconClassification::Non200,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::Finished,
+        ),
+        (
+            ProviderState::ParseError,
+            vec![
+                browser_diagnostics::COOKIE_FOUND,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_FINISHED,
+                diagnostics::FETCH_PARSE_ERROR,
+            ],
+            LiveReconClassification::ParseError,
+            LiveReconCookiePresence::Found,
+            LiveReconWebFetch::Finished,
+        ),
+        (
+            ProviderState::Timeout,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_TIMEOUT,
+            ],
+            LiveReconClassification::Timeout,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::Timeout,
+        ),
+        (
+            ProviderState::ParseError,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::RESPONSE_TOO_LARGE,
+            ],
+            LiveReconClassification::ResponseTooLarge,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::ParseError,
+        ),
+        (
+            ProviderState::Ok,
+            vec![
+                browser_diagnostics::COOKIE_FOUND,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_FINISHED,
+            ],
+            LiveReconClassification::DashboardReachable,
+            LiveReconCookiePresence::Found,
+            LiveReconWebFetch::Finished,
+        ),
+        (
+            ProviderState::Ok,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTED,
+                diagnostics::FETCH_STARTED,
+                diagnostics::FETCH_FINISHED,
+                diagnostics::FETCH_REDACTION_APPLIED,
+            ],
+            LiveReconClassification::ParserSucceeded,
+            LiveReconCookiePresence::Decrypted,
+            LiveReconWebFetch::Finished,
+        ),
+    ] {
+        let provider = recon_provider(state, codes);
+        let result = recon_refresh_result(RefreshStatus::Error, false, []);
+        let summary = LiveReconSummary::from_provider_and_result(&provider, &result);
+
+        assert_eq!(summary.classification, classification);
+        assert_eq!(summary.cookie_presence, cookie_presence);
+        assert_eq!(summary.web_fetch, web_fetch);
+        let summary_json = serde_json::to_string(&summary).expect("summary json");
+        common::assert_public_json_safe(&summary_json);
+        assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
+    }
+}
+
+#[test]
+fn live_recon_summary_does_not_copy_diagnostic_details() {
+    let provider = recon_provider(
+        ProviderState::ParseError,
+        vec![
+            browser_diagnostics::COOKIE_FOUND,
+            diagnostics::FETCH_PARSE_ERROR,
+        ],
+    );
+    let result = recon_refresh_result(RefreshStatus::Partial, false, []);
+    let raw_detail_json = serde_json::json!({
+        "rawResponse": "Authorization: Bearer fixture-secret",
+        "profilePath": "/tmp/codexbar-web-live/profile",
+        "accountEmail": "user@example.invalid",
+        "redirectUrl": "https://chatgpt.com/auth/login?token=fixture-secret"
+    })
+    .to_string();
+
+    let summary = LiveReconSummary::from_provider_and_result(&provider, &result);
+    let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    for forbidden in [
+        "rawResponse",
+        "Authorization",
+        "Bearer",
+        "fixture-secret",
+        "/tmp/codexbar-web-live",
+        "user@example.invalid",
+        "redirectUrl",
+        "token=",
+    ] {
+        assert!(
+            raw_detail_json.contains(forbidden),
+            "test setup should include {forbidden}"
+        );
+        assert!(
+            !summary_json.contains(forbidden),
+            "summary copied diagnostic detail marker {forbidden}"
+        );
+    }
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
+}
+
 #[tokio::test]
 async fn production_linux_web_refresh_has_no_live_client_by_default() {
     let (_tmp, paths) = common::temp_paths();
@@ -642,7 +923,7 @@ async fn failed_linux_web_refresh_preserves_previous_stale_snapshot() {
 #[tokio::test]
 #[ignore = "requires CODEXBAR_CODEX_WEB_LIVE=1 and CODEXBAR_BROWSER_IMPORT_FAKE_HOME=/tmp/... throwaway profile"]
 async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
-    let Some(_fake_home) = live_throwaway_fake_home() else {
+    let Some(fake_home) = live_throwaway_fake_home() else {
         return;
     };
     let (_tmp, paths) = common::temp_paths();
@@ -670,6 +951,12 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
     common::assert_public_json_safe(&completion.result_json);
     assert_no_live_web_secret_markers("live Codex web snapshot", &completion.snapshot_json);
     assert_no_live_web_secret_markers("live Codex web result", &completion.result_json);
+    assert_no_live_web_fake_home_path(
+        "live Codex web snapshot",
+        &completion.snapshot_json,
+        &fake_home,
+    );
+    assert_no_live_web_fake_home_path("live Codex web result", &completion.result_json, &fake_home);
     assert!(!result.cache_written || app.cache_file_path().is_file());
 
     let provider = snapshot
@@ -715,15 +1002,25 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
     let diagnostics_json = app.get_diagnostics_json("codex").expect("diagnostics");
     common::assert_public_json_safe(&diagnostics_json);
     assert_no_live_web_secret_markers("live Codex web diagnostics", &diagnostics_json);
+    assert_no_live_web_fake_home_path("live Codex web diagnostics", &diagnostics_json, &fake_home);
     for (_provider, event_json) in completion.provider_events {
         common::assert_public_json_safe(&event_json);
         assert_no_live_web_secret_markers("live Codex web event", &event_json);
+        assert_no_live_web_fake_home_path("live Codex web event", &event_json, &fake_home);
     }
     if app.cache_file_path().is_file() {
         let cache_json = fs::read_to_string(app.cache_file_path()).expect("cache");
         common::assert_public_json_safe(&cache_json);
         assert_no_live_web_secret_markers("live Codex web cache", &cache_json);
+        assert_no_live_web_fake_home_path("live Codex web cache", &cache_json, &fake_home);
     }
+
+    let summary = LiveReconSummary::from_provider_and_result(provider, &result);
+    let summary_json = serde_json::to_string(&summary).expect("live recon summary json");
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
+    assert_no_live_web_fake_home_path("live Codex web summary", &summary_json, &fake_home);
+    eprintln!("{summary_json}");
 }
 
 fn refresh_for_response(response: WebResponse) -> codexbar_linuxd::web::WebRefresh {
@@ -791,6 +1088,382 @@ fn assert_no_live_web_secret_markers(label: &str, text: &str) {
             !lower.contains(needle),
             "{label} contains forbidden live secret marker {needle:?}"
         );
+    }
+}
+
+fn assert_no_live_web_fake_home_path(label: &str, text: &str, fake_home: &std::path::Path) {
+    let fake_home = fake_home.to_string_lossy();
+    assert!(
+        !text.contains(fake_home.as_ref()),
+        "{label} contains throwaway fake home path"
+    );
+    for needle in [
+        ".codexbar-throwaway-browser-root",
+        ".config/google-chrome",
+        ".config/chromium",
+        "BraveSoftware",
+        "Network/Cookies",
+        "cookies.sqlite",
+    ] {
+        assert!(
+            !text.contains(needle),
+            "{label} contains forbidden browser profile marker {needle:?}"
+        );
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveReconSummary {
+    provider: String,
+    provider_state: ProviderState,
+    refresh_status: RefreshStatus,
+    cache_written: bool,
+    source: SemanticSource,
+    source_adapter: SourceAdapter,
+    classification: LiveReconClassification,
+    diagnostic_codes: Vec<String>,
+    cookie_presence: LiveReconCookiePresence,
+    web_fetch: LiveReconWebFetch,
+    redaction_applied: bool,
+}
+
+impl LiveReconSummary {
+    fn from_provider_and_result(provider: &Provider, result: &RefreshResult) -> Self {
+        let diagnostic_codes = safe_recon_diagnostic_codes(provider, result);
+        let classification = classify_live_recon(provider.state, &diagnostic_codes);
+        let cookie_presence = classify_cookie_presence(&diagnostic_codes);
+        let web_fetch = classify_web_fetch(&diagnostic_codes);
+        Self {
+            provider: "codex".to_string(),
+            provider_state: provider.state,
+            refresh_status: result.status,
+            cache_written: result.cache_written,
+            source: SemanticSource::Web,
+            source_adapter: SourceAdapter::LinuxWeb,
+            classification,
+            diagnostic_codes,
+            cookie_presence,
+            web_fetch,
+            redaction_applied: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LiveReconClassification {
+    DashboardReachable,
+    ParserSucceeded,
+    LoginRequired,
+    ProviderCookieRejected,
+    RedirectBlocked,
+    Non200,
+    ParseError,
+    Timeout,
+    ResponseTooLarge,
+    BrowserCookieMissing,
+    BrowserCookieFound,
+    BrowserKeyringUnavailable,
+    BrowserProfileNotFound,
+    LinuxWebLiveHttpDisabled,
+    UnknownSafeFailure,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LiveReconCookiePresence {
+    None,
+    Found,
+    Decrypted,
+    Unavailable,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LiveReconWebFetch {
+    NotAttempted,
+    Attempted,
+    Finished,
+    Blocked,
+    Timeout,
+    ParseError,
+}
+
+fn safe_recon_diagnostic_codes(provider: &Provider, result: &RefreshResult) -> Vec<String> {
+    let mut codes = Vec::new();
+    for code in &provider.diagnostic_codes {
+        push_safe_recon_diagnostic_code(&mut codes, code);
+    }
+    for provider_result in result
+        .providers
+        .iter()
+        .filter(|provider_result| provider_result.provider == "codex")
+    {
+        for code in &provider_result.diagnostic_codes {
+            push_safe_recon_diagnostic_code(&mut codes, code);
+        }
+    }
+    for code in &result.diagnostic_codes {
+        push_safe_recon_diagnostic_code(&mut codes, code);
+    }
+    codes
+}
+
+fn push_safe_recon_diagnostic_code(codes: &mut Vec<String>, code: &str) {
+    if is_safe_recon_diagnostic_code(code) && !codes.iter().any(|existing| existing == code) {
+        codes.push(code.to_string());
+    }
+}
+
+fn is_safe_recon_diagnostic_code(code: &str) -> bool {
+    matches!(
+        code,
+        LINUX_WEB_LIVE_HTTP_DISABLED
+            | browser_diagnostics::LIVE_PROFILES_DISABLED
+            | browser_diagnostics::NOT_FOUND
+            | browser_diagnostics::PROFILE_NOT_FOUND
+            | browser_diagnostics::PROFILE_UNREADABLE
+            | browser_diagnostics::PROFILE_SKIPPED
+            | browser_diagnostics::COOKIE_DB_MISSING
+            | browser_diagnostics::COOKIE_DB_UNREADABLE
+            | browser_diagnostics::COOKIE_DB_LOCKED
+            | browser_diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED
+            | browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE
+            | browser_diagnostics::COOKIE_DECRYPTION_FAILED
+            | browser_diagnostics::KEYRING_UNAVAILABLE
+            | browser_diagnostics::KEYRING_LOCKED
+            | browser_diagnostics::KEYRING_PROMPT_REQUIRED
+            | browser_diagnostics::COOKIE_FOUND
+            | browser_diagnostics::COOKIE_DECRYPTED
+            | browser_diagnostics::COOKIE_MISSING
+            | diagnostics::FETCH_STARTED
+            | diagnostics::FETCH_FINISHED
+            | diagnostics::FETCH_TIMEOUT
+            | diagnostics::FETCH_NONZERO_STATUS
+            | diagnostics::FETCH_RATE_LIMITED
+            | diagnostics::FETCH_PARSE_ERROR
+            | diagnostics::FETCH_REDACTION_APPLIED
+            | diagnostics::DOMAIN_NOT_ALLOWED
+            | diagnostics::REDIRECT_BLOCKED
+            | diagnostics::RESPONSE_TOO_LARGE
+            | diagnostics::COOKIE_ABSENT
+            | diagnostics::COOKIE_REJECTED
+            | diagnostics::ACCOUNT_MISMATCH
+    )
+}
+
+fn classify_live_recon(provider_state: ProviderState, codes: &[String]) -> LiveReconClassification {
+    if provider_state == ProviderState::Ok {
+        if has_code(codes, diagnostics::FETCH_REDACTION_APPLIED) {
+            return LiveReconClassification::ParserSucceeded;
+        }
+        return LiveReconClassification::DashboardReachable;
+    }
+    if has_code(codes, LINUX_WEB_LIVE_HTTP_DISABLED) {
+        return LiveReconClassification::LinuxWebLiveHttpDisabled;
+    }
+    if has_code(codes, diagnostics::REDIRECT_BLOCKED) {
+        return LiveReconClassification::RedirectBlocked;
+    }
+    if has_code(codes, diagnostics::FETCH_TIMEOUT) {
+        return LiveReconClassification::Timeout;
+    }
+    if has_code(codes, diagnostics::RESPONSE_TOO_LARGE) {
+        return LiveReconClassification::ResponseTooLarge;
+    }
+    if has_code(codes, diagnostics::COOKIE_REJECTED) {
+        if has_code(codes, diagnostics::FETCH_STARTED) {
+            return LiveReconClassification::LoginRequired;
+        }
+        return LiveReconClassification::ProviderCookieRejected;
+    }
+    if has_code(codes, diagnostics::ACCOUNT_MISMATCH)
+        || provider_state == ProviderState::CookieRejected
+    {
+        return LiveReconClassification::ProviderCookieRejected;
+    }
+    if has_any_code(
+        codes,
+        &[
+            diagnostics::FETCH_NONZERO_STATUS,
+            diagnostics::FETCH_RATE_LIMITED,
+        ],
+    ) {
+        return LiveReconClassification::Non200;
+    }
+    if has_code(codes, diagnostics::FETCH_PARSE_ERROR)
+        || provider_state == ProviderState::ParseError
+    {
+        return LiveReconClassification::ParseError;
+    }
+    if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::PROFILE_NOT_FOUND,
+            browser_diagnostics::NOT_FOUND,
+            browser_diagnostics::LIVE_PROFILES_DISABLED,
+        ],
+    ) {
+        return LiveReconClassification::BrowserProfileNotFound;
+    }
+    if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
+            browser_diagnostics::COOKIE_DECRYPTION_FAILED,
+            browser_diagnostics::KEYRING_LOCKED,
+            browser_diagnostics::KEYRING_PROMPT_REQUIRED,
+            browser_diagnostics::KEYRING_UNAVAILABLE,
+        ],
+    ) {
+        return LiveReconClassification::BrowserKeyringUnavailable;
+    }
+    if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::COOKIE_DB_MISSING,
+            browser_diagnostics::COOKIE_DB_UNREADABLE,
+            browser_diagnostics::COOKIE_DB_LOCKED,
+            browser_diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED,
+        ],
+    ) {
+        return LiveReconClassification::UnknownSafeFailure;
+    }
+    if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::COOKIE_MISSING,
+            diagnostics::COOKIE_ABSENT,
+        ],
+    ) || provider_state == ProviderState::Unauthenticated
+    {
+        return LiveReconClassification::BrowserCookieMissing;
+    }
+    if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::COOKIE_FOUND,
+            browser_diagnostics::COOKIE_DECRYPTED,
+        ],
+    ) {
+        return LiveReconClassification::BrowserCookieFound;
+    }
+    LiveReconClassification::UnknownSafeFailure
+}
+
+fn classify_cookie_presence(codes: &[String]) -> LiveReconCookiePresence {
+    if has_code(codes, browser_diagnostics::COOKIE_DECRYPTED) {
+        LiveReconCookiePresence::Decrypted
+    } else if has_code(codes, browser_diagnostics::COOKIE_FOUND) {
+        LiveReconCookiePresence::Found
+    } else if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::PROFILE_NOT_FOUND,
+            browser_diagnostics::PROFILE_UNREADABLE,
+            browser_diagnostics::PROFILE_SKIPPED,
+            browser_diagnostics::NOT_FOUND,
+            browser_diagnostics::LIVE_PROFILES_DISABLED,
+            browser_diagnostics::COOKIE_DB_MISSING,
+            browser_diagnostics::COOKIE_DB_UNREADABLE,
+            browser_diagnostics::COOKIE_DB_LOCKED,
+            browser_diagnostics::COOKIE_DB_SCHEMA_UNSUPPORTED,
+            browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
+            browser_diagnostics::COOKIE_DECRYPTION_FAILED,
+            browser_diagnostics::KEYRING_UNAVAILABLE,
+            browser_diagnostics::KEYRING_LOCKED,
+            browser_diagnostics::KEYRING_PROMPT_REQUIRED,
+        ],
+    ) {
+        LiveReconCookiePresence::Unavailable
+    } else if has_any_code(
+        codes,
+        &[
+            browser_diagnostics::COOKIE_MISSING,
+            diagnostics::COOKIE_ABSENT,
+        ],
+    ) {
+        LiveReconCookiePresence::None
+    } else {
+        LiveReconCookiePresence::Unknown
+    }
+}
+
+fn classify_web_fetch(codes: &[String]) -> LiveReconWebFetch {
+    if has_code(codes, LINUX_WEB_LIVE_HTTP_DISABLED)
+        || has_code(codes, diagnostics::REDIRECT_BLOCKED)
+    {
+        return LiveReconWebFetch::Blocked;
+    }
+    if has_code(codes, diagnostics::FETCH_TIMEOUT) {
+        return LiveReconWebFetch::Timeout;
+    }
+    if has_any_code(
+        codes,
+        &[
+            diagnostics::FETCH_FINISHED,
+            diagnostics::FETCH_NONZERO_STATUS,
+            diagnostics::FETCH_RATE_LIMITED,
+        ],
+    ) {
+        return LiveReconWebFetch::Finished;
+    }
+    if has_any_code(
+        codes,
+        &[
+            diagnostics::FETCH_PARSE_ERROR,
+            diagnostics::RESPONSE_TOO_LARGE,
+        ],
+    ) {
+        return LiveReconWebFetch::ParseError;
+    }
+    if has_code(codes, diagnostics::FETCH_STARTED) {
+        return LiveReconWebFetch::Attempted;
+    }
+    LiveReconWebFetch::NotAttempted
+}
+
+fn has_code(codes: &[String], expected: &str) -> bool {
+    codes.iter().any(|code| code == expected)
+}
+
+fn has_any_code(codes: &[String], expected: &[&str]) -> bool {
+    expected.iter().any(|expected| has_code(codes, expected))
+}
+
+fn recon_provider(state: ProviderState, codes: Vec<&'static str>) -> Provider {
+    let mut refresh = refresh_for_response(html_response("dashboard_success.html"));
+    let provider = &mut refresh.snapshot.providers[0];
+    provider.state = state;
+    provider.diagnostic_codes = codes.into_iter().map(str::to_string).collect();
+    provider.clone()
+}
+
+fn recon_refresh_result(
+    status: RefreshStatus,
+    cache_written: bool,
+    codes: impl IntoIterator<Item = &'static str>,
+) -> RefreshResult {
+    let diagnostic_codes = codes.into_iter().map(str::to_string).collect::<Vec<_>>();
+    RefreshResult {
+        schema_version: 1,
+        refresh_id: "recon-summary-test".to_string(),
+        status,
+        started_at: NOW.to_string(),
+        finished_at: NOW.to_string(),
+        duration_ms: 0,
+        reason: RefreshReason::Test,
+        providers: vec![RefreshProviderResult {
+            provider: "codex".to_string(),
+            status: RefreshProviderStatus::Ok,
+            source_adapter: Some(SourceAdapter::LinuxWeb),
+            diagnostic_codes: diagnostic_codes.clone(),
+        }],
+        cache_written,
+        snapshot_generated_at: Some(NOW.to_string()),
+        diagnostic_codes,
     }
 }
 

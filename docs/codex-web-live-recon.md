@@ -76,26 +76,89 @@ cargo test --manifest-path daemon/Cargo.toml -- --ignored codex_web_live
 Normal CI and `./scripts/check.sh` do not set these variables and do not run
 ignored live tests.
 
+## Safe Recon Summary
+
+After the ignored live smoke completes its existing snapshot, refresh-result,
+diagnostics, provider-event, and cache redaction assertions, it prints one
+compact JSON summary line. The summary is derived only from normalized provider
+state and refresh-result state; it does not inspect raw browser stores, request
+headers, response headers, redirect locations, response bodies, or diagnostics
+details.
+
+A passing live test by itself only proves the safety assertions held. The
+summary `classification` is the useful reconnaissance result, because it tells
+the operator whether the run reached browser session material, attempted the
+bounded web fetch, and reached a parser outcome.
+
+Allowed summary fields are:
+
+- `provider`: always `codex`;
+- `providerState`: normalized provider state;
+- `refreshStatus`: normalized refresh status;
+- `cacheWritten`: boolean refresh-result cache-write flag;
+- `source`: always `web`;
+- `sourceAdapter`: always `linux_web`;
+- `classification`: one value from the fixed safe classification set below;
+- `diagnosticCodes`: de-duplicated browser/web diagnostic codes filtered
+  through a stable allowlist;
+- `cookiePresence`: one of `none`, `found`, `decrypted`, `unavailable`, or
+  `unknown`;
+- `webFetch`: one of `not_attempted`, `attempted`, `finished`, `blocked`,
+  `timeout`, or `parse_error`;
+- `redactionApplied`: always `true`.
+
+The summary must not include cookie names or values, Cookie or Authorization
+headers, Set-Cookie headers, raw response bodies, full URLs with query or
+fragment data, redirect locations, profile or home paths, account email or ID
+values, raw diagnostic details, or raw provider payloads.
+
 ## Safe Classifications
 
 The live test may produce these safe outcomes:
 
 - `dashboard_reachable` when the fixture-shaped parser succeeds and output
-  validates;
+  validates without a more specific parser-success diagnostic;
+- `parser_succeeded` when the fixture-shaped parser and redaction path
+  succeeded;
 - `login_required` or `provider_cookie_rejected` when the response indicates an
   authentication flow or rejected session material;
-- `account_mismatch` when a future expected-account check proves a mismatch
-  without exposing raw identity;
 - `redirect_blocked` when `Location` or final URL policy fails;
 - `non_200` for non-success HTTP statuses that are not authentication
   rejections or rate limits;
-- `response_too_large` when the response body exceeds the cap;
 - `parse_error` for unsupported content type, invalid UTF-8, unexpected body
   shape, or redaction guard failure;
-- `timeout` when the bounded request times out.
+- `timeout` when the bounded request times out;
+- `response_too_large` when the response body exceeds the cap;
+- `browser_cookie_missing` when no provider-relevant browser session material is
+  available;
+- `browser_cookie_found` when provider-relevant cookie material was found but no
+  more specific terminal fetch outcome is available;
+- `browser_keyring_unavailable` when cookie decryption would require
+  unavailable, locked, or prompt-required keyring access;
+- `browser_profile_not_found` when no supported marked throwaway profile is
+  available;
+- `linux_web_live_http_disabled` when the live HTTP gate did not permit the
+  provider fetch;
+- `unknown_safe_failure` when the redacted codes prove a failure but not one of
+  the more specific safe classes.
 
 The implementation records stable diagnostic codes for these classes, not raw
 provider response data.
+
+## Next Decision
+
+Use the summary classification to choose the next task:
+
+| Classification | Decision |
+| --- | --- |
+| `parser_succeeded` or `dashboard_reachable` | Consider Task 04D.2 production-shape parser work, still behind explicit review. |
+| `parse_error` with `cookiePresence="found"` or `cookiePresence="decrypted"` and `webFetch="finished"` | Update synthetic parser fixtures from hand-authored observations only. Do not copy raw live body. |
+| `login_required` or `provider_cookie_rejected` | Investigate cookie/session material validity in the throwaway profile. |
+| `browser_cookie_missing` | Investigate browser import and cookie-domain selection. |
+| `redirect_blocked` | Review the redirect host/path policy with safe host/path-class evidence only. |
+| `timeout`, `non_200`, or `response_too_large` | Follow up on transport/classification behavior before parser work. |
+| `browser_keyring_unavailable` or `browser_profile_not_found` | Fix the throwaway browser setup or decryption prerequisite before retrying live recon. |
+| `linux_web_live_http_disabled` or `unknown_safe_failure` | Confirm gates and stable diagnostic coverage before broadening implementation. |
 
 ## Never Print Or Commit
 
