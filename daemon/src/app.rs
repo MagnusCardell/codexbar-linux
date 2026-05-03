@@ -506,10 +506,10 @@ impl App {
                 };
                 let refresh = if let Some(fixture) = self.runtime.codex_web_fixture() {
                     let client = FakeWebClient::codex_fixture(fixture);
-                    crate::web::refresh_with_client(request, &client)?
+                    crate::web::refresh_with_client(request, &client).await?
                 } else if live_transport_allowed {
                     let client = ReqwestStaticGetClient::new();
-                    crate::web::refresh_with_client(request, &client)?
+                    crate::web::refresh_with_client(request, &client).await?
                 } else {
                     crate::web::disabled_refresh(request)?
                 };

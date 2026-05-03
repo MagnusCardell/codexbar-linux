@@ -13,7 +13,7 @@ When every live gate is present, the ignored test may:
 - discover Chromium-family profiles under a marked throwaway fake home;
 - read `chatgpt.com` cookies from that throwaway profile into daemon memory;
 - build an internal Cookie header for the static Codex dashboard URL;
-- make one bounded GET to `https://chatgpt.com/codex/settings/usage`;
+- make one bounded async GET to `https://chatgpt.com/codex/settings/usage`;
 - classify status, redirect, timeout, response-size, content-type, and parser
   outcomes into schema-valid provider states and diagnostics.
 

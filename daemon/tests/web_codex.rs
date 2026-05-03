@@ -22,7 +22,8 @@ use codexbar_linuxd::model::{
     RefreshResult, RefreshStatus, SemanticSource, Snapshot, SourceAdapter,
 };
 use codexbar_linuxd::web::client::{
-    CodexWebFixture, FakeWebClient, ReqwestStaticGetClient, WebClientError, WebRequest, WebResponse,
+    CodexWebFixture, FakeWebClient, ReqwestStaticGetClient, WebClient, WebClientError, WebRequest,
+    WebResponse,
 };
 use codexbar_linuxd::web::diagnostics;
 use codexbar_linuxd::web::policy::CodexWebPolicy;
@@ -125,11 +126,38 @@ fn reqwest_live_client_rejects_non_static_hosts_before_network() {
     );
 }
 
+#[tokio::test]
+async fn async_reqwest_live_client_drops_inside_tokio_context_without_panic() {
+    let client = ReqwestStaticGetClient::new();
+    let request = WebRequest::new(CodexWebPolicy::new().dashboard_url());
+
+    assert_eq!(
+        client.request(request).await.unwrap_err(),
+        WebClientError::TransportUnavailable
+    );
+    drop(client);
+}
+
+#[tokio::test]
+async fn fake_web_client_is_async_compatible_without_network() {
+    let client = FakeWebClient::responding(html_response("dashboard_success.html"));
+    let refresh = web::refresh_with_client(web_request(Some(session())), &client)
+        .await
+        .expect("web refresh");
+
+    assert_eq!(client.request_count(), 1);
+    assert_eq!(refresh.snapshot.providers[0].state, ProviderState::Ok);
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
 #[test]
 fn fake_success_response_normalizes_to_schema_valid_linux_web_snapshot() {
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
 
     assert_eq!(client.requests().len(), 1);
     let provider = &refresh.snapshot.providers[0];
@@ -160,7 +188,8 @@ fn fake_success_response_normalizes_to_schema_valid_linux_web_snapshot() {
 #[test]
 fn absent_session_material_maps_to_unauthenticated_without_client_call() {
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
-    let refresh = web::refresh_with_client(web_request(None), &client).expect("web refresh");
+    let refresh =
+        block_on_web(web::refresh_with_client(web_request(None), &client)).expect("web refresh");
 
     assert!(client.requests().is_empty());
     let provider = &refresh.snapshot.providers[0];
@@ -179,7 +208,7 @@ fn browser_preflight_no_profile_maps_to_missing_dependency_without_client_call()
         "codex".to_string(),
         vec!["browser_profile_not_found".to_string()],
     );
-    let refresh = web::refresh_with_client(request, &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(request, &client)).expect("web refresh");
 
     assert!(client.requests().is_empty());
     let provider = &refresh.snapshot.providers[0];
@@ -204,7 +233,7 @@ fn browser_preflight_cookie_decrypted_code_is_preserved_on_success() {
             "browser_cookie_decrypted".to_string(),
         ],
     );
-    let refresh = web::refresh_with_client(request, &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(request, &client)).expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
     assert_eq!(provider.state, ProviderState::Ok);
@@ -224,8 +253,11 @@ fn openai_scoped_cookie_is_not_sent_to_chatgpt_static_get() {
         ],
     );
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
-    let refresh =
-        web::refresh_with_client(web_request(Some(material)), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(material)),
+        &client,
+    ))
+    .expect("web refresh");
 
     assert!(client.requests().is_empty());
     assert_eq!(
@@ -249,12 +281,12 @@ fn login_required_response_maps_to_cookie_rejected() {
 #[test]
 fn account_mismatch_maps_to_safe_diagnostic_without_raw_email() {
     let client = FakeWebClient::responding(html_response("dashboard_account_mismatch.html"));
-    let result = codex::fetch_dashboard_with_client(
+    let result = block_on_web(codex::fetch_dashboard_with_client(
         &client,
         Some(&session()),
         NOW,
         Some("other@example.invalid"),
-    );
+    ));
     let payload = serde_json::to_string(&(&result.provider, &result.diagnostics))
         .expect("diagnostic payload json");
 
@@ -314,8 +346,11 @@ fn auth_rejection_status_maps_to_cookie_rejected_without_body_exposure() {
 #[test]
 fn timeout_maps_to_timeout_state() {
     let client = FakeWebClient::failing(WebClientError::Timeout);
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
     assert_eq!(provider.state, ProviderState::Timeout);
     assert!(provider
@@ -327,8 +362,11 @@ fn timeout_maps_to_timeout_state() {
 #[test]
 fn transport_body_cap_error_maps_to_response_too_large() {
     let client = FakeWebClient::failing(WebClientError::ResponseTooLarge);
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
     assert_eq!(provider.state, ProviderState::ParseError);
@@ -410,8 +448,11 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
     let client = FakeWebClient::responding(
         WebResponse::new(200, CodexWebPolicy::new().dashboard_url(), "{}").with_redirect(location),
     );
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
     assert_eq!(provider.state, ProviderState::ProviderUnavailable);
@@ -427,8 +468,11 @@ fn allowed_login_redirect_maps_to_cookie_rejected_without_location_exposure() {
         WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
             .with_redirect("https://chatgpt.com/auth/login"),
     );
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let payload =
         serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
     let provider = &refresh.snapshot.providers[0];
@@ -451,8 +495,11 @@ fn final_url_same_host_wrong_path_is_blocked() {
         "https://chatgpt.com/not-codex/settings/usage",
         "{}",
     ));
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
     assert_eq!(provider.state, ProviderState::ProviderUnavailable);
@@ -468,8 +515,11 @@ fn redirect_allowed_host_cannot_mask_disallowed_final_url() {
         WebResponse::new(200, "https://attacker.example.invalid/final", "{}")
             .with_redirect("https://chatgpt.com/codex/settings/usage"),
     );
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
     assert_eq!(provider.state, ProviderState::ProviderUnavailable);
@@ -486,8 +536,11 @@ fn raw_header_and_token_like_body_is_rejected_without_exposure() {
         CodexWebPolicy::new().dashboard_url(),
         r#"{"schemaVersion":1,"state":"ok","rawResponse":"Authorization: Bearer fixture-secret"}"#,
     ));
-    let refresh =
-        web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh");
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
     let payload =
         serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
 
@@ -510,8 +563,11 @@ fn session_material_debug_is_redacted_and_fake_request_records_only_counts() {
     assert!(!debug.contains("fixture-value"));
 
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
-    let _refresh =
-        web::refresh_with_client(web_request(Some(material)), &client).expect("web refresh");
+    let _refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(material)),
+        &client,
+    ))
+    .expect("web refresh");
     let request = client.requests().into_iter().next().expect("request");
     assert!(request.session_material_attached);
     assert!(request.session_material_bytes > 0);
@@ -1351,7 +1407,23 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
 
 fn refresh_for_response(response: WebResponse) -> codexbar_linuxd::web::WebRefresh {
     let client = FakeWebClient::responding(response);
-    web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh")
+    block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh")
+}
+
+fn block_on_web<T>(future: impl std::future::Future<Output = T>) -> T {
+    assert!(
+        tokio::runtime::Handle::try_current().is_err(),
+        "block_on_web must not create a runtime inside an async context"
+    );
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
 }
 
 #[derive(Clone)]

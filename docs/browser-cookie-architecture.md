@@ -21,7 +21,9 @@ Task 04D.0 adds a daemon-only Codex web adapter skeleton with fake HTTP
 fixtures, static policy/URL allowlists, response-size/redirect/timeout
 handling, and normalization into the existing snapshot provider shape. Task
 04D.1 adds a daemon-only, gated real HTTP transport for opt-in Codex web
-reconnaissance against the single static dashboard URL. It still does not
+reconnaissance against the single static dashboard URL. Task 04D.1B keeps that
+transport daemon-async with `reqwest::Client` instead of `reqwest::blocking`,
+so it can run and drop inside the daemon's Tokio context. It still does not
 implement live browser-profile scanning by default, default live provider
 fetch, real Secret Service secret extraction, real provider scraping, or
 production web scraping.
@@ -532,8 +534,9 @@ Current Rust crates and likely future APIs:
 - `aes`, `cbc`, `pbkdf2`, `sha1`, and `sha2` for the verified Chromium Linux
   basic/plain `v10` decryptor, pinned exactly and implemented without
   OpenSSL/native keychain dependencies;
-- `reqwest` for the Task 04D.1 daemon-only static Codex GET transport, with
-  default features disabled and Rustls-oriented TLS selected;
+- `reqwest` for the Task 04D.1 daemon-only static Codex async GET transport,
+  with default features disabled, no `blocking` feature, and Rustls-oriented
+  TLS selected;
 - `url` for resolving and sanitizing redirect targets instead of ad hoc
   string joining;
 - existing `zbus` or a small reviewed Secret Service crate for keyring access;

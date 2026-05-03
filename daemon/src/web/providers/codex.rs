@@ -22,7 +22,7 @@ pub struct CodexWebFetchResult {
     pub diagnostics: Vec<DiagnosticEvent>,
 }
 
-pub fn fetch_dashboard_with_client<C>(
+pub async fn fetch_dashboard_with_client<C>(
     client: &C,
     session: Option<&SessionMaterial>,
     now: &str,
@@ -38,9 +38,10 @@ where
         expected_account_email,
         &[],
     )
+    .await
 }
 
-pub fn fetch_dashboard_with_client_with_session_codes<C>(
+pub async fn fetch_dashboard_with_client_with_session_codes<C>(
     client: &C,
     session: Option<&SessionMaterial>,
     now: &str,
@@ -90,7 +91,7 @@ where
     let request = policy
         .dashboard_request()
         .with_session_header(session_header);
-    let response = match client.request(request) {
+    let response = match client.request(request).await {
         Ok(response) => response,
         Err(WebClientError::Timeout) => {
             events.push(diagnostics::event(

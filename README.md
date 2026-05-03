@@ -83,7 +83,7 @@ Present:
 - Task 04D.1 daemon-only Codex web transport and reconnaissance:
   `daemon/src/web/` defines a bounded web request/response abstraction, static
   Codex web policy, redaction-safe web diagnostics, fake HTTP client, a gated
-  Rustls-backed static GET client, and Codex parser/normalizer against
+  async Rustls-backed static GET client, and Codex parser/normalizer against
   synthetic fixture shapes only. Production `linux_web` refresh has no live
   provider fetch configured by default and returns schema-valid disabled
   diagnostics instead of contacting provider endpoints. Live Codex web
@@ -154,7 +154,7 @@ CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
 ```
 
 Optional Codex web live reconnaissance is also ignored by default and is not
-part of `./scripts/check.sh` or CI. It may make one bounded GET to
+part of `./scripts/check.sh` or CI. It may make one bounded async GET to
 `https://chatgpt.com/codex/settings/usage` only when all live gates are set and
 the fake home is a marked throwaway browser root:
 

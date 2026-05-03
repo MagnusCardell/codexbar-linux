@@ -53,7 +53,7 @@ pub fn target_providers(settings: &Settings, requested: &[String]) -> Vec<String
         .collect()
 }
 
-pub fn refresh_with_client<C>(request: WebRefreshRequest, client: &C) -> AppResult<WebRefresh>
+pub async fn refresh_with_client<C>(request: WebRefreshRequest, client: &C) -> AppResult<WebRefresh>
 where
     C: WebClient,
 {
@@ -78,6 +78,7 @@ where
                 None,
                 &session_codes,
             );
+            let result = result.await;
             providers.push(result.provider);
             diagnostics.extend(result.diagnostics);
         } else {

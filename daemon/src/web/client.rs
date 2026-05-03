@@ -1,10 +1,13 @@
 use std::fmt;
-use std::io::Read;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use reqwest::blocking::Client;
-use reqwest::header::{HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, LOCATION, USER_AGENT};
+use reqwest::header::{
+    HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, COOKIE, LOCATION, USER_AGENT,
+};
+use reqwest::Client;
 
 use crate::browser::session_material::CookieHeader;
 use crate::web::policy::CodexWebPolicy;
@@ -174,8 +177,11 @@ pub enum WebClientError {
     TransportUnavailable,
 }
 
-pub trait WebClient {
-    fn request(&self, request: WebRequest) -> Result<WebResponse, WebClientError>;
+pub type WebClientFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<WebResponse, WebClientError>> + Send + 'a>>;
+
+pub trait WebClient: Send + Sync {
+    fn request(&self, request: WebRequest) -> WebClientFuture<'_>;
 }
 
 #[derive(Clone, Debug)]
@@ -269,7 +275,7 @@ impl FakeWebClient {
 }
 
 impl WebClient for FakeWebClient {
-    fn request(&self, request: WebRequest) -> Result<WebResponse, WebClientError> {
+    fn request(&self, request: WebRequest) -> WebClientFuture<'_> {
         if let Ok(mut requests) = self.requests.lock() {
             requests.push(FakeRecordedRequest {
                 url: request.url().to_string(),
@@ -279,22 +285,27 @@ impl WebClient for FakeWebClient {
                 response_size_limit: request.response_size_limit(),
             });
         }
-        match self.outcome.lock() {
+        let result = match self.outcome.lock() {
             Ok(outcome) => match &*outcome {
                 FakeWebOutcome::Response(response) => Ok(response.clone()),
                 FakeWebOutcome::Error(error) => Err(*error),
             },
             Err(_) => Err(WebClientError::TransportUnavailable),
-        }
+        };
+        Box::pin(async move { result })
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ReqwestStaticGetClient;
+#[derive(Clone)]
+pub struct ReqwestStaticGetClient {
+    client: Option<Client>,
+}
 
 impl ReqwestStaticGetClient {
     pub fn new() -> Self {
-        Self
+        Self {
+            client: Self::build_client().ok(),
+        }
     }
 
     pub fn validate_request_for_tests(request: &WebRequest) -> Result<(), WebClientError> {
@@ -306,20 +317,39 @@ impl ReqwestStaticGetClient {
             .validate_dashboard_url(request.url())
             .map_err(|_| WebClientError::TransportUnavailable)
     }
-}
 
-impl WebClient for ReqwestStaticGetClient {
-    fn request(&self, request: WebRequest) -> Result<WebResponse, WebClientError> {
-        Self::validate_request(&request)?;
-        let Some(session_header) = request.session_header.as_ref() else {
-            return Err(WebClientError::TransportUnavailable);
-        };
-
-        let client = Client::builder()
-            .timeout(request.timeout())
+    fn build_client() -> Result<Client, WebClientError> {
+        Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|_| WebClientError::TransportUnavailable)?;
+            .map_err(|_| WebClientError::TransportUnavailable)
+    }
+
+    async fn request_inner(&self, request: WebRequest) -> Result<WebResponse, WebClientError> {
+        Self::validate_request(&request)?;
+        if request.session_header.is_none() {
+            return Err(WebClientError::TransportUnavailable);
+        }
+
+        match tokio::time::timeout(request.timeout(), self.send_validated_request(request)).await {
+            Ok(result) => result,
+            Err(_) => Err(WebClientError::Timeout),
+        }
+    }
+
+    async fn send_validated_request(
+        &self,
+        request: WebRequest,
+    ) -> Result<WebResponse, WebClientError> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(WebClientError::TransportUnavailable)?;
+        let session_header = request
+            .session_header
+            .as_ref()
+            .ok_or(WebClientError::TransportUnavailable)?;
+
         let mut builder = client
             .get(request.url())
             .header(USER_AGENT, header_value(&request.user_agent)?)
@@ -329,7 +359,7 @@ impl WebClient for ReqwestStaticGetClient {
             builder = builder.header(ACCEPT_LANGUAGE, header_value(accept_language)?);
         }
 
-        let response = builder.send().map_err(classify_reqwest_error)?;
+        let response = builder.send().await.map_err(classify_reqwest_error)?;
         let status = response.status().as_u16();
         let final_url = response.url().as_str().to_string();
         let redirect_url = response
@@ -339,14 +369,34 @@ impl WebClient for ReqwestStaticGetClient {
             .and_then(|location| resolve_redirect_url(&final_url, location));
         let content_type = response
             .headers()
-            .get(reqwest::header::CONTENT_TYPE)
+            .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        let body = read_limited_body(response, request.response_size_limit())?;
+        let body = read_limited_body(response, request.response_size_limit()).await?;
 
         Ok(WebResponse::new(status, final_url, body)
             .with_optional_redirect(redirect_url)
             .with_optional_content_type(content_type))
+    }
+}
+
+impl Default for ReqwestStaticGetClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for ReqwestStaticGetClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReqwestStaticGetClient")
+            .field("client_available", &self.client.is_some())
+            .finish()
+    }
+}
+
+impl WebClient for ReqwestStaticGetClient {
+    fn request(&self, request: WebRequest) -> WebClientFuture<'_> {
+        Box::pin(async move { self.request_inner(request).await })
     }
 }
 
@@ -367,24 +417,24 @@ fn resolve_redirect_url(base: &str, location: &str) -> Option<String> {
     base.join(location).ok().map(|url| url.to_string())
 }
 
-fn read_limited_body<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, WebClientError>
-where
-    R: Read,
-{
+async fn read_limited_body(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, WebClientError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(WebClientError::ResponseTooLarge);
+    }
     let mut body = Vec::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|_| WebClientError::TransportUnavailable)?;
-        if read == 0 {
-            return Ok(body);
-        }
-        if body.len() + read > limit {
+    while let Some(chunk) = response.chunk().await.map_err(classify_reqwest_error)? {
+        if body.len().saturating_add(chunk.len()) > limit {
             return Err(WebClientError::ResponseTooLarge);
         }
-        body.extend_from_slice(&buffer[..read]);
+        body.extend_from_slice(&chunk);
     }
+    Ok(body)
 }
 
 fn redacted_url_shape(url: &str) -> String {
