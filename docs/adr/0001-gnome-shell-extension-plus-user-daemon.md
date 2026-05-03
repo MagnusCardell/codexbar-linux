@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-The product must feel native on Ubuntu/GNOME, render a polished top-bar popover, work on Wayland, and avoid a weak AppIndicator-only experience. At the same time, provider fetching, browser-cookie import, subprocess execution, cache management, and diagnostics are inappropriate for the GNOME Shell process.
+The product must feel native on Ubuntu/GNOME, render a polished top-bar popover, work on Wayland, and avoid a weak AppIndicator-only experience. At the same time, subprocess execution, cache management, provider normalization, and diagnostics are inappropriate for the GNOME Shell process.
 
 ## Decision
 

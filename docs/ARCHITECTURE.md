@@ -19,19 +19,17 @@
 │  - refresh scheduler                                          │
 │  - upstream codexbar CLI runner                               │
 │  - local normalized cache                                     │
-│  - Linux browser-cookie import                                │
-│  - provider web fetch adapters                                │
 │  - redacted diagnostics                                       │
 └───────┬──────────────┬────────────────┬──────────────────────┘
-        │              │                │
-        ▼              ▼                ▼
- upstream codexbar   browser DBs      provider web endpoints
- CLI                 + keyring         (cookie-backed, no raw persistence)
+        │              │
+        ▼              ▼
+ upstream codexbar   local provider tooling
+ CLI                 where available
 ```
 
 ## Why this split
 
-The GNOME Shell process is latency-sensitive, review-sensitive, and not a safe place for provider fetching, browser-cookie decryption, subprocess orchestration, or cache management. The daemon owns all I/O and normalization. The extension owns presentation only.
+The GNOME Shell process is latency-sensitive, review-sensitive, and not a safe place for subprocess orchestration, cache management, or provider data normalization. The daemon owns local I/O and normalization. The extension owns presentation only and speaks to the daemon over D-Bus.
 
 ## Components
 
@@ -51,7 +49,10 @@ Non-responsibilities:
 
 - No provider network calls.
 - No browser-cookie reads.
+- No browser profile scanning.
+- No keyring or session extraction.
 - No upstream CLI subprocess calls.
+- No cache file reads in production.
 - No raw diagnostics construction.
 
 ### 2. Preferences
@@ -61,7 +62,7 @@ Responsibilities:
 - Render native preferences with GTK4/libadwaita.
 - Read/write extension UI preferences.
 - Configure daemon through D-Bus or documented config file.
-- Display daemon health and import tests.
+- Display daemon health and diagnostics.
 
 ### 3. Daemon
 
@@ -73,8 +74,7 @@ Responsibilities:
 - Config file under `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json` for Linux-specific settings.
 - Upstream config read from `~/.codexbar/config.json`.
 - Upstream CLI resolver and runner.
-- Browser-cookie import.
-- Provider web fetch adapters.
+- Local provider tooling integration where it is available through upstream CLI semantics.
 - Redacted diagnostics.
 
 ### 4. Upstream CLI adapter
@@ -98,37 +98,13 @@ All invocations require:
 - redaction before logging;
 - parse errors mapped into provider diagnostics.
 
-### 5. Browser-cookie adapter
+### 5. Explicitly Unsupported Surfaces
 
-The adapter does four things:
-
-1. discover browser profiles;
-2. read a safe temporary copy of cookie stores;
-3. decrypt values only when needed using the user’s normal keyring/session facilities;
-4. build an in-memory cookie jar for provider web requests.
-
-The adapter must not persist raw cookies or full cookie headers.
-
-Task 04A freezes the detailed Linux browser-cookie and web-fetch architecture
-in `docs/browser-cookie-architecture.md`, with the related threat model in
-`docs/browser-cookie-threat-model.md`.
-
-### 6. Provider web adapters
-
-Provider web adapters are thin Linux shims, not a new provider framework. They exist only where upstream Linux CLI cannot yet provide web-backed data.
-
-Adapter outputs must normalize to `spec/snapshot.schema.json` and should preserve upstream provider field names where possible.
-
-Initial adapters:
-
-- Codex/OpenAI web dashboard.
-- Claude web.
-
-Later candidates:
-
-- Cursor.
-- Factory/Droid.
-- Other providers only after explicit product decision.
+The daemon does not read browser cookies, browser profiles, browser databases,
+desktop keyrings, Secret Service, KWallet, provider web dashboards, or provider
+session material. It does not run provider web scraping and does not expose a
+localhost/TCP API. `TestBrowserImport` is retained only as a stable D-Bus
+contract method and returns a schema-valid unsupported/no-op result.
 
 ## Contract freeze
 
@@ -148,7 +124,7 @@ Snapshot
 │   ├── provider
 │   ├── displayName
 │   ├── source              # provider semantic source: api/local/web/unknown
-│   ├── sourceAdapter       # implementation adapter: upstream_cli/linux_web/cache/fixture/synthetic/none
+│   ├── sourceAdapter       # implementation adapter: upstream_cli/cache/fixture/synthetic/none
 │   ├── state
 │   ├── usage.primary
 │   ├── usage.secondary
@@ -167,7 +143,7 @@ Provider states:
 - `ok`
 - `stale`
 - `unauthenticated`
-- `cookie_rejected`
+- `cookie_rejected`       # reserved legacy state; not produced by the no-browser daemon
 - `missing_dependency`
 - `provider_unavailable`
 - `parse_error`
@@ -199,7 +175,7 @@ See `spec/dbus-org.codexbar.Linux1.xml`.
 ## Cache rules
 
 - Cache stores normalized snapshots only.
-- Cache never stores raw cookies, raw provider responses, raw headers, Authorization values, Set-Cookie values, or decrypted browser secrets.
+- Cache never stores raw provider responses, raw headers, Authorization values, session material, browser paths, or raw identity.
 - Cache supports fast daemon startup and stale-state rendering through D-Bus.
 - UI must clearly show stale cache when daemon cannot refresh.
 - Cache write is atomic: write temp file, fsync, rename.
@@ -209,11 +185,10 @@ See `spec/dbus-org.codexbar.Linux1.xml`.
 
 Refresh sources are attempted by provider preference and recorded as `sourceAdapter`. Snapshot `source` records provider semantics, not implementation policy:
 
-1. explicit Linux web source, if enabled and implemented;
-2. upstream CLI/API/local path;
-3. stale cache fallback.
+1. upstream CLI/API/local path;
+2. stale cache fallback.
 
-Auto mode may choose Linux web first for providers where CLI Linux web parity is absent, but emitted snapshots must never use `auto`; they must record the actual `source` and `sourceAdapter`.
+Auto mode resolves only to the supported upstream CLI/local path in production. Emitted snapshots must never use `auto`; they must record the actual `source` and `sourceAdapter`.
 
 Manual refresh bypasses normal interval throttling but still respects concurrency limits.
 
@@ -239,7 +214,6 @@ Package post-install may compile schemas and reload systemd user daemon. It must
 
 ## Open decisions
 
-1. Exact provider-web adapter boundaries after upstream CLI parity evolves.
-2. Whether Firefox cookie import can be reliable enough without a helper extension for all target provider domains.
-3. Whether to seek extensions.gnome.org distribution later, given native daemon dependency.
-4. Whether to support KDE via a separate frontend after GNOME MVP.
+1. Whether to seek extensions.gnome.org distribution later, given native daemon dependency.
+2. Whether to support KDE via a separate frontend after GNOME MVP.
+3. Which upstream CLI/provider polish tasks are needed before release packaging.

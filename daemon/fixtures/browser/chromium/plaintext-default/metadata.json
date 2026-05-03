@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "plaintext-default",
-  "browserFamily": "chromium",
-  "profileShape": "Network/Cookies",
-  "expected": "parse",
-  "description": "Synthetic plaintext Chromium cookie rows under example.invalid only."
-}

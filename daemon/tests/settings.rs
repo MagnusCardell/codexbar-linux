@@ -5,7 +5,9 @@ use std::fs;
 use codexbar_linuxd::app::App;
 use codexbar_linuxd::config;
 use codexbar_linuxd::error::AppError;
-use codexbar_linuxd::model::{DiagnosticsVerbosity, Settings};
+use codexbar_linuxd::model::{
+    BrowserImportPolicy, DiagnosticsVerbosity, PreferredSourceAdapter, Settings,
+};
 
 #[test]
 fn default_settings_validate() {
@@ -34,10 +36,32 @@ fn valid_patch_applies_persists_and_preserves_omitted_fields() {
     assert_eq!(settings.refresh.interval_seconds, 300);
     assert!(settings.refresh.startup_refresh);
     assert!(!settings.providers["codex"].enabled);
-    assert!(settings.providers["codex"].allow_browser_import);
+    assert!(!settings.providers["codex"].allow_browser_import);
+    assert_eq!(settings.browser_import.policy, BrowserImportPolicy::Off);
+    assert!(!settings.browser_import.enabled);
     assert_eq!(
         settings.diagnostics.verbosity,
         DiagnosticsVerbosity::Verbose
+    );
+}
+
+#[test]
+fn browser_settings_are_compatibility_only_and_normalized_off() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new(paths).expect("app");
+    let settings_json = app
+        .set_settings_patch_json(
+            r#"{"schemaVersion":1,"providers":{"codex":{"preferredSourceAdapter":"linux_web","allowBrowserImport":true}},"browserImport":{"enabled":true,"policy":"chromium_family","profileIdAllowlist":["safe-profile"]}}"#,
+        )
+        .expect("settings patch");
+    let settings: Settings = serde_json::from_str(&settings_json).expect("settings");
+    assert!(!settings.browser_import.enabled);
+    assert_eq!(settings.browser_import.policy, BrowserImportPolicy::Off);
+    assert!(settings.browser_import.profile_id_allowlist.is_empty());
+    assert!(!settings.providers["codex"].allow_browser_import);
+    assert_eq!(
+        settings.providers["codex"].preferred_source_adapter,
+        PreferredSourceAdapter::UpstreamCli
     );
 }
 
@@ -64,25 +88,6 @@ fn profile_id_allowlist_rejects_absolute_paths() {
     )
     .expect_err("absolute profile path rejected");
     assert!(matches!(err, AppError::InvalidJson(_)));
-}
-
-#[test]
-fn profile_id_allowlist_rejects_path_like_opaque_values() {
-    for value in [
-        "chromium..default",
-        "chromium-Network-Cookies",
-        "chromium-.config",
-        "chromium\\Default",
-        "~chromium",
-    ] {
-        let encoded = serde_json::to_string(value).expect("json string");
-        let patch = format!(
-            r#"{{"schemaVersion":1,"browserImport":{{"profileIdAllowlist":[{encoded}]}}}}"#
-        );
-        let err = config::parse_settings_patch(&patch)
-            .expect_err("path-like profile id rejected before persistence");
-        assert!(matches!(err, AppError::InvalidJson(_)), "{value}");
-    }
 }
 
 #[test]

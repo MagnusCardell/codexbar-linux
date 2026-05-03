@@ -10,7 +10,7 @@ Upstream CodexBar already owns provider semantics, config shape, local CLI/API p
 
 ## Decision
 
-Use upstream `codexbar` CLI as the default source for providers where Linux CLI support works. Normalize its JSON output into the CodexBar GNOME snapshot schema without changing semantics unless required by Linux constraints.
+Use upstream `codexbar` CLI as the production source for providers where Linux CLI support works. Normalize its JSON output into the CodexBar GNOME snapshot schema without changing semantics unless required by Linux constraints.
 
 ## Consequences
 
@@ -24,4 +24,4 @@ Negative:
 
 - We depend on a separately installed or bundled upstream CLI.
 - CLI output changes can break parsing unless schema tests catch regressions.
-- Linux web/auto gaps remain and need a Linux-native layer.
+- Linux web/auto gaps remain upstream limitations. CodexBar GNOME does not fill them by reading browser cookies or scraping provider dashboards.

@@ -2,7 +2,7 @@
 
 Task 02B adds a production daemon adapter for upstream `codexbar` CLI refresh.
 The adapter is owned by the Rust daemon and is not called from GNOME Shell,
-preferences, browser import code, or any localhost API.
+preferences, reserved browser-import compatibility code, or any localhost API.
 
 ## Resolver
 
@@ -57,8 +57,9 @@ Provider targets are selected in this order:
 3. `codex`.
 
 `codex` is the first proven Linux provider in the promoted live usage/status
-fixtures. Browser import, Linux web adapters, and web/auto upstream source
-paths remain unimplemented for production refresh.
+fixtures. Browser import and Linux web adapters are unsupported compatibility
+surface and do not run. Web/auto upstream source paths remain upstream Linux
+limitations unless the upstream CLI itself supports them later.
 
 ## Normalization
 

@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "encrypted-fake",
-  "browserFamily": "chromium",
-  "profileShape": "Network/Cookies",
-  "expected": "parse",
-  "description": "Encrypted-value schema; tests generate synthetic fake encrypted rows at runtime."
-}

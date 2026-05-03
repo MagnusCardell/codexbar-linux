@@ -2,13 +2,13 @@ Source: codexbar-linux
 Section: gnome
 Priority: optional
 Maintainer: CodexBar GNOME Maintainers <maintainers@example.invalid>
-Build-Depends: debhelper-compat (= 13), cargo, rustc, pkg-config, libsqlite3-dev, cmake
+Build-Depends: debhelper-compat (= 13), cargo, rustc
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 
 Package: codexbar-linux
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, gnome-shell, ca-certificates
+Depends: ${misc:Depends}, ${shlibs:Depends}, gnome-shell
 Description: Bootstrap skeleton for CodexBar GNOME
  Native Ubuntu/GNOME top-bar companion skeleton for CodexBar.
  Task 00 packaging is structural only; Task 08 wires real Debian packaging.

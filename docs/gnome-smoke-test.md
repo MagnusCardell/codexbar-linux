@@ -27,7 +27,7 @@ If a live upstream CLI smoke is being tested, also record whether
 - `glib-compile-schemas` has been run for the installed schema directory.
 - The user D-Bus service `org.codexbar.Linux1` is installed and can activate
   `codexbar-linuxd`.
-- No raw provider credentials, browser-cookie data, or daemon cache files are
+- No raw provider credentials, browser/session data, or daemon cache files are
   copied into the extension directory.
 - Local development installs place GNOME extension and D-Bus service files
   under `${XDG_DATA_HOME:-$HOME/.local/share}`. If `PREFIX` is set, it only

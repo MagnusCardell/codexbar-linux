@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "locked-or-wal",
-  "browserFamily": "chromium",
-  "profileShape": "Network/Cookies",
-  "expected": "parse",
-  "description": "Synthetic schema for WAL companion copy tests."
-}

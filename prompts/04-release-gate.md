@@ -19,7 +19,7 @@ Check:
 - systemd user service lifecycle.
 - extension enable/disable cleanup.
 - upstream CLI path.
-- browser-cookie path if enabled.
+- no-browser/web-surface validation.
 - diagnostics redaction.
 - uninstall/purge behavior.
 

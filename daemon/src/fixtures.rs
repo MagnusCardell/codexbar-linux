@@ -69,10 +69,7 @@ pub fn unsupported_adapter_snapshot(now: &str) -> AppResult<Snapshot> {
         provider.updated_at = Some(now.to_string());
         provider.diagnostics_summary =
             Some("Requested source adapter is not implemented".to_string());
-        provider.diagnostic_codes = vec![
-            "upstream_cli_not_implemented".to_string(),
-            "browser_import_not_implemented".to_string(),
-        ];
+        provider.diagnostic_codes = vec!["source_adapter_not_implemented".to_string()];
         if let Some(status) = provider.status.as_mut() {
             status.indicator = Some("missing_dependency".to_string());
             status.description = Some("Requested source adapter is not implemented".to_string());

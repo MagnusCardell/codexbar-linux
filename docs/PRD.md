@@ -2,18 +2,18 @@
 
 ## 1. Product thesis
 
-Build a native Ubuntu/GNOME top-bar usage monitor for AI coding assistants, powered by upstream `steipete/CodexBar` Linux CLI where possible, and augmented by a Linux-native browser-cookie/web-fetch layer where upstream Linux CLI parity does not yet exist.
+Build a native Ubuntu/GNOME top-bar usage monitor for AI coding assistants, powered by upstream `steipete/CodexBar` Linux CLI and local provider tooling where available.
 
 The core bet:
 
-> A good Ubuntu version is not a tray app. It is a GNOME Shell extension backed by a user-scoped daemon, with browser-cookie import good enough that signed-in browser sessions “just work.”
+> A good Ubuntu version is not a tray app. It is a GNOME Shell extension backed by a user-scoped daemon, with upstream CLI data normalized into a polished GNOME top-bar experience.
 
 This avoids two traps:
 
 - a visually weak AppIndicator menu that cannot compete with the macOS SwiftUI popover;
 - a fragile localhost service surface that feels more like an integration API than a desktop component.
 
-Upstream CodexBar remains macOS-first as a GUI product. Linux support is CLI-only, and upstream Linux CLI currently does not support `web`/`auto` sources. CodexBar GNOME wraps upstream CLI for CLI/API/local provider paths and supplies a Linux-native cookie-backed web path for providers where that is necessary for the “just works” promise.
+Upstream CodexBar remains macOS-first as a GUI product. CodexBar GNOME wraps upstream CLI for CLI/API/local provider paths and does not add a Linux-native browser-cookie or provider-dashboard scraping layer.
 
 ## 2. Name and positioning
 
@@ -39,19 +39,13 @@ This leaves room to upstream Linux improvements later without implying a permane
    - Respect `~/.codexbar/config.json` where possible.
    - Preserve upstream provider semantics, labels, reset windows, identity fields, `source`, status, and cost output.
 
-3. **First-class browser-cookie import**
-   - Existing browser login should be enough for supported web-backed providers.
-   - No provider password prompts beyond normal keyring unlock.
-   - No manual token copy/paste in the happy path.
-   - No raw cookie persistence by this project.
-
-4. **Daemon stability over localhost API convenience**
+3. **Daemon stability over localhost API convenience**
    - User-scoped daemon.
    - D-Bus session API as primary interface.
    - No TCP listener by default.
    - Cache for fast UI startup and stale-state rendering.
 
-5. **Mac-like density and visual quality**
+4. **Mac-like density and visual quality**
    - Two-bar status icon.
    - Rich provider cards.
    - Stable layout.
@@ -67,6 +61,7 @@ This leaves room to upstream Linux improvements later without implying a permane
 - Not an AppIndicator-only tray menu.
 - Not a localhost HTTP API by default.
 - Not a credential manager that stores provider passwords.
+- Not a browser-cookie importer, browser profile scanner, keyring/session extractor, or provider web scraper.
 
 ## 5. Target users
 
@@ -76,7 +71,6 @@ Typical setup:
 
 - Ubuntu Desktop 24.04 LTS or 26.04 LTS.
 - GNOME Shell on Wayland.
-- Chrome/Chromium/Brave/Firefox signed into ChatGPT, Claude, Cursor, or similar providers.
 - Local CLIs installed for Codex, Claude Code, Gemini, or similar.
 - Comfortable with terminal install, but expects the running product to be graphical and low-friction.
 
@@ -124,7 +118,7 @@ UX requirements:
 - No raw JSON in normal UI.
 - Clear stale-but-usable state.
 - Clear unauthenticated state.
-- Clear “cookie found but provider rejected it” state.
+- Clear unauthenticated or upstream session/error states.
 - Per-provider diagnostics one click away.
 - Manual refresh always available.
 - Dashboard links open in default browser.
@@ -152,18 +146,10 @@ Required sections:
 #### Providers
 
 - Enable/disable provider display.
-- Preferred source: upstream CLI/API/local, Linux browser web, auto.
-- Browser source policy: auto, Chromium-family only, Firefox only, off.
+- Preferred source: upstream CLI/API/local, auto, or off.
 - Provider dashboard link.
 - Last successful refresh.
 - Last error summary.
-
-#### Browser sessions
-
-- Detected browsers and profiles.
-- Keyring status.
-- Import test button.
-- Explain privacy model.
 
 #### Diagnostics
 
@@ -185,7 +171,7 @@ Required behavior:
 - Maintains normalized cache.
 - Emits snapshot-change signals.
 - Supports manual refresh and scheduled refresh.
-- Performs browser-cookie import and provider web fetches where implemented.
+- Does not perform browser-cookie import, browser profile discovery, keyring access, provider web fetches, or localhost/TCP serving.
 - Never exposes raw secrets over D-Bus.
 
 ### 6.5 Packaging
@@ -207,7 +193,6 @@ MVP success:
 
 - On fresh Ubuntu 24.04 or 26.04, after installing package and enabling extension, the user sees a GNOME top-bar item.
 - If upstream `codexbar` CLI is installed and configured, usage appears without manual JSON configuration in this project.
-- If supported browser sessions exist, web-backed provider data can be fetched without raw-token copy/paste.
 - Killing/restarting GNOME Shell does not lose daemon state.
 - Killing/restarting daemon leaves the UI in a stale-but-usable state until D-Bus recovers.
 - Copy diagnostics contains no raw cookies/tokens.

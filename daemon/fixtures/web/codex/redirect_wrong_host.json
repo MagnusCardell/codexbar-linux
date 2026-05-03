@@ -1,5 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "codex-web-redirect-wrong-host",
-  "location": "https://codex-test.example.invalid/callback"
-}

@@ -87,11 +87,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     common::assert_schema("browser-import-result.schema.json", &browser_result);
     let browser_value: serde_json::Value =
         serde_json::from_str(&browser_result).expect("browser json");
-    assert_eq!(browser_value["status"], "unavailable");
-    assert_eq!(
-        browser_value["diagnosticCodes"][1],
-        "browser_live_profiles_disabled"
-    );
+    assert_eq!(browser_value["status"], "not_implemented");
 
     let mut started_stream = proxy
         .receive_signal("RefreshStarted")

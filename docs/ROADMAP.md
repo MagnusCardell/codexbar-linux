@@ -10,7 +10,7 @@ Deliverables:
 - Freeze initial `Snapshot` schema.
 - Freeze initial D-Bus XML.
 - Freeze settings schema.
-- Complete Task 00A contract-freeze addendum for refresh payloads, diagnostics, daemon info, browser import result, provider events, identity redaction, and source taxonomy.
+- Complete Task 00A contract-freeze addendum for refresh payloads, diagnostics, daemon info, reserved browser-import no-op result, provider events, identity redaction, and source taxonomy.
 - Threat model v1.
 - UI fixture states.
 
@@ -41,28 +41,7 @@ Exit criteria:
 - Killing daemon leaves stale cache UI.
 - Restarting daemon updates snapshot signal.
 
-## P2 — Linux browser-cookie path
-
-Goal: signed-in browsers work for first web-backed providers.
-
-Deliverables:
-
-- Browser/profile discovery.
-- Safe cookie DB copying.
-- Chromium-family cookie read/decrypt path after current-behavior verification.
-- Firefox cookie read path after current-behavior verification.
-- In-memory cookie jar.
-- Codex/OpenAI web adapter.
-- Claude web adapter.
-- Browser import diagnostics.
-- No raw persistence tests.
-
-Exit criteria:
-
-- Import test distinguishes absent profile, keyring locked, cookie absent, cookie rejected, and success.
-- Provider cards show `cookie_rejected` distinctly from `unauthenticated`.
-
-## P3 — Preferences and packaging
+## P2 — Packaging and release hardening
 
 Goal: users can install, configure, inspect, and uninstall cleanly.
 
@@ -75,12 +54,30 @@ Deliverables:
 - Debian packaging.
 - Local dev install/uninstall scripts.
 - Smoke test script for Ubuntu 24.04/26.04 VMs.
+- Static no-browser/web guard in CI.
 
 Exit criteria:
 
 - `.deb` installs daemon, service, extension, schema.
 - Extension can be enabled manually and connects to daemon.
 - Uninstall removes installed files and leaves user config/cache unless purge is explicit.
+- Browser-cookie/web-fetch files, dependencies, fixtures, validators, and agents remain absent.
+
+## P3 — Upstream CLI/provider polish
+
+Goal: improve the supported upstream-CLI-only data path and provider UX.
+
+Deliverables:
+
+- Upstream CLI output drift tests.
+- Provider state and diagnostics polish.
+- Local cost/usage display improvements where upstream data is available.
+- `TestBrowserImport` remains schema-valid `not_implemented` and side-effect free while retained in v1 D-Bus.
+
+Exit criteria:
+
+- Targeted upstream CLI provider refresh is reliable on supported Ubuntu releases.
+- Diagnostics identify missing CLI, timeout, parse error, unavailable provider, stale cache, and success without exposing secrets.
 
 ## P4 — Polish and hardening
 

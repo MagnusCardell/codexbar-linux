@@ -16,13 +16,13 @@
 - CLI missing, timeout, parse error, and non-zero exit states are distinct.
 - Upstream provider IDs/order are preserved where possible.
 
-### C. Browser-cookie path
+### C. No-browser data path
 
-- Browser import detects supported browser profiles.
-- Keyring locked/unavailable state is actionable.
-- Cookie absent and cookie rejected are distinct.
-- Raw cookies never appear in cache, logs, D-Bus output, or copied diagnostics.
-- Provider web adapter output normalizes into the same snapshot shape as CLI output.
+- The daemon does not read browser cookies, browser profiles, browser cookie databases, keyrings, or provider web dashboards.
+- `TestBrowserImport` returns a schema-valid `not_implemented` result and has no browser/cache/settings side effects.
+- Browser-cookie/web-fetch implementation modules, fixtures, validators, direct dependencies, and project agent are absent.
+- Static validation fails if the removed browser-cookie/web-fetch surface is reintroduced.
+- Raw tokens, cookie/header strings, local paths, and raw provider payloads never appear in cache, logs, D-Bus output, fixtures, or copied diagnostics.
 
 ### D. Panel indicator
 
@@ -43,7 +43,7 @@
 
 - General preferences save and apply.
 - Provider enable/source preferences save and apply.
-- Browser import test produces clear results.
+- Reserved browser import test reports unsupported/no-op behavior.
 - Diagnostics page shows daemon status, CLI path/version, cache path, and D-Bus service.
 
 ## Engineering acceptance

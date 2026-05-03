@@ -1,5 +1,4 @@
 pub mod app;
-pub mod browser;
 pub mod cache;
 pub mod cli;
 pub mod clock;
@@ -10,7 +9,6 @@ pub mod fixtures;
 pub mod model;
 pub mod paths;
 pub mod redact;
-pub mod web;
 
 pub const APP_ID: &str = "codexbar-linux";
 pub const DAEMON_NAME: &str = "codexbar-linuxd";

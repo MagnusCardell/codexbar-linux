@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "unsupported-schema",
-  "browserFamily": "chromium",
-  "profileShape": "Network/Cookies",
-  "expected": "unsupported_schema",
-  "description": "Intentionally lacks Chromium cookie columns."
-}

@@ -1,22 +1,33 @@
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use crate::browser;
 use crate::cache::ensure_private_dir;
 use crate::clock;
 use crate::error::{AppError, AppResult};
 use crate::model::{
-    BrowserImportSettingsPatch, DiagnosticsSettingsPatch, ProviderSettings, ProviderSettingsPatch,
-    RefreshSettingsPatch, Settings, SettingsPatch,
+    BrowserImportPolicy, BrowserImportSettingsPatch, DiagnosticsSettingsPatch,
+    PreferredSourceAdapter, ProviderSettings, ProviderSettingsPatch, RefreshSettingsPatch,
+    Settings, SettingsPatch,
 };
 use crate::redact;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SettingsStore {
     dir: PathBuf,
     file: PathBuf,
+}
+
+impl fmt::Debug for SettingsStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SettingsStore")
+            .field("dir", &"[redacted]")
+            .field("file", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -47,7 +58,10 @@ impl SettingsStore {
             return SettingsLoad::Invalid(Settings::default());
         }
         match serde_json::from_str::<Settings>(&text) {
-            Ok(settings) if validate_settings(&settings).is_ok() => SettingsLoad::Loaded(settings),
+            Ok(mut settings) if validate_settings(&settings).is_ok() => {
+                normalize_no_browser_settings(&mut settings);
+                SettingsLoad::Loaded(settings)
+            }
             _ => SettingsLoad::Invalid(Settings::default()),
         }
     }
@@ -127,8 +141,21 @@ pub fn apply_settings_patch(mut settings: Settings, patch: SettingsPatch) -> App
     if let Some(diagnostics) = patch.diagnostics {
         apply_diagnostics_patch(&mut settings, diagnostics);
     }
+    normalize_no_browser_settings(&mut settings);
     validate_settings(&settings)?;
     Ok(settings)
+}
+
+pub fn normalize_no_browser_settings(settings: &mut Settings) {
+    settings.browser_import.enabled = false;
+    settings.browser_import.policy = BrowserImportPolicy::Off;
+    settings.browser_import.profile_id_allowlist.clear();
+    for provider in settings.providers.values_mut() {
+        provider.allow_browser_import = false;
+        if provider.preferred_source_adapter == PreferredSourceAdapter::LinuxWeb {
+            provider.preferred_source_adapter = PreferredSourceAdapter::UpstreamCli;
+        }
+    }
 }
 
 pub fn validate_settings(settings: &Settings) -> AppResult<()> {
@@ -145,8 +172,10 @@ pub fn validate_settings(settings: &Settings) -> AppResult<()> {
             ));
         }
     }
-    if !browser::validate_profile_ids(&settings.browser_import.profile_id_allowlist) {
-        return Err(AppError::invalid_json());
+    for profile_id in &settings.browser_import.profile_id_allowlist {
+        if !is_safe_id(profile_id) {
+            return Err(AppError::invalid_json());
+        }
     }
     let value = serde_json::to_value(settings).map_err(|_| AppError::internal_redacted())?;
     redact::validate_public_json_value(&value).map_err(|_| AppError::internal_redacted())?;
@@ -165,8 +194,10 @@ fn validate_settings_patch_policy(patch: &SettingsPatch) -> AppResult<()> {
     }
     if let Some(browser_import) = &patch.browser_import {
         if let Some(profile_ids) = &browser_import.profile_id_allowlist {
-            if !browser::validate_profile_ids(profile_ids) {
-                return Err(AppError::invalid_json());
+            for profile_id in profile_ids {
+                if !is_safe_id(profile_id) {
+                    return Err(AppError::invalid_json());
+                }
             }
         }
     }
@@ -190,10 +221,13 @@ fn apply_provider_patch(settings: &mut ProviderSettings, patch: ProviderSettings
         settings.enabled = value;
     }
     if let Some(value) = patch.preferred_source_adapter {
-        settings.preferred_source_adapter = value;
+        settings.preferred_source_adapter = match value {
+            PreferredSourceAdapter::LinuxWeb => PreferredSourceAdapter::UpstreamCli,
+            value => value,
+        };
     }
-    if let Some(value) = patch.allow_browser_import {
-        settings.allow_browser_import = value;
+    if patch.allow_browser_import.is_some() {
+        settings.allow_browser_import = false;
     }
     if let Some(value) = patch.allow_cli_fallback {
         settings.allow_cli_fallback = value;
@@ -204,17 +238,19 @@ fn apply_browser_import_patch(
     settings: &mut Settings,
     patch: BrowserImportSettingsPatch,
 ) -> AppResult<()> {
-    if let Some(value) = patch.enabled {
-        settings.browser_import.enabled = value;
+    if patch.enabled.is_some() {
+        settings.browser_import.enabled = false;
     }
-    if let Some(value) = patch.policy {
-        settings.browser_import.policy = value;
+    if patch.policy.is_some() {
+        settings.browser_import.policy = BrowserImportPolicy::Off;
     }
     if let Some(value) = patch.profile_id_allowlist {
-        if !browser::validate_profile_ids(&value) {
-            return Err(AppError::invalid_json());
+        for profile_id in &value {
+            if !is_safe_id(profile_id) {
+                return Err(AppError::invalid_json());
+            }
         }
-        settings.browser_import.profile_id_allowlist = value;
+        settings.browser_import.profile_id_allowlist.clear();
     }
     if let Some(value) = patch.domain_allowlist_mode {
         settings.browser_import.domain_allowlist_mode = value;

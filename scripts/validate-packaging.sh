@@ -89,6 +89,18 @@ for entry in expected_install_entries:
     if entry not in debian_install:
         raise SystemExit(f"packaging/debian/install missing required install mapping: {entry}")
 
+packaging_text = "\n".join(
+    [
+        (root / "packaging/debian/control").read_text(encoding="utf-8"),
+        (root / ".github/workflows/check.yml").read_text(encoding="utf-8"),
+    ]
+)
+for package in ("pkg-config", "libsqlite3-dev", "cmake", "ca-certificates"):
+    if re.search(rf"\b{re.escape(package)}\b", packaging_text):
+        raise SystemExit(
+            f"{package} must not be required while browser-cookie/web-fetch is out of scope"
+        )
+
 auto_enable = re.compile(
     r"(?:\bgnome-extensions\s+enable\b|"
     r"\bgnome-shell-extension-tool\s+-e\b|"

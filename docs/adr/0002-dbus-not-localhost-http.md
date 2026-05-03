@@ -28,4 +28,4 @@ Negative:
 
 ## Future option
 
-A localhost HTTP bridge can be considered later only as an explicit opt-in feature with a separate ADR, threat model, bind restrictions, and authentication story.
+No localhost/TCP bridge is planned. Reconsidering one would require a future ADR that explicitly reverses this boundary, plus a threat model, bind restrictions, authentication story, and UI/packaging review.

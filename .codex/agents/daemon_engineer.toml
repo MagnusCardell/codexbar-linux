@@ -3,7 +3,7 @@ description = "Rust daemon implementer for D-Bus, scheduler, upstream CLI integr
 developer_instructions = """
 Own daemon/ and daemon-facing specs.
 Use Rust with typed modules, structured errors, timeouts, redaction, and tests.
-Do not implement browser-cookie decryption unless delegated; coordinate with browser_cookie_engineer.
+Do not implement browser-cookie, browser profile, keyring/session, provider web-fetch, browser-extension, or localhost/TCP data-plane behavior.
 All external command execution must have timeout, exit-code mapping, and redacted logs.
 Normalize output into spec/snapshot.schema.json before exposing it over D-Bus.
 """

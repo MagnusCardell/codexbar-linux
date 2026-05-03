@@ -15,13 +15,20 @@ pub struct AppPaths {
 }
 
 impl fmt::Debug for AppPaths {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AppPaths")
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AppPaths")
             .field("config_dir", &"[redacted]")
             .field("config_file", &"[redacted]")
             .field("cache_dir", &"[redacted]")
             .field("cache_file", &"[redacted]")
-            .field("upstream_config_file_hint", &self.upstream_config_file_hint)
+            .field(
+                "upstream_config_file_hint",
+                &self
+                    .upstream_config_file_hint
+                    .as_ref()
+                    .map(|_| "[redacted]"),
+            )
             .field(
                 "upstream_cli_path",
                 &self.upstream_cli_path.as_ref().map(|_| "[redacted]"),

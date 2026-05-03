@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -8,10 +9,20 @@ use crate::error::{AppError, AppResult};
 use crate::model::{ProviderState, Snapshot, SourceAdapter};
 use crate::redact;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SnapshotCache {
     dir: PathBuf,
     file: PathBuf,
+}
+
+impl fmt::Debug for SnapshotCache {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SnapshotCache")
+            .field("dir", &"[redacted]")
+            .field("file", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]

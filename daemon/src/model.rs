@@ -505,8 +505,8 @@ impl Default for Settings {
             },
             providers: BTreeMap::new(),
             browser_import: BrowserImportSettings {
-                enabled: true,
-                policy: BrowserImportPolicy::Auto,
+                enabled: false,
+                policy: BrowserImportPolicy::Off,
                 profile_id_allowlist: Vec::new(),
                 domain_allowlist_mode: DomainAllowlistMode::ProviderRequiredOnly,
             },
@@ -540,7 +540,7 @@ impl Default for ProviderSettings {
         Self {
             enabled: true,
             preferred_source_adapter: PreferredSourceAdapter::Auto,
-            allow_browser_import: true,
+            allow_browser_import: false,
             allow_cli_fallback: true,
         }
     }

@@ -1,13 +1,9 @@
 use std::collections::BTreeSet;
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::browser::keyring::{BrowserDecryptorMode, FakeDecryptorMode};
-use crate::browser::profile::BrowserDiscoveryRoots;
-use crate::browser::{self, BrowserImportRequest, BrowserSessionRequest};
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
 use crate::cli::{self, CliRefreshRequest, UpstreamCliAdapter};
 use crate::clock::{duration_ms, now_rfc3339, Clock};
@@ -17,14 +13,15 @@ use crate::config::{
 use crate::error::{AppError, AppResult};
 use crate::fixtures;
 use crate::model::{
-    BrowserImportOptions, BusyBehavior, Capabilities, DaemonInfo, DaemonPathsInfo, DaemonState,
-    DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity, EventRedaction, ProviderEvent,
-    ProviderEventReason, RedactionSummary, RefreshOptions, RefreshReason, RefreshResult,
-    RefreshSourceAdapter, RefreshStatus, Settings, Snapshot, SourceAdapter,
+    BrowserImportOptions, BrowserImportResult, BrowserImportStatus, BrowserProviderResult,
+    BrowserProviderStatus, BrowserSourceAdapter, BusyBehavior, Capabilities, DaemonInfo,
+    DaemonPathsInfo, DaemonState, DbusInfo, DiagnosticEvent, DiagnosticScope, DiagnosticSeverity,
+    EventRedaction, ProviderEvent, ProviderEventReason, RedactionSummary, RefreshOptions,
+    RefreshReason, RefreshResult, RefreshSourceAdapter, RefreshStatus, Settings, Snapshot,
+    SourceAdapter,
 };
 use crate::paths::AppPaths;
 use crate::redact;
-use crate::web::client::{CodexWebFixture, FakeWebClient, ReqwestStaticGetClient};
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
 pub struct App {
@@ -38,8 +35,9 @@ pub struct App {
 }
 
 impl fmt::Debug for App {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("App")
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("App")
             .field("paths", &"[redacted]")
             .field("runtime", &self.runtime)
             .field("clock", &self.clock)
@@ -49,132 +47,32 @@ impl fmt::Debug for App {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppRuntime {
     allow_fixture_source: bool,
-    browser_roots: Option<BrowserDiscoveryRoots>,
-    browser_decryptor_mode: BrowserDecryptorMode,
-    codex_web_fixture: Option<CodexWebFixture>,
-    fake_web_session_available: bool,
-    codex_web_live_transport: bool,
-}
-
-impl fmt::Debug for AppRuntime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AppRuntime")
-            .field("allow_fixture_source", &self.allow_fixture_source)
-            .field(
-                "browser_roots",
-                &self.browser_roots.as_ref().map(|_| "[redacted]"),
-            )
-            .field("browser_decryptor_mode", &self.browser_decryptor_mode)
-            .field("codex_web_fixture", &self.codex_web_fixture)
-            .field(
-                "fake_web_session_available",
-                &self.fake_web_session_available,
-            )
-            .field("codex_web_live_transport", &self.codex_web_live_transport)
-            .finish()
-    }
 }
 
 impl AppRuntime {
     pub fn production() -> Self {
         Self {
             allow_fixture_source: false,
-            browser_roots: None,
-            browser_decryptor_mode: BrowserDecryptorMode::Plain,
-            codex_web_fixture: None,
-            fake_web_session_available: false,
-            codex_web_live_transport: false,
         }
     }
 
-    pub fn from_env() -> AppResult<Self> {
-        let browser_roots = env_browser_roots()?;
-        let codex_web_live_transport = env_codex_web_live_transport();
-        if codex_web_live_transport && browser_roots.is_none() {
-            return Err(unsafe_browser_fake_home());
-        }
-        Ok(Self {
+    pub fn from_env() -> Self {
+        Self {
             allow_fixture_source: env_allows_fixture_source(),
-            browser_roots,
-            browser_decryptor_mode: BrowserDecryptorMode::Plain,
-            codex_web_fixture: None,
-            fake_web_session_available: false,
-            codex_web_live_transport,
-        })
+        }
     }
 
     pub fn with_fixture_source_for_tests() -> Self {
         Self {
             allow_fixture_source: true,
-            browser_roots: None,
-            browser_decryptor_mode: BrowserDecryptorMode::Plain,
-            codex_web_fixture: None,
-            fake_web_session_available: false,
-            codex_web_live_transport: false,
         }
     }
 
     pub fn fixture_source_allowed(&self) -> bool {
         self.allow_fixture_source
-    }
-
-    pub fn with_browser_roots_for_tests(roots: BrowserDiscoveryRoots) -> Self {
-        Self::production().with_browser_roots(roots)
-    }
-
-    pub fn with_browser_roots(mut self, roots: BrowserDiscoveryRoots) -> Self {
-        self.browser_roots = roots.canonicalized();
-        self
-    }
-
-    pub fn with_browser_decryptor_mode(mut self, mode: FakeDecryptorMode) -> Self {
-        self.browser_decryptor_mode = BrowserDecryptorMode::fake(mode);
-        self
-    }
-
-    pub fn with_browser_decryptor_backend(mut self, mode: BrowserDecryptorMode) -> Self {
-        self.browser_decryptor_mode = mode;
-        self
-    }
-
-    pub fn with_codex_web_fixture_for_tests(fixture: CodexWebFixture) -> Self {
-        Self::production()
-            .with_codex_web_fixture(fixture)
-            .with_fake_web_session_available(true)
-    }
-
-    pub fn with_codex_web_fixture(mut self, fixture: CodexWebFixture) -> Self {
-        self.codex_web_fixture = Some(fixture);
-        self
-    }
-
-    pub fn with_fake_web_session_available(mut self, available: bool) -> Self {
-        self.fake_web_session_available = available;
-        self
-    }
-
-    pub fn with_codex_web_live_transport_for_tests(mut self, enabled: bool) -> Self {
-        self.codex_web_live_transport = enabled;
-        self
-    }
-
-    fn browser_roots(&self) -> Option<BrowserDiscoveryRoots> {
-        self.browser_roots.clone()
-    }
-
-    fn browser_decryptor_mode(&self) -> BrowserDecryptorMode {
-        self.browser_decryptor_mode
-    }
-
-    fn codex_web_fixture(&self) -> Option<CodexWebFixture> {
-        self.codex_web_fixture
-    }
-
-    fn codex_web_live_transport(&self) -> bool {
-        self.codex_web_live_transport
     }
 }
 
@@ -211,7 +109,7 @@ pub struct RefreshCompletion {
 
 impl App {
     pub fn from_env() -> AppResult<Self> {
-        Self::new_with_runtime(AppPaths::from_env(), AppRuntime::from_env()?)
+        Self::new_with_runtime(AppPaths::from_env(), AppRuntime::from_env())
     }
 
     pub fn new(paths: AppPaths) -> AppResult<Self> {
@@ -385,20 +283,24 @@ impl App {
                 return Err(AppError::invalid_json());
             }
         }
-        if !browser::validate_profile_ids(&options.profile_ids) {
-            return Err(AppError::invalid_json());
-        }
-        let settings = {
-            let state = self.lock_state()?;
-            state.settings.clone()
-        };
-        let result = browser::test_import(BrowserImportRequest {
-            options,
-            settings,
-            roots: self.runtime.browser_roots(),
-            decryptor_mode: self.runtime.browser_decryptor_mode(),
+        let result = BrowserImportResult {
+            schema_version: 1,
             tested_at: now_rfc3339(),
-        });
+            status: BrowserImportStatus::NotImplemented,
+            policy: options.policy,
+            profiles: Vec::new(),
+            providers: options
+                .providers
+                .into_iter()
+                .map(|provider| BrowserProviderResult {
+                    provider,
+                    status: BrowserProviderStatus::NotImplemented,
+                    source_adapter: BrowserSourceAdapter::None,
+                    diagnostic_codes: vec!["browser_import_not_implemented".to_string()],
+                })
+                .collect(),
+            diagnostic_codes: vec!["browser_import_not_implemented".to_string()],
+        };
         to_public_json(&result)
     }
 
@@ -445,16 +347,10 @@ impl App {
         };
 
         let finished_at = now_rfc3339();
+        let provider_targets = cli::target_providers(&settings, &active.options.providers);
         let fixture_requested = fixture_requested(&active.options);
         let fixture_only = active.options.source_adapter_policy.allows_fixture()
             && !active.options.source_adapter_policy.allows_upstream_cli();
-        let linux_web_requested = active.options.source_adapter_policy.mode
-            == crate::model::SourceAdapterPolicyMode::Only
-            && active
-                .options
-                .source_adapter_policy
-                .adapters
-                .contains(&RefreshSourceAdapter::LinuxWeb);
 
         let (mut snapshot, mut diagnostics, mut diagnostic_codes) =
             if fixture_requested && !self.runtime.fixture_source_allowed() {
@@ -472,55 +368,7 @@ impl App {
                     Vec::new(),
                     Vec::new(),
                 )
-            } else if linux_web_requested {
-                let provider_targets =
-                    crate::web::target_providers(&settings, &active.options.providers);
-                let live_transport_allowed = self.runtime.codex_web_live_transport()
-                    && codex_web_live_request_allowed(&active.options, &provider_targets);
-                let mut sessions = std::collections::BTreeMap::new();
-                let mut session_diagnostic_codes = std::collections::BTreeMap::new();
-                if self.runtime.fake_web_session_available {
-                    sessions.insert(
-                        "codex".to_string(),
-                        crate::web::fake_codex_session_for_tests(),
-                    );
-                } else if live_transport_allowed {
-                    let collection = browser::collect_session_material(BrowserSessionRequest {
-                        providers: provider_targets.clone(),
-                        settings: settings.clone(),
-                        roots: self.runtime.browser_roots(),
-                        decryptor_mode: self.runtime.browser_decryptor_mode(),
-                    });
-                    sessions = collection.sessions;
-                    session_diagnostic_codes = collection.provider_diagnostic_codes;
-                }
-                let request = crate::web::WebRefreshRequest {
-                    refresh_id: refresh_id.to_string(),
-                    started_at: active.started_at.clone(),
-                    finished_at: finished_at.clone(),
-                    providers: provider_targets,
-                    selected_provider: previous_snapshot.selected_provider.clone(),
-                    upstream_cli: cli::resolve_info(&self.paths),
-                    sessions,
-                    session_diagnostic_codes,
-                };
-                let refresh = if let Some(fixture) = self.runtime.codex_web_fixture() {
-                    let client = FakeWebClient::codex_fixture(fixture);
-                    crate::web::refresh_with_client(request, &client).await?
-                } else if live_transport_allowed {
-                    let client = ReqwestStaticGetClient::new();
-                    crate::web::refresh_with_client(request, &client).await?
-                } else {
-                    crate::web::disabled_refresh(request)?
-                };
-                let diagnostic_codes = refresh
-                    .diagnostics
-                    .iter()
-                    .map(|event| event.code.clone())
-                    .collect::<Vec<_>>();
-                (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
             } else if active.options.source_adapter_policy.allows_upstream_cli() {
-                let provider_targets = cli::target_providers(&settings, &active.options.providers);
                 let adapter = UpstreamCliAdapter::from_paths(&self.paths);
                 let refresh = adapter
                     .refresh(CliRefreshRequest {
@@ -670,9 +518,8 @@ impl App {
             },
             capabilities: Capabilities {
                 upstream_cli: upstream_cli_available,
-                browser_import: true,
-                linux_web_adapters: self.runtime.codex_web_live_transport()
-                    || self.runtime.codex_web_fixture().is_some(),
+                browser_import: false,
+                linux_web_adapters: false,
                 cost: upstream_cli_available,
                 settings_patch: true,
             },
@@ -719,6 +566,15 @@ fn refresh_status(
     cache_written: bool,
     diagnostic_codes: &[String],
 ) -> RefreshStatus {
+    if diagnostic_codes
+        .iter()
+        .any(|code| code == "stale_cache_fallback")
+        && !diagnostic_codes
+            .iter()
+            .any(|code| code == "fixture_not_allowed")
+    {
+        return RefreshStatus::Partial;
+    }
     let ok_count = snapshot
         .providers
         .iter()
@@ -726,14 +582,7 @@ fn refresh_status(
         .count();
     if ok_count == snapshot.providers.len() && diagnostic_codes.is_empty() && cache_written {
         RefreshStatus::Ok
-    } else if ok_count > 0
-        || (diagnostic_codes
-            .iter()
-            .any(|code| code == "stale_cache_fallback")
-            && !diagnostic_codes
-                .iter()
-                .any(|code| code == "fixture_not_allowed"))
-    {
+    } else if ok_count > 0 {
         RefreshStatus::Partial
     } else {
         RefreshStatus::Error
@@ -768,14 +617,6 @@ fn fixture_requested(options: &RefreshOptions) -> bool {
         .contains(&RefreshSourceAdapter::Fixture)
         || (options.source_adapter_policy.allows_fixture()
             && !options.source_adapter_policy.allows_upstream_cli())
-}
-
-fn codex_web_live_request_allowed(options: &RefreshOptions, provider_targets: &[String]) -> bool {
-    options.providers.len() == 1
-        && options.providers[0] == "codex"
-        && provider_targets.iter().any(|provider| provider == "codex")
-        && options.source_adapter_policy.mode == crate::model::SourceAdapterPolicyMode::Only
-        && options.source_adapter_policy.adapters.as_slice() == [RefreshSourceAdapter::LinuxWeb]
 }
 
 fn fixture_not_allowed_snapshot(
@@ -827,70 +668,6 @@ fn env_allows_fixture_source() -> bool {
             .as_deref(),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
-}
-
-fn env_codex_web_live_transport() -> bool {
-    matches!(
-        std::env::var("CODEXBAR_CODEX_WEB_LIVE").ok().as_deref(),
-        Some("1" | "true" | "TRUE" | "yes" | "YES")
-    )
-}
-
-fn env_browser_roots() -> AppResult<Option<BrowserDiscoveryRoots>> {
-    let Some(value) = std::env::var_os("CODEXBAR_BROWSER_IMPORT_FAKE_HOME") else {
-        return Ok(None);
-    };
-    if value.is_empty() {
-        return Err(unsafe_browser_fake_home());
-    }
-    safe_browser_roots_from_fake_home(
-        PathBuf::from(value),
-        std::env::var_os("HOME").map(PathBuf::from),
-        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-    )
-}
-
-fn safe_browser_roots_from_fake_home(
-    fake_home: PathBuf,
-    real_home: Option<PathBuf>,
-    real_xdg_config_home: Option<PathBuf>,
-) -> AppResult<Option<BrowserDiscoveryRoots>> {
-    if fake_home.as_os_str().is_empty() || fake_home == Path::new("/") || !fake_home.is_absolute() {
-        return Err(unsafe_browser_fake_home());
-    }
-    let fake_home = std::fs::canonicalize(fake_home).map_err(|_| unsafe_browser_fake_home())?;
-    if fake_home == Path::new("/") || !fake_home.is_dir() {
-        return Err(unsafe_browser_fake_home());
-    }
-
-    if let Some(real_home) = real_home.and_then(|path| std::fs::canonicalize(path).ok()) {
-        if fake_home == real_home {
-            return Err(unsafe_browser_fake_home());
-        }
-        let real_config = real_home.join(".config");
-        if fake_home.starts_with(&real_config) {
-            return Err(unsafe_browser_fake_home());
-        }
-    }
-    if let Some(real_xdg_config_home) =
-        real_xdg_config_home.and_then(|path| std::fs::canonicalize(path).ok())
-    {
-        if fake_home == real_xdg_config_home || fake_home.starts_with(&real_xdg_config_home) {
-            return Err(unsafe_browser_fake_home());
-        }
-    }
-    if !fake_home.join(".codexbar-throwaway-browser-root").is_file() {
-        return Err(unsafe_browser_fake_home());
-    }
-
-    let Some(roots) = BrowserDiscoveryRoots::synthetic_home(fake_home).canonicalized() else {
-        return Err(unsafe_browser_fake_home());
-    };
-    Ok(Some(roots))
-}
-
-fn unsafe_browser_fake_home() -> AppError {
-    AppError::DependencyUnavailable("unsafe browser fake home; details redacted".to_string())
 }
 
 fn parse_input_json<T>(json: &str) -> AppResult<T>
@@ -969,105 +746,5 @@ fn redaction_summary() -> RedactionSummary {
         applied: true,
         policy_version: 1,
         notes: vec!["Task 01 diagnostics are redacted before D-Bus output".to_string()],
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fake_browser_home_guard_rejects_real_home_and_unsafe_roots() {
-        let real_home = tempfile::tempdir().expect("real home");
-        let fake_home = tempfile::tempdir().expect("fake home");
-        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
-        std::fs::create_dir_all(fake_home.path().join(".config")).expect("fake config");
-        std::fs::write(
-            fake_home.path().join(".codexbar-throwaway-browser-root"),
-            b"throwaway",
-        )
-        .expect("fake marker");
-
-        assert!(safe_browser_roots_from_fake_home(
-            fake_home.path().to_path_buf(),
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .expect("safe fake home")
-        .is_some());
-        assert!(safe_browser_roots_from_fake_home(
-            real_home.path().to_path_buf(),
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .is_err());
-        assert!(safe_browser_roots_from_fake_home(PathBuf::from("/"), None, None).is_err());
-        assert!(safe_browser_roots_from_fake_home(PathBuf::new(), None, None).is_err());
-        assert!(safe_browser_roots_from_fake_home(PathBuf::from("relative"), None, None).is_err());
-    }
-
-    #[test]
-    fn fake_browser_home_guard_rejects_real_config_descendants() {
-        let real_home = tempfile::tempdir().expect("real home");
-        let real_config_child = real_home.path().join(".config").join("throwaway");
-        std::fs::create_dir_all(real_config_child.join(".config")).expect("config child");
-
-        assert!(safe_browser_roots_from_fake_home(
-            real_config_child,
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn fake_browser_home_guard_rejects_missing_throwaway_marker() {
-        let real_home = tempfile::tempdir().expect("real home");
-        let fake_home = tempfile::tempdir().expect("fake home");
-        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
-        std::fs::create_dir_all(fake_home.path().join(".config")).expect("fake config");
-
-        assert!(safe_browser_roots_from_fake_home(
-            fake_home.path().to_path_buf(),
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .is_err());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn fake_browser_home_guard_rejects_home_and_config_symlink_escapes() {
-        use std::os::unix::fs::symlink;
-
-        let real_home = tempfile::tempdir().expect("real home");
-        let symlink_home = tempfile::tempdir().expect("link holder");
-        let home_link = symlink_home.path().join("home-link");
-        symlink(real_home.path(), &home_link).expect("home symlink");
-        assert!(safe_browser_roots_from_fake_home(
-            home_link,
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .is_err());
-
-        let fake_home = tempfile::tempdir().expect("fake home");
-        std::fs::create_dir_all(real_home.path().join(".config")).expect("real config");
-        symlink(
-            real_home.path().join(".config"),
-            fake_home.path().join(".config"),
-        )
-        .expect("config symlink");
-        std::fs::write(
-            fake_home.path().join(".codexbar-throwaway-browser-root"),
-            b"throwaway",
-        )
-        .expect("fake marker");
-        assert!(safe_browser_roots_from_fake_home(
-            fake_home.path().to_path_buf(),
-            Some(real_home.path().to_path_buf()),
-            Some(real_home.path().join(".config"))
-        )
-        .is_err());
     }
 }

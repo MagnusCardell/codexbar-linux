@@ -21,32 +21,10 @@ pub fn validate_public_json_text(text: &str) -> Result<(), RedactionFinding> {
         ("access_token", "accesstoken"),
         ("refresh_token", "refresh_token"),
         ("refresh_token", "refreshtoken"),
-        ("session_id", "sessionid"),
-        ("session_id", "sid="),
         ("session_token", "session_token"),
         ("session_key", "sessionkey"),
-        ("secure_cookie_name", "__secure-"),
-        ("host_cookie_name", "__host-"),
-        ("encrypted_cookie_value", "encrypted_value"),
-        ("browser_cookie_db", "/cookies"),
-        ("browser_cookie_db", "cookies.sqlite"),
-        ("browser_profile_path", ".config/google-chrome"),
-        ("browser_profile_path", ".config/chromium"),
-        ("browser_profile_path", "bravesoftware"),
         ("raw_payload", "\"rawpayload\""),
         ("raw_response", "\"rawresponse\""),
-        ("raw_url", "\"rawurl\""),
-        ("raw_path", "\"rawpath\""),
-        ("raw_query", "\"rawquery\""),
-        ("raw_fragment", "\"rawfragment\""),
-        ("raw_body", "\"rawbody\""),
-        ("raw_location", "\"rawlocation\""),
-        ("redirect_url", "\"redirecturl\""),
-        ("request_url", "\"requesturl\""),
-        ("final_url", "\"finalurl\""),
-        ("raw_profile_path", "\"rawprofilepath\""),
-        ("raw_cookie", "\"rawcookie\""),
-        ("raw_header", "\"rawheader\""),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
         ("auth_json_path", "auth.json"),
@@ -171,20 +149,27 @@ fn validate_public_key(key: &str) -> Result<(), RedactionFinding> {
     ) {
         return Ok(());
     }
+    if normalized.contains("header") {
+        return Err(RedactionFinding { code: "secret_key" });
+    }
+    if normalized.contains("url")
+        && (normalized.starts_with("raw")
+            || normalized.starts_with("request")
+            || normalized.starts_with("response")
+            || normalized.starts_with("final"))
+    {
+        return Err(RedactionFinding {
+            code: "raw_url_key",
+        });
+    }
     let code = match normalized.as_str() {
         "authorization" | "cookie" | "cookies" | "setcookie" | "xapikey" | "headers" => {
             Some("secret_key")
         }
-        "cookiename" | "cookienames" | "hostkey" | "domain" | "encryptedvalue" => {
-            Some("browser_cookie_key")
-        }
-        "raw" | "rawpayload" | "rawresponse" | "rawurl" | "rawpath" | "rawquery"
-        | "rawfragment" | "rawbody" | "rawlocation" | "rawprofilepath" | "rawcookie"
-        | "rawheader" => Some("raw_payload"),
-        "location" | "redirecturl" | "requesturl" | "finalurl" => Some("raw_url_key"),
-        "accesstoken" | "refreshtoken" | "sessiontoken" | "sessionkey" | "sessionid" | "sid"
-        | "apikey" | "password" | "secret" => Some("token_key"),
-        "requestheaders" | "responseheaders" => Some("secret_key"),
+        "raw" | "rawpayload" | "rawresponse" | "rawoutput" | "stdout" | "stderr" | "stdouttext"
+        | "stderrtext" | "stdoutjson" | "stderrjson" => Some("raw_payload"),
+        "accesstoken" | "refreshtoken" | "sessiontoken" | "sessionkey" | "apikey" | "password"
+        | "secret" => Some("token_key"),
         "accountemail" | "signedinemail" | "email" => Some("raw_email_key"),
         "accountorganization" | "organization" | "provideraccountid" => Some("raw_identity_key"),
         _ => None,
@@ -209,30 +194,10 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
         ("access_token", "accesstoken"),
         ("refresh_token", "refresh_token"),
         ("refresh_token", "refreshtoken"),
-        ("session_id", "sessionid"),
-        ("session_id", "sid="),
+        ("session_token", "session_token"),
+        ("session_token", "sessiontoken"),
+        ("session_key", "session_key"),
         ("session_key", "sessionkey"),
-        ("secure_cookie_name", "__secure-"),
-        ("host_cookie_name", "__host-"),
-        ("encrypted_cookie_value", "encrypted_value"),
-        ("browser_cookie_db", "network/cookies"),
-        ("browser_cookie_db", "/cookies"),
-        ("browser_cookie_db", "cookies.sqlite"),
-        ("browser_profile_path", ".config/google-chrome"),
-        ("browser_profile_path", ".config/chromium"),
-        ("browser_profile_path", "bravesoftware"),
-        ("raw_profile_path", "rawprofilepath"),
-        ("raw_cookie", "rawcookie"),
-        ("raw_header", "rawheader"),
-        ("raw_url", "rawurl"),
-        ("raw_path", "rawpath"),
-        ("raw_query", "rawquery"),
-        ("raw_fragment", "rawfragment"),
-        ("raw_body", "rawbody"),
-        ("raw_location", "rawlocation"),
-        ("redirect_url", "redirecturl"),
-        ("request_url", "requesturl"),
-        ("final_url", "finalurl"),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
         ("auth_json_path", "auth.json"),
@@ -241,29 +206,9 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
             return Err(RedactionFinding { code });
         }
     }
-    let compact: String = lower
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '=' | ':' | '"'))
-        .collect();
-    for (code, needle) in [
-        ("access_token", "accesstoken="),
-        ("access_token", "accesstoken:"),
-        ("access_token", "\"accesstoken\""),
-        ("refresh_token", "refreshtoken="),
-        ("refresh_token", "refreshtoken:"),
-        ("refresh_token", "\"refreshtoken\""),
-        ("session_token", "sessiontoken="),
-        ("session_token", "sessiontoken:"),
-        ("session_token", "\"sessiontoken\""),
-        ("session_key", "sessionkey="),
-        ("session_key", "sessionkey:"),
-        ("session_key", "\"sessionkey\""),
-        ("api_key", "apikey="),
-        ("api_key", "apikey:"),
-        ("api_key", "\"apikey\""),
-    ] {
-        if compact.contains(needle) {
-            return Err(RedactionFinding { code });
+    for name in ["api_key", "apikey"] {
+        if lower.contains(&format!("{name}=")) || lower.contains(&format!("{name}:")) {
+            return Err(RedactionFinding { code: "api_key" });
         }
     }
     if contains_raw_email(value) {

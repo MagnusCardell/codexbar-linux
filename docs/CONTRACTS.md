@@ -22,7 +22,7 @@ Required v1 keys:
 
 The Shell process may read GSettings and D-Bus only. It must not read daemon cache files in production.
 
-### Daemon-owned provider/browser/refresh settings
+### Daemon-owned provider/refresh settings
 
 The daemon owns `spec/settings.schema.json` and persists it under `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json` with `0600` file permissions and `0700` directory permissions.
 
@@ -31,8 +31,12 @@ Daemon-owned settings include:
 - refresh interval and stale-cache fallback;
 - provider enablement;
 - provider source adapter preference;
-- browser import policy and profile id allowlist;
 - diagnostics verbosity.
+
+The v1 settings schema still contains browser-import and Linux-web fields for
+compatibility with the frozen contract. In the no-browser product scope those
+fields are deprecated, normalized off by the daemon, and must not trigger
+browser profile scanning, keyring access, cookie reads, or provider web fetches.
 
 The preferences UI may configure daemon settings through `SetSettingsPatch(patch_json)` after the daemon exists. During local development it may also write the documented config file path, but production UX should prefer D-Bus so validation and redaction stay centralized.
 
@@ -53,13 +57,13 @@ Do not conflate the provider semantic source with the implementation data plane.
 
 - `api` — provider API or upstream CLI API-derived result;
 - `local` — local CLI/config/state result;
-- `web` — provider web/session result;
+- `web` — provider web/session result if reported by upstream provider semantics; not a local daemon web fetch;
 - `unknown` — source is unknown or unavailable.
 
 `sourceAdapter` describes the implementation adapter that produced the normalized data:
 
 - `upstream_cli` — upstream `codexbar` CLI output;
-- `linux_web` — daemon Linux browser-cookie/web adapter;
+- `linux_web` — deprecated compatibility value; local Linux web adapters are unsupported and must not run;
 - `cache` — cache-only/synthetic fallback where the original adapter is unknown;
 - `fixture` — test/dev fixture source;
 - `synthetic` — daemon-generated placeholder/error state;
@@ -80,7 +84,7 @@ Allowed identity fields are:
 - `accountOrganizationDisplay` — masked or generalized organization display;
 - `accountOrganizationHash` — non-reversible local hash/HMAC;
 - `providerAccountIdHash` — non-reversible local hash/HMAC;
-- `loginMethod` — safe high-level string such as `browser_cookie`, `api_key`, `oauth`, or `unknown`.
+- `loginMethod` — safe high-level string such as `api_key`, `oauth`, `upstream_cli`, or `unknown`. The legacy `browser_cookie` value is reserved for compatibility only and is not produced by the no-browser daemon.
 
 If upstream returns raw identity fields, the daemon must normalize them immediately and discard raw values before cache/D-Bus/logging. The Shell never receives raw identity.
 
@@ -114,7 +118,7 @@ The service must use these stable error names:
 | `org.codexbar.Linux1.Error.InvalidJson` | Input JSON is invalid or fails the payload schema. |
 | `org.codexbar.Linux1.Error.InvalidSettingsPatch` | Settings patch is syntactically valid JSON but invalid or rejected. |
 | `org.codexbar.Linux1.Error.RefreshBusy` | Caller requested `busyBehavior=reject` while a refresh is running. |
-| `org.codexbar.Linux1.Error.DependencyUnavailable` | Required dependency such as upstream CLI, browser profile, keyring, or provider adapter is unavailable for the requested operation. |
+| `org.codexbar.Linux1.Error.DependencyUnavailable` | Required dependency such as upstream CLI or local provider tooling is unavailable for the requested operation. |
 | `org.codexbar.Linux1.Error.CapabilityUnimplemented` | The method/capability is part of v1 surface but not implemented in the current phase. |
 | `org.codexbar.Linux1.Error.Internal` | Redacted internal failure. Details must be safe and actionable. |
 
@@ -126,12 +130,12 @@ Future errors may be added only with docs, tests, and UI fallback behavior.
 
 - `provider_id=""` or `provider_id="global"` returns global diagnostics.
 - Provider diagnostics use the provider id.
-- Browser import diagnostics use `scope=browser_import`.
+- `scope=browser_import` is retained only for the compatibility no-op method and must not imply active browser access.
 - Every event has a stable `code`, `severity`, `safeMessage`, `timestamp`, and `redacted.applied=true`.
 - `details` may contain small scalar redacted values only.
 - Copy-diagnostics uses this payload after one more redaction pass.
 
-`TestBrowserImport(options_json)` accepts `spec/browser-import-options.schema.json` and returns `spec/browser-import-result.schema.json`. Task 04B implements Chromium-family synthetic/fake-root capability checks through this existing method. Default runtime must still avoid real user profile scans unless a reviewed fake/throwaway or live gate is explicitly enabled. Firefox and provider-web validation may still return schema-valid `not_implemented` or unavailable states until their implementation tasks land.
+`TestBrowserImport(options_json)` accepts `spec/browser-import-options.schema.json` and returns `spec/browser-import-result.schema.json`. The method is reserved and unsupported in the no-browser product scope. The daemon must validate JSON/schema and return a schema-valid result with `status=not_implemented`, empty `profiles`, provider results with `sourceAdapter=none`, and safe diagnostic codes. It must not inspect browser profiles, keyrings, cookie stores, provider endpoints, daemon cache files, or settings files.
 
 ## Cache contract
 
@@ -148,7 +152,7 @@ When the daemon serves cached data because startup refresh has not run or live r
 - Preserve the cached snapshot `generatedAt`, provider `updatedAt`, provider semantic `source`, and original `sourceAdapter` when known.
 - Set top-level `stale=true`.
 - For providers with previously usable data, set `state=stale` and set `staleSince` if it was not already set.
-- Preserve non-usable provider states such as `unauthenticated`, `cookie_rejected`, `missing_dependency`, `provider_unavailable`, `parse_error`, `timeout`, and `error` unless the refresh result supplies a newer normalized provider state.
+- Preserve non-usable provider states such as `unauthenticated`, `cookie_rejected`, `missing_dependency`, `provider_unavailable`, `parse_error`, `timeout`, and `error` unless the refresh result supplies a newer normalized provider state. `cookie_rejected` is a legacy/reserved state and is not produced by local browser-cookie logic.
 - Use `sourceAdapter=cache` only for cache-only fallback records where the original adapter is unknown.
 
 ## Fixtures

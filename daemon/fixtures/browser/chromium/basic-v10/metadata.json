@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "fixtureId": "basic-v10",
-  "browserFamily": "chromium",
-  "profileShape": "Network/Cookies",
-  "expected": "parse",
-  "description": "Chromium v10 basic/plain schema; tests generate synthetic encrypted rows at runtime."
-}

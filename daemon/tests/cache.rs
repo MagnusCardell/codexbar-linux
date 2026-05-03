@@ -57,6 +57,72 @@ async fn restart_loads_cache_as_stale_without_relabeling_known_adapter() {
     assert_eq!(value["providers"][0]["source"], "api");
 }
 
+#[tokio::test]
+async fn stale_cache_fallback_reports_partial_refresh() {
+    let (_tmp, paths) = common::temp_paths();
+    let cache = SnapshotCache::new(paths.cache_dir.clone(), paths.cache_file.clone());
+    let now = codexbar_linuxd::clock::now_rfc3339();
+    let snapshot = fixtures::refreshed_snapshot("cached-ok", &now, &now).expect("snapshot");
+    cache.store(&snapshot).expect("cache store");
+
+    let app = App::new(paths).expect("app");
+    let refresh = app
+        .start_refresh(
+            r#"{"schemaVersion":1,"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#,
+        )
+        .expect("start refresh");
+    let RefreshStart::Started { refresh_id } = refresh else {
+        panic!("expected started refresh");
+    };
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("finish refresh");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(result["status"], "partial");
+    assert!(result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes")
+        .iter()
+        .any(|code| code == "stale_cache_fallback"));
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    assert_eq!(snapshot["stale"], true);
+    assert_eq!(snapshot["providers"][0]["state"], "stale");
+}
+
+#[tokio::test]
+async fn unsupported_linux_web_refresh_uses_generic_diagnostic() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new(paths).expect("app");
+    let refresh = app
+        .start_refresh(
+            r#"{"schemaVersion":1,"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"],"allowStaleCacheFallback":false}}"#,
+        )
+        .expect("start refresh");
+    let RefreshStart::Started { refresh_id } = refresh else {
+        panic!("expected started refresh");
+    };
+    let completion = app
+        .finish_refresh(&refresh_id)
+        .await
+        .expect("finish refresh");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(result["status"], "error");
+    let codes = result["providers"][0]["diagnosticCodes"]
+        .as_array()
+        .expect("provider diagnostic codes");
+    assert!(codes
+        .iter()
+        .any(|code| code == "source_adapter_not_implemented"));
+    assert!(!codes
+        .iter()
+        .any(|code| code == "browser_import_not_implemented"));
+}
+
 #[test]
 fn stale_mutation_preserves_non_usable_provider_states() {
     let now = codexbar_linuxd::clock::now_rfc3339();
