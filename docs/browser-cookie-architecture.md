@@ -26,7 +26,11 @@ transport daemon-async with `reqwest::Client` instead of `reqwest::blocking`,
 so it can run and drop inside the daemon's Tokio context. It still does not
 implement live browser-profile scanning by default, default live provider
 fetch, real Secret Service secret extraction, real provider scraping, or
-production web scraping.
+production web scraping. Task 04D.1C adds a static browser-like request header
+profile for the Codex dashboard GET, reports only
+`requestHeaderProfile="browser_like"`, and classifies non-2xx, redirect,
+rate-limit, authentication-rejection, and server-error responses with safe
+scalar metadata only.
 
 ## Thesis
 
@@ -121,7 +125,10 @@ still have no default live provider fetch and return redacted
 gate is enabled. The live Codex reconnaissance gate requires
 `CODEXBAR_CODEX_WEB_LIVE=1`, a safe marked throwaway fake home through
 `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`, explicit provider `codex`, and explicit
-source adapter `linux_web`.
+source adapter `linux_web`. The Codex dashboard request uses a static
+browser-like navigation header profile, but public output reports only the
+profile class `browser_like`; raw request headers are not logged, cached,
+diagnosed, or emitted over D-Bus.
 
 ## Browser Support Sequence
 
@@ -366,7 +373,7 @@ The stable browser/web diagnostic code registry for future implementation is:
 | `provider_web_fetch_finished` | Provider web request completed. | none |
 | `provider_web_fetch_timeout` | Provider request timed out. | `timeout` |
 | `provider_web_fetch_rate_limited` | Provider returned a rate-limit response. | `provider_unavailable` |
-| `provider_web_fetch_nonzero_status` | Provider returned an unsuccessful HTTP status. | `provider_unavailable` or `cookie_rejected` |
+| `provider_web_fetch_nonzero_status` | Provider returned an unsuccessful HTTP status. 401/403 map to `cookie_rejected`; other non-2xx statuses map to `provider_unavailable` unless a more specific code applies. | `provider_unavailable` or `cookie_rejected` |
 | `provider_web_fetch_parse_error` | Provider response shape was unexpected. | `parse_error` |
 | `provider_web_fetch_redaction_applied` | Redaction was applied before public output. | none |
 | `provider_domain_not_allowed` | Request host was outside the allowlist. | `provider_unavailable` |
@@ -381,15 +388,22 @@ Allowed diagnostic `details` keys are small redacted scalars only, such as:
 - `profileDisplayName`;
 - `keyringState`;
 - `durationMs`;
+- `requestHeaderProfile`;
+- `httpStatusCode`;
 - `httpStatusClass`;
+- `contentTypeClass`;
+- `redirectPresent`;
+- `redirectHostClass`;
 - `redirectBlocked`;
-- `responseBytes`;
+- `responseBodyClass`;
+- `responseSizeBucket`;
 - `redactionClass`;
 - `recoverable`.
 
 Forbidden diagnostic details include paths, cookie names/values, full headers,
-raw URLs with query/fragment data, raw emails, account IDs, stdout/stderr, raw
-provider payloads, and nested objects containing unbounded data.
+raw URLs with query/fragment data, redirect locations, raw emails, account IDs,
+stdout/stderr, raw provider payloads, and nested objects containing unbounded
+data.
 
 Browser-import diagnostics should be available through `TestBrowserImport`
 results and through a future reserved diagnostics selector `browser_import`.

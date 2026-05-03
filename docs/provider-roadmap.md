@@ -49,6 +49,9 @@ Task 04D.1 implementation status:
   unavailable, parse error, timeout, redirect rejection, and response-size cap;
 - a daemon-only real HTTP transport exists for one bounded static GET to
   `https://chatgpt.com/codex/settings/usage`;
+- that static GET uses a fixed browser-like navigation header profile and
+  public diagnostics report only `requestHeaderProfile="browser_like"`, never
+  raw request headers;
 - production `linux_web` refresh has no live provider fetch configured by
   default and returns `linux_web_live_http_disabled` unless the explicit live
   reconnaissance gates are set;
@@ -58,6 +61,11 @@ Task 04D.1 implementation status:
 - the live reconnaissance path classifies status, redirect, timeout,
   response-size, content-type, and parse outcomes safely without storing raw
   bodies or headers;
+- 401/403 classify as provider cookie rejection, 429 as rate-limited provider
+  unavailable, 5xx as provider unavailable, blocked redirects as
+  `redirect_blocked`, allowed non-login redirects as `redirect_blocked` because
+  redirect following is disabled, and other non-success statuses as `non_200` in
+  the safe live reconnaissance summary;
 - Codex live cookie scope is temporarily `chatgpt.com` domain-wide because
   required cookie names have not been verified; this is not production
   enablement;

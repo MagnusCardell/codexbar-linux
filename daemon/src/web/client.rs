@@ -5,12 +5,25 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::header::{
-    HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, COOKIE, LOCATION, USER_AGENT,
+    HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, PRAGMA,
+    USER_AGENT,
 };
 use reqwest::Client;
 
 use crate::browser::session_material::CookieHeader;
 use crate::web::policy::CodexWebPolicy;
+
+const REQUEST_HEADER_PROFILE_BROWSER_LIKE: &str = "browser_like";
+const BROWSER_LIKE_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const BROWSER_LIKE_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+const BROWSER_LIKE_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+const BROWSER_LIKE_CACHE_CONTROL: &str = "no-cache";
+const BROWSER_LIKE_PRAGMA: &str = "no-cache";
+const BROWSER_LIKE_EXTRA_HEADERS: &[(&str, &str)] = &[
+    ("Sec-Fetch-Dest", "document"),
+    ("Sec-Fetch-Mode", "navigate"),
+    ("Sec-Fetch-Site", "none"),
+];
 
 #[derive(Clone)]
 pub struct WebRequest {
@@ -18,6 +31,7 @@ pub struct WebRequest {
     user_agent: String,
     accept: String,
     accept_language: Option<String>,
+    request_header_profile: &'static str,
     session_header: Option<CookieHeader>,
     timeout: Duration,
     response_size_limit: usize,
@@ -27,9 +41,10 @@ impl WebRequest {
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
-            user_agent: "codexbar-linux/0 web-fixture-boundary".to_string(),
-            accept: "text/html,application/json;q=0.9,*/*;q=0.1".to_string(),
-            accept_language: Some("en-US,en;q=0.8".to_string()),
+            user_agent: BROWSER_LIKE_USER_AGENT.to_string(),
+            accept: BROWSER_LIKE_ACCEPT.to_string(),
+            accept_language: Some(BROWSER_LIKE_ACCEPT_LANGUAGE.to_string()),
+            request_header_profile: REQUEST_HEADER_PROFILE_BROWSER_LIKE,
             session_header: None,
             timeout: Duration::from_secs(15),
             response_size_limit: 512 * 1024,
@@ -46,6 +61,10 @@ impl WebRequest {
 
     pub fn response_size_limit(&self) -> usize {
         self.response_size_limit
+    }
+
+    pub fn request_header_profile(&self) -> &'static str {
+        self.request_header_profile
     }
 
     pub fn session_material_attached(&self) -> bool {
@@ -79,6 +98,7 @@ impl fmt::Debug for WebRequest {
             .field("user_agent", &self.user_agent)
             .field("accept", &self.accept)
             .field("accept_language", &self.accept_language)
+            .field("request_header_profile", &self.request_header_profile)
             .field(
                 "session_material_attached",
                 &self.session_material_attached(),
@@ -98,6 +118,8 @@ pub struct WebResponse {
     status: u16,
     final_url: String,
     redirect_url: Option<String>,
+    redirect_present: bool,
+    redirect_invalid: bool,
     body: Vec<u8>,
     content_type: Option<String>,
 }
@@ -108,6 +130,8 @@ impl WebResponse {
             status,
             final_url: final_url.into(),
             redirect_url: None,
+            redirect_present: false,
+            redirect_invalid: false,
             body: body.into(),
             content_type: None,
         }
@@ -115,6 +139,8 @@ impl WebResponse {
 
     pub fn with_redirect(mut self, redirect_url: impl Into<String>) -> Self {
         self.redirect_url = Some(redirect_url.into());
+        self.redirect_present = true;
+        self.redirect_invalid = false;
         self
     }
 
@@ -124,7 +150,16 @@ impl WebResponse {
     }
 
     pub fn with_optional_redirect(mut self, redirect_url: Option<String>) -> Self {
+        self.redirect_present = redirect_url.is_some();
+        self.redirect_invalid = false;
         self.redirect_url = redirect_url;
+        self
+    }
+
+    pub fn with_invalid_redirect_for_tests(mut self) -> Self {
+        self.redirect_url = None;
+        self.redirect_present = true;
+        self.redirect_invalid = true;
         self
     }
 
@@ -145,6 +180,14 @@ impl WebResponse {
         self.redirect_url.as_deref()
     }
 
+    pub fn redirect_present(&self) -> bool {
+        self.redirect_present
+    }
+
+    pub fn redirect_invalid(&self) -> bool {
+        self.redirect_invalid
+    }
+
     pub fn body(&self) -> &[u8] {
         &self.body
     }
@@ -159,7 +202,8 @@ impl fmt::Debug for WebResponse {
         f.debug_struct("WebResponse")
             .field("status", &self.status)
             .field("final_url", &redacted_url_shape(&self.final_url))
-            .field("redirect_present", &self.redirect_url.is_some())
+            .field("redirect_present", &self.redirect_present)
+            .field("redirect_invalid", &self.redirect_invalid)
             .field("body_bytes", &self.body.len())
             .field("body", &"[redacted]")
             .field(
@@ -279,6 +323,7 @@ impl WebClient for FakeWebClient {
         if let Ok(mut requests) = self.requests.lock() {
             requests.push(FakeRecordedRequest {
                 url: request.url().to_string(),
+                request_header_profile: request.request_header_profile().to_string(),
                 session_material_attached: request.session_material_attached(),
                 session_material_bytes: request.session_material_bytes(),
                 timeout_ms: request.timeout().as_millis() as u64,
@@ -310,6 +355,19 @@ impl ReqwestStaticGetClient {
 
     pub fn validate_request_for_tests(request: &WebRequest) -> Result<(), WebClientError> {
         Self::validate_request(request)
+    }
+
+    #[doc(hidden)]
+    pub fn static_browser_like_headers_for_tests() -> Vec<(&'static str, &'static str)> {
+        let mut headers = vec![
+            ("User-Agent", BROWSER_LIKE_USER_AGENT),
+            ("Accept", BROWSER_LIKE_ACCEPT),
+            ("Accept-Language", BROWSER_LIKE_ACCEPT_LANGUAGE),
+            ("Cache-Control", BROWSER_LIKE_CACHE_CONTROL),
+            ("Pragma", BROWSER_LIKE_PRAGMA),
+        ];
+        headers.extend_from_slice(BROWSER_LIKE_EXTRA_HEADERS);
+        headers
     }
 
     fn validate_request(request: &WebRequest) -> Result<(), WebClientError> {
@@ -354,19 +412,25 @@ impl ReqwestStaticGetClient {
             .get(request.url())
             .header(USER_AGENT, header_value(&request.user_agent)?)
             .header(ACCEPT, header_value(&request.accept)?)
+            .header(CACHE_CONTROL, header_value(BROWSER_LIKE_CACHE_CONTROL)?)
+            .header(PRAGMA, header_value(BROWSER_LIKE_PRAGMA)?)
             .header(COOKIE, header_value(session_header.as_str())?);
         if let Some(accept_language) = &request.accept_language {
             builder = builder.header(ACCEPT_LANGUAGE, header_value(accept_language)?);
+        }
+        for (name, value) in BROWSER_LIKE_EXTRA_HEADERS {
+            builder = builder.header(*name, header_value(value)?);
         }
 
         let response = builder.send().await.map_err(classify_reqwest_error)?;
         let status = response.status().as_u16();
         let final_url = response.url().as_str().to_string();
-        let redirect_url = response
-            .headers()
-            .get(LOCATION)
+        let location = response.headers().get(LOCATION);
+        let redirect_present = location.is_some();
+        let redirect_url = location
             .and_then(|value| value.to_str().ok())
             .and_then(|location| resolve_redirect_url(&final_url, location));
+        let redirect_invalid = redirect_present && redirect_url.is_none();
         let content_type = response
             .headers()
             .get(CONTENT_TYPE)
@@ -374,9 +438,13 @@ impl ReqwestStaticGetClient {
             .map(str::to_string);
         let body = read_limited_body(response, request.response_size_limit()).await?;
 
-        Ok(WebResponse::new(status, final_url, body)
+        let mut response = WebResponse::new(status, final_url, body)
             .with_optional_redirect(redirect_url)
-            .with_optional_content_type(content_type))
+            .with_optional_content_type(content_type);
+        if redirect_invalid {
+            response = response.with_invalid_redirect_for_tests();
+        }
+        Ok(response)
     }
 }
 
@@ -479,6 +547,7 @@ enum FakeWebOutcome {
 #[derive(Clone, Eq, PartialEq)]
 pub struct FakeRecordedRequest {
     pub url: String,
+    pub request_header_profile: String,
     pub session_material_attached: bool,
     pub session_material_bytes: usize,
     pub timeout_ms: u64,
@@ -489,6 +558,7 @@ impl fmt::Debug for FakeRecordedRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FakeRecordedRequest")
             .field("url", &redacted_url_shape(&self.url))
+            .field("request_header_profile", &self.request_header_profile)
             .field("session_material_attached", &self.session_material_attached)
             .field(
                 "session_material_size",

@@ -9,7 +9,7 @@ use crate::model::{
     ProviderStatus, SemanticSource, SourceAdapter, Usage,
 };
 use crate::redact;
-use crate::web::client::{WebClient, WebClientError};
+use crate::web::client::{WebClient, WebClientError, WebRequest, WebResponse};
 use crate::web::diagnostics;
 use crate::web::policy::CodexWebPolicy;
 
@@ -80,17 +80,17 @@ where
         );
     };
 
+    let request = policy
+        .dashboard_request()
+        .with_session_header(session_header);
     let mut events = vec![diagnostics::event(
         diagnostics::FETCH_STARTED,
         DiagnosticSeverity::Info,
         "Codex web fetch started",
         now,
         PROVIDER_ID,
-        BTreeMap::new(),
+        request_metadata_details(&request),
     )];
-    let request = policy
-        .dashboard_request()
-        .with_session_header(session_header);
     let response = match client.request(request).await {
         Ok(response) => response,
         Err(WebClientError::Timeout) => {
@@ -149,18 +149,22 @@ where
         }
     };
 
+    let content_type_class = response_content_type_class(response.content_type());
     let final_url_allowed = policy.validate_dashboard_url(response.final_url()).is_ok();
     let redirect_allowed = response
         .redirect_url()
         .is_none_or(|url| policy.validate_redirect_url(url).is_ok());
-    if !final_url_allowed || !redirect_allowed {
+    if response.redirect_invalid() || !final_url_allowed || !redirect_allowed {
+        let mut details =
+            response_metadata_details(&response, redirect_allowed, content_type_class);
+        details.insert("redirectBlocked".to_string(), Value::Bool(true));
         events.push(diagnostics::event(
             diagnostics::REDIRECT_BLOCKED,
             DiagnosticSeverity::Warning,
             "Codex web redirect target was blocked by policy",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[("redirectBlocked", Value::Bool(true))]),
+            details,
         ));
         return failure_with_extra_codes(
             ProviderState::ProviderUnavailable,
@@ -183,10 +187,7 @@ where
                 "Codex web fetch returned an authentication redirect status",
                 now,
                 PROVIDER_ID,
-                diagnostics::details(&[(
-                    "httpStatusClass",
-                    Value::from(status_class(response.status())),
-                )]),
+                response_metadata_details(&response, redirect_allowed, content_type_class),
             ));
         }
         events.push(diagnostics::event(
@@ -207,6 +208,28 @@ where
         );
     }
 
+    if (300..=399).contains(&response.status()) && response.redirect_present() {
+        let mut details =
+            response_metadata_details(&response, redirect_allowed, content_type_class);
+        details.insert("redirectBlocked".to_string(), Value::Bool(true));
+        events.push(diagnostics::event(
+            diagnostics::REDIRECT_BLOCKED,
+            DiagnosticSeverity::Warning,
+            "Codex web redirect was not followed by policy",
+            now,
+            PROVIDER_ID,
+            details,
+        ));
+        return failure_with_extra_codes(
+            ProviderState::ProviderUnavailable,
+            diagnostics::REDIRECT_BLOCKED,
+            "Codex web redirect was not followed by policy",
+            now,
+            events,
+            &preflight_codes,
+        );
+    }
+
     if response.body().len() > policy.response_size_limit() {
         events.push(diagnostics::event(
             diagnostics::RESPONSE_TOO_LARGE,
@@ -214,7 +237,7 @@ where
             "Codex web response exceeded the configured size limit",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[("responseBytes", Value::from(response.body().len() as u64))]),
+            response_metadata_details(&response, redirect_allowed, content_type_class),
         ));
         return failure_with_extra_codes(
             ProviderState::ParseError,
@@ -233,7 +256,7 @@ where
             "Codex web fetch was rate limited",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[("httpStatusClass", Value::from("4xx"))]),
+            response_metadata_details(&response, redirect_allowed, content_type_class),
         ));
         return failure_with_extra_codes(
             ProviderState::ProviderUnavailable,
@@ -252,10 +275,7 @@ where
             "Codex web fetch returned an authentication rejection status",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[(
-                "httpStatusClass",
-                Value::from(status_class(response.status())),
-            )]),
+            response_metadata_details(&response, redirect_allowed, content_type_class),
         ));
         events.push(diagnostics::event(
             diagnostics::COOKIE_REJECTED,
@@ -282,10 +302,7 @@ where
             "Codex web fetch returned an unsuccessful status",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[(
-                "httpStatusClass",
-                Value::from(status_class(response.status())),
-            )]),
+            response_metadata_details(&response, redirect_allowed, content_type_class),
         ));
         return failure_with_extra_codes(
             ProviderState::ProviderUnavailable,
@@ -297,7 +314,6 @@ where
         );
     }
 
-    let content_type_class = response_content_type_class(response.content_type());
     if !content_type_allowed(content_type_class) {
         events.push(diagnostics::event(
             diagnostics::FETCH_PARSE_ERROR,
@@ -305,7 +321,7 @@ where
             "Codex web response content type was not supported",
             now,
             PROVIDER_ID,
-            diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
+            response_metadata_details(&response, redirect_allowed, content_type_class),
         ));
         return failure_with_extra_codes(
             ProviderState::ParseError,
@@ -327,7 +343,7 @@ where
                 "Codex web response could not be parsed",
                 now,
                 PROVIDER_ID,
-                diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
+                response_metadata_details(&response, redirect_allowed, content_type_class),
             ));
             return failure_with_extra_codes(
                 ProviderState::ParseError,
@@ -384,7 +400,7 @@ where
                 "Codex web fetch finished",
                 now,
                 PROVIDER_ID,
-                diagnostics::details(&[("contentTypeClass", Value::from(content_type_class))]),
+                response_metadata_details(&response, redirect_allowed, content_type_class),
             ));
             events.push(diagnostics::event(
                 diagnostics::FETCH_REDACTION_APPLIED,
@@ -636,17 +652,93 @@ fn state_indicator(state: ProviderState) -> &'static str {
 
 fn status_class(status: u16) -> &'static str {
     match status {
-        100..=199 => "1xx",
-        200..=299 => "2xx",
-        300..=399 => "3xx",
-        400..=499 => "4xx",
-        500..=599 => "5xx",
+        100..=199 => "informational",
+        200..=299 => "success",
+        300..=399 => "redirect",
+        400..=499 => "client_error",
+        500..=599 => "server_error",
         _ => "unknown",
     }
 }
 
 fn provider_rejected_status(status: u16) -> bool {
     matches!(status, 401 | 403)
+}
+
+fn request_metadata_details(request: &WebRequest) -> BTreeMap<String, Value> {
+    diagnostics::details(&[(
+        "requestHeaderProfile",
+        Value::from(request.request_header_profile()),
+    )])
+}
+
+fn response_metadata_details(
+    response: &WebResponse,
+    redirect_allowed: bool,
+    content_type_class: &'static str,
+) -> BTreeMap<String, Value> {
+    diagnostics::details(&[
+        ("httpStatusCode", Value::from(response.status() as u64)),
+        (
+            "httpStatusClass",
+            Value::from(status_class(response.status())),
+        ),
+        ("redirectPresent", Value::Bool(response.redirect_present())),
+        (
+            "redirectHostClass",
+            Value::from(redirect_host_class(response, redirect_allowed)),
+        ),
+        ("contentTypeClass", Value::from(content_type_class)),
+        (
+            "responseBodyClass",
+            Value::from(response_body_class(response)),
+        ),
+        (
+            "responseSizeBucket",
+            Value::from(response_size_bucket(response)),
+        ),
+    ])
+}
+
+fn redirect_host_class(response: &WebResponse, redirect_allowed: bool) -> &'static str {
+    if response.redirect_invalid() {
+        "invalid"
+    } else if response.redirect_url().is_some() && redirect_allowed {
+        "allowed"
+    } else if response.redirect_url().is_some() {
+        "blocked"
+    } else if (300..=399).contains(&response.status()) {
+        "missing"
+    } else {
+        "none"
+    }
+}
+
+fn response_body_class(response: &WebResponse) -> &'static str {
+    if response.body().len() > CodexWebPolicy::new().response_size_limit() {
+        "too_large"
+    } else if response.body().is_empty() {
+        "empty"
+    } else if std::str::from_utf8(response.body()).is_err() {
+        "invalid_encoding"
+    } else {
+        "within_cap"
+    }
+}
+
+fn response_size_bucket(response: &WebResponse) -> &'static str {
+    let bytes = response.body().len();
+    if bytes > CodexWebPolicy::new().response_size_limit() {
+        "capped"
+    } else if bytes == 0 {
+        "zero"
+    } else if bytes <= 16 * 1024 {
+        "small"
+    } else if bytes <= 128 * 1024 {
+        "medium"
+    } else {
+        "large"
+    }
 }
 
 fn response_content_type_class(content_type: Option<&str>) -> &'static str {

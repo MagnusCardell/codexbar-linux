@@ -18,8 +18,9 @@ use codexbar_linuxd::browser::session_material::{ScopedCookie, SessionMaterial};
 use codexbar_linuxd::browser::{self, BrowserSessionRequest};
 use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{
-    Provider, ProviderState, RefreshProviderResult, RefreshProviderStatus, RefreshReason,
-    RefreshResult, RefreshStatus, SemanticSource, Snapshot, SourceAdapter,
+    DiagnosticEvent, Diagnostics, Provider, ProviderState, RefreshProviderResult,
+    RefreshProviderStatus, RefreshReason, RefreshResult, RefreshStatus, SemanticSource, Snapshot,
+    SourceAdapter,
 };
 use codexbar_linuxd::web::client::{
     CodexWebFixture, FakeWebClient, ReqwestStaticGetClient, WebClient, WebClientError, WebRequest,
@@ -126,6 +127,42 @@ fn reqwest_live_client_rejects_non_static_hosts_before_network() {
     );
 }
 
+#[test]
+fn codex_dashboard_get_uses_static_browser_like_header_profile() {
+    let request = CodexWebPolicy::new().dashboard_request();
+    assert_eq!(request.request_header_profile(), "browser_like");
+
+    let headers = ReqwestStaticGetClient::static_browser_like_headers_for_tests();
+    assert_eq!(
+        headers,
+        vec![
+            (
+                "User-Agent",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ),
+            (
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ),
+            ("Accept-Language", "en-US,en;q=0.9"),
+            ("Cache-Control", "no-cache"),
+            ("Pragma", "no-cache"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Site", "none"),
+        ]
+    );
+    for (name, _value) in headers {
+        assert!(
+            !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "cookie" | "authorization" | "set-cookie" | "origin" | "referer" | "x-csrf-token"
+            ),
+            "static header profile exposed forbidden header {name}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn async_reqwest_live_client_drops_inside_tokio_context_without_panic() {
     let client = ReqwestStaticGetClient::new();
@@ -160,6 +197,13 @@ fn fake_success_response_normalizes_to_schema_valid_linux_web_snapshot() {
     .expect("web refresh");
 
     assert_eq!(client.requests().len(), 1);
+    assert_eq!(client.requests()[0].request_header_profile, "browser_like");
+    let started = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_STARTED);
+    assert_allowed_response_detail_keys(started);
+    assert_eq!(
+        started.details.get("requestHeaderProfile"),
+        Some(&serde_json::Value::from("browser_like"))
+    );
     let provider = &refresh.snapshot.providers[0];
     assert_eq!(provider.provider, "codex");
     assert_eq!(provider.state, ProviderState::Ok);
@@ -314,6 +358,28 @@ fn non_200_response_maps_to_provider_unavailable() {
     assert!(provider
         .diagnostic_codes
         .contains(&diagnostics::FETCH_NONZERO_STATUS.to_string()));
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_NONZERO_STATUS);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(status as u64))
+    );
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("server_error"))
+    );
+    assert_eq!(
+        event.details.get("redirectPresent"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("none"))
+    );
+    assert_eq!(
+        event.details.get("responseBodyClass"),
+        Some(&serde_json::Value::from("within_cap"))
+    );
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
@@ -336,11 +402,50 @@ fn auth_rejection_status_maps_to_cookie_rejected_without_body_exposure() {
         assert!(provider
             .diagnostic_codes
             .contains(&diagnostics::FETCH_NONZERO_STATUS.to_string()));
+        let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_NONZERO_STATUS);
+        assert_allowed_response_detail_keys(event);
+        assert_eq!(
+            event.details.get("httpStatusCode"),
+            Some(&serde_json::Value::from(status as u64))
+        );
+        assert_eq!(
+            event.details.get("httpStatusClass"),
+            Some(&serde_json::Value::from("client_error"))
+        );
         assert!(!payload.contains("Authorization"));
         assert!(!payload.contains("Bearer"));
         assert!(!payload.contains("fixture-secret"));
         assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
     }
+}
+
+#[test]
+fn rate_limit_status_maps_to_provider_unavailable_with_safe_summary() {
+    let refresh = refresh_for_response(WebResponse::new(
+        429,
+        CodexWebPolicy::new().dashboard_url(),
+        "rate-limit body marker",
+    ));
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_RATE_LIMITED);
+
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_RATE_LIMITED.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(429_u64))
+    );
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("client_error"))
+    );
+    assert!(!payload.contains("rate-limit body marker"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
 #[test]
@@ -446,7 +551,7 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
     let descriptor = fixture_json("redirect_wrong_host.json");
     let location = descriptor["location"].as_str().expect("location");
     let client = FakeWebClient::responding(
-        WebResponse::new(200, CodexWebPolicy::new().dashboard_url(), "{}").with_redirect(location),
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "{}").with_redirect(location),
     );
     let refresh = block_on_web(web::refresh_with_client(
         web_request(Some(session())),
@@ -459,6 +564,107 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
     assert!(provider
         .diagnostic_codes
         .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(302_u64))
+    );
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("redirect"))
+    );
+    assert_eq!(
+        event.details.get("redirectPresent"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("blocked"))
+    );
+    assert_eq!(
+        event.details.get("redirectBlocked"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn allowed_non_login_redirect_status_is_blocked_without_following() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect(CodexWebPolicy::new().dashboard_url()),
+    );
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(302_u64))
+    );
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("redirect"))
+    );
+    assert_eq!(
+        event.details.get("redirectPresent"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("allowed"))
+    );
+    assert_eq!(
+        event.details.get("redirectBlocked"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert!(!payload.contains("Location"));
+    assert!(!payload.contains("/codex/settings/usage"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn invalid_redirect_location_is_blocked_without_location_exposure() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_invalid_redirect_for_tests(),
+    );
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("redirectPresent"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("invalid"))
+    );
+    assert!(!payload.contains("Location"));
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
@@ -484,6 +690,16 @@ fn allowed_login_redirect_maps_to_cookie_rejected_without_location_exposure() {
     assert!(provider
         .diagnostic_codes
         .contains(&diagnostics::FETCH_NONZERO_STATUS.to_string()));
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_NONZERO_STATUS);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("redirect"))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("allowed"))
+    );
     assert!(!payload.contains("auth/login"));
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
@@ -634,6 +850,7 @@ fn live_recon_summary_filters_to_safe_stable_fields() {
     assert_eq!(summary.provider_state, ProviderState::Ok);
     assert_eq!(summary.source, SemanticSource::Web);
     assert_eq!(summary.source_adapter, SourceAdapter::LinuxWeb);
+    assert_eq!(summary.request_header_profile, "browser_like");
     assert_eq!(
         summary.classification,
         LiveReconClassification::ParserSucceeded
@@ -661,6 +878,47 @@ fn live_recon_summary_filters_to_safe_stable_fields() {
     assert!(!summary_json.contains("user@example.invalid"));
     common::assert_public_json_safe(&summary_json);
     assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
+}
+
+#[test]
+fn live_recon_summary_includes_safe_http_response_metadata_only() {
+    let refresh = refresh_for_response(
+        WebResponse::new(
+            503,
+            CodexWebPolicy::new().dashboard_url(),
+            "summary response body marker",
+        )
+        .with_content_type("text/plain; charset=utf-8"),
+    );
+    let provider = &refresh.snapshot.providers[0];
+    let result = recon_refresh_result(RefreshStatus::Error, false, []);
+
+    let summary = LiveReconSummary::from_provider_result_material_and_diagnostics(
+        provider,
+        &result,
+        codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary::default(),
+        &refresh.diagnostics,
+    );
+    let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    assert_eq!(summary.classification, LiveReconClassification::Non200);
+    assert_eq!(summary.request_header_profile, "browser_like");
+    assert_eq!(summary.http_response.http_status_code, Some(503));
+    assert_eq!(summary.http_response.http_status_class, "server_error");
+    assert!(!summary.http_response.redirect_present);
+    assert_eq!(summary.http_response.redirect_host_class, "none");
+    assert_eq!(summary.http_response.content_type_class, "text");
+    assert_eq!(summary.http_response.response_body_class, "within_cap");
+    assert_eq!(summary.http_response.response_size_bucket, "small");
+    assert!(summary_json.contains(r#""httpStatusCode":503"#));
+    assert!(summary_json.contains(r#""httpStatusClass":"server_error""#));
+    assert!(!summary_json.contains("summary response body marker"));
+    assert!(!summary_json.contains("Location"));
+    assert!(!summary_json.contains("Set-Cookie"));
+    assert!(!summary_json.contains("Cookie:"));
+    assert!(!summary_json.contains("Authorization"));
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web response summary", &summary_json);
 }
 
 #[test]
@@ -901,6 +1159,10 @@ fn live_recon_summary_classifies_required_outcomes() {
         assert_eq!(summary.cookie_presence, cookie_presence);
         assert_eq!(summary.web_fetch, web_fetch);
         let summary_json = serde_json::to_string(&summary).expect("summary json");
+        if classification == LiveReconClassification::Non200 {
+            assert!(summary_json.contains(r#""classification":"non_200""#));
+            assert!(!summary_json.contains(r#""classification":"non200""#));
+        }
         common::assert_public_json_safe(&summary_json);
         assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
     }
@@ -1373,6 +1635,7 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
             | "provider_cookie_rejected"
             | "provider_redirect_blocked"
             | "provider_web_fetch_nonzero_status"
+            | "provider_web_fetch_rate_limited"
             | "provider_web_fetch_parse_error"
             | "provider_web_fetch_finished"
             | "provider_web_fetch_timeout"
@@ -1380,6 +1643,8 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
     )));
 
     let diagnostics_json = app.get_diagnostics_json("codex").expect("diagnostics");
+    let diagnostics_payload: Diagnostics =
+        serde_json::from_str(&diagnostics_json).expect("diagnostics payload");
     common::assert_public_json_safe(&diagnostics_json);
     assert_no_live_web_secret_markers("live Codex web diagnostics", &diagnostics_json);
     assert_no_live_web_fake_home_path("live Codex web diagnostics", &diagnostics_json, &fake_home);
@@ -1396,8 +1661,12 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
     }
 
     let material_summary = live_cookie_material_summary(&fake_home);
-    let summary =
-        LiveReconSummary::from_provider_result_and_material(provider, &result, material_summary);
+    let summary = LiveReconSummary::from_provider_result_material_and_diagnostics(
+        provider,
+        &result,
+        material_summary,
+        &diagnostics_payload.events,
+    );
     let summary_json = serde_json::to_string(&summary).expect("live recon summary json");
     common::assert_public_json_safe(&summary_json);
     assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
@@ -1638,6 +1907,9 @@ struct LiveReconSummary {
     cache_written: bool,
     source: SemanticSource,
     source_adapter: SourceAdapter,
+    request_header_profile: String,
+    #[serde(flatten)]
+    http_response: LiveReconHttpResponseSummary,
     classification: LiveReconClassification,
     diagnostic_codes: Vec<String>,
     cookie_material: codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary,
@@ -1647,15 +1919,19 @@ struct LiveReconSummary {
 }
 
 impl LiveReconSummary {
-    fn from_provider_result_and_material(
+    fn from_provider_result_material_and_diagnostics(
         provider: &Provider,
         result: &RefreshResult,
         cookie_material: codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary,
+        diagnostics: &[DiagnosticEvent],
     ) -> Self {
         let diagnostic_codes = safe_recon_diagnostic_codes(provider, result);
         let classification = classify_live_recon(provider.state, &diagnostic_codes);
         let cookie_presence = classify_cookie_presence(&diagnostic_codes);
         let web_fetch = classify_web_fetch(&diagnostic_codes);
+        let request_header_profile = recon_request_header_profile(diagnostics);
+        let http_response =
+            LiveReconHttpResponseSummary::from_diagnostics(diagnostics, &diagnostic_codes);
         Self {
             provider: "codex".to_string(),
             provider_state: provider.state,
@@ -1663,6 +1939,8 @@ impl LiveReconSummary {
             cache_written: result.cache_written,
             source: SemanticSource::Web,
             source_adapter: SourceAdapter::LinuxWeb,
+            request_header_profile,
+            http_response,
             classification,
             diagnostic_codes,
             cookie_material,
@@ -1670,6 +1948,14 @@ impl LiveReconSummary {
             web_fetch,
             redaction_applied: true,
         }
+    }
+
+    fn from_provider_result_and_material(
+        provider: &Provider,
+        result: &RefreshResult,
+        cookie_material: codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary,
+    ) -> Self {
+        Self::from_provider_result_material_and_diagnostics(provider, result, cookie_material, &[])
     }
 
     fn from_provider_and_result(provider: &Provider, result: &RefreshResult) -> Self {
@@ -1681,6 +1967,104 @@ impl LiveReconSummary {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveReconHttpResponseSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_status_code: Option<u16>,
+    http_status_class: String,
+    redirect_present: bool,
+    redirect_host_class: String,
+    content_type_class: String,
+    response_body_class: String,
+    response_size_bucket: String,
+}
+
+impl LiveReconHttpResponseSummary {
+    fn from_diagnostics(events: &[DiagnosticEvent], codes: &[String]) -> Self {
+        let mut summary = Self {
+            http_status_code: None,
+            http_status_class: "unknown".to_string(),
+            redirect_present: false,
+            redirect_host_class: "none".to_string(),
+            content_type_class: "missing".to_string(),
+            response_body_class: if has_code(codes, diagnostics::RESPONSE_TOO_LARGE) {
+                "too_large".to_string()
+            } else {
+                "not_read".to_string()
+            },
+            response_size_bucket: if has_code(codes, diagnostics::RESPONSE_TOO_LARGE) {
+                "capped".to_string()
+            } else {
+                "zero".to_string()
+            },
+        };
+
+        let Some(event) = events
+            .iter()
+            .rev()
+            .find(|event| event.details.contains_key("httpStatusCode"))
+        else {
+            return summary;
+        };
+
+        summary.http_status_code = event
+            .details
+            .get("httpStatusCode")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok());
+        summary.http_status_class = safe_detail_class(
+            event,
+            "httpStatusClass",
+            &[
+                "informational",
+                "success",
+                "redirect",
+                "client_error",
+                "server_error",
+                "unknown",
+            ],
+            "unknown",
+        );
+        summary.redirect_present = event
+            .details
+            .get("redirectPresent")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        summary.redirect_host_class = safe_detail_class(
+            event,
+            "redirectHostClass",
+            &["none", "allowed", "blocked", "missing", "invalid"],
+            "none",
+        );
+        summary.content_type_class = safe_detail_class(
+            event,
+            "contentTypeClass",
+            &["html", "json", "text", "other", "missing"],
+            "missing",
+        );
+        summary.response_body_class = safe_detail_class(
+            event,
+            "responseBodyClass",
+            &[
+                "not_read",
+                "empty",
+                "within_cap",
+                "too_large",
+                "invalid_encoding",
+            ],
+            "not_read",
+        );
+        summary.response_size_bucket = safe_detail_class(
+            event,
+            "responseSizeBucket",
+            &["zero", "small", "medium", "large", "capped"],
+            "zero",
+        );
+        summary
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 enum LiveReconClassification {
@@ -1689,6 +2073,7 @@ enum LiveReconClassification {
     LoginRequired,
     ProviderCookieRejected,
     RedirectBlocked,
+    #[serde(rename = "non_200")]
     Non200,
     ParseError,
     Timeout,
@@ -1964,6 +2349,32 @@ fn has_any_code(codes: &[String], expected: &[&str]) -> bool {
     expected.iter().any(|expected| has_code(codes, expected))
 }
 
+fn recon_request_header_profile(events: &[DiagnosticEvent]) -> String {
+    events
+        .iter()
+        .find(|event| event.code == diagnostics::FETCH_STARTED)
+        .and_then(|event| event.details.get("requestHeaderProfile"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|profile| matches!(*profile, "minimal" | "browser_like"))
+        .unwrap_or("browser_like")
+        .to_string()
+}
+
+fn safe_detail_class(
+    event: &DiagnosticEvent,
+    key: &str,
+    allowed: &[&str],
+    fallback: &str,
+) -> String {
+    event
+        .details
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| allowed.iter().any(|allowed| allowed == value))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
 fn recon_provider(state: ProviderState, codes: Vec<&'static str>) -> Provider {
     let mut refresh = refresh_for_response(html_response("dashboard_success.html"));
     let provider = &mut refresh.snapshot.providers[0];
@@ -2038,6 +2449,33 @@ fn fixture_text(name: &str) -> String {
 
 fn fixture_json(name: &str) -> serde_json::Value {
     serde_json::from_str(&fixture_text(name)).expect("fixture json")
+}
+
+fn find_diagnostic<'a>(events: &'a [DiagnosticEvent], code: &str) -> &'a DiagnosticEvent {
+    events
+        .iter()
+        .find(|event| event.code == code)
+        .unwrap_or_else(|| panic!("diagnostic event {code} not found"))
+}
+
+fn assert_allowed_response_detail_keys(event: &DiagnosticEvent) {
+    for key in event.details.keys() {
+        assert!(
+            matches!(
+                key.as_str(),
+                "contentTypeClass"
+                    | "httpStatusCode"
+                    | "httpStatusClass"
+                    | "redirectBlocked"
+                    | "redirectHostClass"
+                    | "redirectPresent"
+                    | "requestHeaderProfile"
+                    | "responseBodyClass"
+                    | "responseSizeBucket"
+            ),
+            "unexpected safe response detail key {key}"
+        );
+    }
 }
 
 fn assert_payloads_are_schema_valid_and_public(

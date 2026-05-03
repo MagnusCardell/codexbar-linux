@@ -50,6 +50,32 @@ static request. Cookie names are not yet verified, so the temporary domain-wide
 cookie exception applies only to marked throwaway reconnaissance and must be
 narrowed or justified with live provider evidence before production enablement.
 
+## Task 04D.1C Status
+
+Complete as a safe transport/reporting refinement. The Codex dashboard GET now
+uses a static browser-like navigation request header profile, and public output
+reports only `requestHeaderProfile="browser_like"` rather than raw request
+headers. Response diagnostics include only bounded scalar HTTP metadata:
+`httpStatusCode`, `httpStatusClass`, `redirectPresent`, `redirectHostClass`,
+`contentTypeClass`, `responseBodyClass`, `responseSizeBucket`, and
+`redirectBlocked` where relevant.
+
+Status mapping is explicit for the covered non-2xx cases: 401/403 become
+`cookie_rejected`, 429 becomes rate-limited `provider_unavailable`, 5xx becomes
+`provider_unavailable`, blocked 3xx redirects become `redirect_blocked`, and
+allowed non-login 3xx responses also classify as `redirect_blocked` because
+redirect following is disabled. The safe live reconnaissance classification
+spelling is `non_200`.
+
+This refinement does not change parsers, does not promote live bodies or
+fixtures, does not enable default live provider fetch, does not scan real
+browser profiles, does not add keyring work, and does not change Shell, D-Bus
+XML, JSON schemas, or TCP/localhost surfaces.
+
+The gated signed-in live rerun was not performed in this workspace because no
+marked throwaway home was available through `CODEXBAR_WEB_HOME` or
+`CODEXBAR_BROWSER_IMPORT_FAKE_HOME`.
+
 ## Goal
 
 Implement the first daemon-only Linux web provider adapter using in-memory
