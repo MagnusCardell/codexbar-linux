@@ -403,6 +403,212 @@ fn fake_success_response_normalizes_to_schema_valid_linux_web_snapshot() {
 }
 
 #[test]
+fn parser_recon_fields_are_safe_on_fixture_success() {
+    let refresh = refresh_for_response(html_response("dashboard_success.html"));
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_FINISHED);
+
+    assert_parser_recon(
+        event,
+        true,
+        "script_json",
+        "application_json_script",
+        "none",
+        1,
+        "account,credits,unknown,usage",
+    );
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn synthetic_embedded_json_parser_shapes_normalize() {
+    for (fixture, candidate, html_class, key_classes, used_percent) in [
+        (
+            "next_data_usage_success.html",
+            "next_data_script",
+            "next_data",
+            "credits,route,unknown,usage",
+            21.0,
+        ),
+        (
+            "dashboard_success.html",
+            "application_json_script",
+            "script_json",
+            "account,credits,unknown,usage",
+            34.0,
+        ),
+        (
+            "inline_state_usage_success.html",
+            "inline_state_script",
+            "script_json",
+            "credits,unknown,usage",
+            12.0,
+        ),
+    ] {
+        let refresh = refresh_for_response(html_response(fixture));
+        let provider = &refresh.snapshot.providers[0];
+        let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_FINISHED);
+
+        assert_eq!(provider.state, ProviderState::Ok);
+        assert_eq!(
+            provider.usage.primary.as_ref().unwrap().used_percent,
+            Some(used_percent)
+        );
+        assert_parser_recon(event, true, html_class, candidate, "none", 1, key_classes);
+        assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+    }
+}
+
+#[test]
+fn app_shell_with_no_data_fails_closed_with_safe_parser_recon() {
+    let refresh = refresh_for_response(html_response("app_shell_no_data.html"));
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert_parser_recon(
+        event,
+        true,
+        "static_app_shell",
+        "none",
+        "no_candidate",
+        0,
+        "none",
+    );
+    assert!(!payload.contains("static-app-shell"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn login_shell_maps_to_cookie_rejected_with_safe_parser_recon() {
+    let refresh = refresh_for_response(html_response("login_shell.html"));
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::COOKIE_REJECTED);
+
+    assert_eq!(provider.state, ProviderState::CookieRejected);
+    assert_parser_recon(
+        event,
+        true,
+        "login_shell",
+        "html_text_fallback",
+        "no_candidate",
+        0,
+        "none",
+    );
+    assert!(!payload.contains("Log in to continue"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn embedded_json_missing_usage_fails_with_specific_parser_class() {
+    let refresh = refresh_for_response(html_response("embedded_json_missing_usage.html"));
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert_parser_recon(
+        event,
+        true,
+        "script_json",
+        "application_json_script",
+        "candidate_missing_usage_fields",
+        1,
+        "unknown,usage",
+    );
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn embedded_json_redaction_rejected_fails_without_body_leakage() {
+    let refresh = refresh_for_response(html_response("embedded_json_redaction_rejected.html"));
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert_parser_recon(
+        event,
+        true,
+        "script_json",
+        "none",
+        "candidate_redaction_rejected",
+        1,
+        "unknown,usage",
+    );
+    assert!(!payload.contains("user@example.invalid"));
+    assert!(!payload.contains("redaction-rejected"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn invalid_utf8_html_maps_to_unsupported_live_shape_without_body_leakage() {
+    let refresh = refresh_for_response(
+        WebResponse::new(
+            200,
+            CodexWebPolicy::new().dashboard_url(),
+            vec![b'<', b'h', b't', b'm', b'l', b'>', 0xff],
+        )
+        .with_content_type("text/html"),
+    );
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert_eq!(
+        event.details.get("responseBodyClass"),
+        Some(&serde_json::Value::from("invalid_encoding"))
+    );
+    assert_parser_recon(
+        event,
+        true,
+        "unknown_html",
+        "none",
+        "unsupported_live_shape",
+        0,
+        "none",
+    );
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn large_html_within_cap_has_bounded_parser_behavior() {
+    let mut body = String::from("<!doctype html><html><body><main id=\"app\"></main>");
+    body.push_str(&"x".repeat(256 * 1024));
+    body.push_str("</body></html>");
+    assert!(body.len() < CodexWebPolicy::new().response_size_limit());
+
+    let refresh = refresh_for_response(
+        WebResponse::new(200, CodexWebPolicy::new().dashboard_url(), body.as_bytes())
+            .with_content_type("text/html"),
+    );
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert_eq!(
+        event.details.get("responseSizeBucket"),
+        Some(&serde_json::Value::from("large"))
+    );
+    assert_parser_recon(
+        event,
+        true,
+        "static_app_shell",
+        "none",
+        "no_candidate",
+        0,
+        "none",
+    );
+    assert!(!payload.contains(&"x".repeat(128)));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
 fn absent_session_material_maps_to_unauthenticated_without_client_call() {
     let client = FakeWebClient::responding(html_response("dashboard_success.html"));
     let refresh =
@@ -1921,6 +2127,15 @@ fn live_recon_summary_includes_safe_http_response_metadata_only() {
     assert_eq!(summary.http_response.content_type_class, "text");
     assert_eq!(summary.http_response.response_body_class, "within_cap");
     assert_eq!(summary.http_response.response_size_bucket, "small");
+    assert_eq!(summary.http_response.html_structure_class, "unknown_html");
+    assert_eq!(summary.http_response.embedded_json_candidate_count, 0);
+    assert!(summary
+        .http_response
+        .embedded_json_safe_key_classes
+        .is_empty());
+    assert_eq!(summary.http_response.parser_candidate, "none");
+    assert_eq!(summary.http_response.parser_failure_class, "no_candidate");
+    assert!(!summary.http_response.parser_reached);
     assert!(summary_json.contains(r#""httpStatusCode":503"#));
     assert!(summary_json.contains(r#""httpStatusClass":"server_error""#));
     assert!(summary_json.contains(r#""redirectTargetClass":"none""#));
@@ -1939,6 +2154,43 @@ fn live_recon_summary_includes_safe_http_response_metadata_only() {
     assert!(!summary_json.contains("Authorization"));
     common::assert_public_json_safe(&summary_json);
     assert_no_live_web_secret_markers("live Codex web response summary", &summary_json);
+}
+
+#[test]
+fn live_recon_summary_includes_safe_parser_metadata() {
+    let refresh = refresh_for_response(html_response("next_data_usage_success.html"));
+    let provider = &refresh.snapshot.providers[0];
+    let result = recon_refresh_result(RefreshStatus::Partial, true, []);
+
+    let summary = LiveReconSummary::from_provider_result_material_and_diagnostics(
+        provider,
+        &result,
+        codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary::default(),
+        &refresh.diagnostics,
+    );
+    let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    assert_eq!(summary.http_response.html_structure_class, "next_data");
+    assert_eq!(summary.http_response.embedded_json_candidate_count, 1);
+    assert_eq!(
+        summary.http_response.embedded_json_safe_key_classes,
+        vec![
+            "credits".to_string(),
+            "route".to_string(),
+            "unknown".to_string(),
+            "usage".to_string(),
+        ]
+    );
+    assert_eq!(summary.http_response.parser_candidate, "next_data_script");
+    assert_eq!(summary.http_response.parser_failure_class, "none");
+    assert!(summary.http_response.parser_reached);
+    assert!(summary_json.contains(r#""htmlStructureClass":"next_data""#));
+    assert!(summary_json.contains(r#""embeddedJsonCandidateCount":1"#));
+    assert!(summary_json.contains(r#""parserCandidate":"next_data_script""#));
+    assert!(!summary_json.contains("__NEXT_DATA__"));
+    assert!(!summary_json.contains("codexUsage"));
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web parser summary", &summary_json);
 }
 
 #[test]
@@ -2254,8 +2506,71 @@ fn live_recon_summary_does_not_copy_diagnostic_details() {
     })
     .to_string();
 
-    let summary = LiveReconSummary::from_provider_and_result(&provider, &result);
+    let toxic_started = diagnostics::event(
+        diagnostics::FETCH_STARTED,
+        codexbar_linuxd::model::DiagnosticSeverity::Info,
+        "Codex web fetch started",
+        NOW,
+        "codex",
+        diagnostics::details(&[(
+            "requestHeaderProfile",
+            serde_json::Value::from("Authorization: Bearer fixture-secret"),
+        )]),
+    );
+    let toxic_parse = diagnostics::event(
+        diagnostics::FETCH_PARSE_ERROR,
+        codexbar_linuxd::model::DiagnosticSeverity::Warning,
+        "Codex web response could not be parsed",
+        NOW,
+        "codex",
+        diagnostics::details(&[
+            ("httpStatusCode", serde_json::Value::from(200_u64)),
+            (
+                "httpStatusClass",
+                serde_json::Value::from("Authorization: Bearer fixture-secret"),
+            ),
+            (
+                "htmlStructureClass",
+                serde_json::Value::from("/tmp/codexbar-web-live/profile/Network/Cookies"),
+            ),
+            (
+                "embeddedJsonSafeKeyClasses",
+                serde_json::Value::from("usage,user@example.invalid"),
+            ),
+            (
+                "parserCandidate",
+                serde_json::Value::from("Set-Cookie: fixture-secret"),
+            ),
+            ("parserFailureClass", serde_json::Value::from("rawResponse")),
+            (
+                "rawResponse",
+                serde_json::Value::from("Authorization: Bearer fixture-secret"),
+            ),
+            (
+                "redirectUrl",
+                serde_json::Value::from("https://chatgpt.com/auth/login?token=fixture-secret"),
+            ),
+        ]),
+    );
+
+    let summary = LiveReconSummary::from_provider_result_material_and_diagnostics(
+        &provider,
+        &result,
+        codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary::default(),
+        &[toxic_started, toxic_parse],
+    );
     let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    assert_eq!(summary.request_header_profile, "browser_like");
+    assert_eq!(summary.http_response.http_status_code, Some(200));
+    assert_eq!(summary.http_response.http_status_class, "unknown");
+    assert_eq!(summary.http_response.html_structure_class, "unknown_html");
+    assert!(summary
+        .http_response
+        .embedded_json_safe_key_classes
+        .is_empty());
+    assert_eq!(summary.http_response.parser_candidate, "none");
+    assert_eq!(summary.http_response.parser_failure_class, "no_candidate");
 
     for forbidden in [
         "rawResponse",
@@ -3055,6 +3370,12 @@ struct LiveReconHttpResponseSummary {
     content_type_class: String,
     response_body_class: String,
     response_size_bucket: String,
+    html_structure_class: String,
+    embedded_json_candidate_count: u64,
+    embedded_json_safe_key_classes: Vec<String>,
+    parser_candidate: String,
+    parser_failure_class: String,
+    parser_reached: bool,
 }
 
 impl LiveReconHttpResponseSummary {
@@ -3084,6 +3405,12 @@ impl LiveReconHttpResponseSummary {
             } else {
                 "zero".to_string()
             },
+            html_structure_class: "unknown_html".to_string(),
+            embedded_json_candidate_count: 0,
+            embedded_json_safe_key_classes: Vec::new(),
+            parser_candidate: "none".to_string(),
+            parser_failure_class: "no_candidate".to_string(),
+            parser_reached: false,
         };
 
         let Some(event) = events
@@ -3226,6 +3553,57 @@ impl LiveReconHttpResponseSummary {
             &["zero", "small", "medium", "large", "capped"],
             "zero",
         );
+        summary.html_structure_class = safe_detail_class(
+            event,
+            "htmlStructureClass",
+            &[
+                "unknown_html",
+                "script_json",
+                "next_data",
+                "login_shell",
+                "static_app_shell",
+                "error_page",
+            ],
+            "unknown_html",
+        );
+        summary.embedded_json_candidate_count = event
+            .details
+            .get("embeddedJsonCandidateCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            .min(16);
+        summary.embedded_json_safe_key_classes = safe_key_classes_detail(event);
+        summary.parser_candidate = safe_detail_class(
+            event,
+            "parserCandidate",
+            &[
+                "none",
+                "application_json_script",
+                "next_data_script",
+                "inline_state_script",
+                "html_text_fallback",
+            ],
+            "none",
+        );
+        summary.parser_failure_class = safe_detail_class(
+            event,
+            "parserFailureClass",
+            &[
+                "none",
+                "no_candidate",
+                "unsupported_live_shape",
+                "candidate_redaction_rejected",
+                "candidate_not_json",
+                "candidate_schema_unknown",
+                "candidate_missing_usage_fields",
+            ],
+            "no_candidate",
+        );
+        summary.parser_reached = event
+            .details
+            .get("parserReached")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         summary
     }
 }
@@ -3540,6 +3918,37 @@ fn safe_detail_class(
         .to_string()
 }
 
+fn safe_key_classes_detail(event: &DiagnosticEvent) -> Vec<String> {
+    let allowed = [
+        "account",
+        "billing",
+        "credits",
+        "featureFlags",
+        "quota",
+        "route",
+        "unknown",
+        "usage",
+    ];
+    let Some(value) = event
+        .details
+        .get("embeddedJsonSafeKeyClasses")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Vec::new();
+    };
+    if value == "none" {
+        return Vec::new();
+    }
+    if value
+        .split(',')
+        .all(|class| allowed.iter().any(|allowed| allowed == &class))
+    {
+        value.split(',').map(str::to_string).collect()
+    } else {
+        Vec::new()
+    }
+}
+
 fn recon_provider(state: ProviderState, codes: Vec<&'static str>) -> Provider {
     let mut refresh = refresh_for_response(html_response("dashboard_success.html"));
     let provider = &mut refresh.snapshot.providers[0];
@@ -3658,16 +4067,58 @@ fn assert_redirect_decision(
     );
 }
 
+fn assert_parser_recon(
+    event: &DiagnosticEvent,
+    reached: bool,
+    html_structure_class: &str,
+    parser_candidate: &str,
+    parser_failure_class: &str,
+    embedded_json_candidate_count: u64,
+    embedded_json_safe_key_classes: &str,
+) {
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("parserReached"),
+        Some(&serde_json::Value::Bool(reached))
+    );
+    assert_eq!(
+        event.details.get("htmlStructureClass"),
+        Some(&serde_json::Value::from(html_structure_class))
+    );
+    assert_eq!(
+        event.details.get("parserCandidate"),
+        Some(&serde_json::Value::from(parser_candidate))
+    );
+    assert_eq!(
+        event.details.get("parserFailureClass"),
+        Some(&serde_json::Value::from(parser_failure_class))
+    );
+    assert_eq!(
+        event.details.get("embeddedJsonCandidateCount"),
+        Some(&serde_json::Value::from(embedded_json_candidate_count))
+    );
+    assert_eq!(
+        event.details.get("embeddedJsonSafeKeyClasses"),
+        Some(&serde_json::Value::from(embedded_json_safe_key_classes))
+    );
+}
+
 fn assert_allowed_response_detail_keys(event: &DiagnosticEvent) {
     for key in event.details.keys() {
         assert!(
             matches!(
                 key.as_str(),
                 "contentTypeClass"
+                    | "embeddedJsonCandidateCount"
+                    | "embeddedJsonSafeKeyClasses"
                     | "finalHttpStatusClass"
                     | "finalHttpStatusCode"
+                    | "htmlStructureClass"
                     | "httpStatusCode"
                     | "httpStatusClass"
+                    | "parserCandidate"
+                    | "parserFailureClass"
+                    | "parserReached"
                     | "redirectBlocked"
                     | "redirectCanFollow"
                     | "redirectFollowed"

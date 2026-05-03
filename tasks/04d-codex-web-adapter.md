@@ -165,6 +165,37 @@ fixtures, does not capture or commit raw response bodies, does not enable
 default live provider fetch, and does not change Shell, D-Bus XML, JSON
 schemas, localhost, or TCP surfaces.
 
+## Task 04D.1G Status
+
+Complete as a parser reconnaissance and synthetic fixture slice. The daemon now
+adds safe parser-structure metadata to Codex web parse outcomes:
+`htmlStructureClass`, `embeddedJsonCandidateCount`,
+`embeddedJsonSafeKeyClasses`, `parserCandidate`, `parserFailureClass`, and
+`parserReached`. These values are classes and counts only. They do not include
+raw live HTML, raw script text, raw JSON, raw keys that could carry identity,
+account email or IDs, organization/workspace names, cookies, headers, response
+snippets, byte offsets, redirect URLs, or profile paths.
+
+The parser remains bounded and fixture-shaped. It supports only hand-authored
+synthetic structures under `daemon/fixtures/web/codex/`: synthetic next-data
+JSON, generic `application/json` script JSON, allowlisted inline JSON
+assignment, app-shell-with-no-data, login-shell, missing-usage, and
+redaction-rejected candidates. It does not execute JavaScript, does not use a
+browser engine, does not promote live payloads to fixtures, and does not enable
+default live provider fetch.
+
+The safe signed-in live baseline for this slice reached authenticated HTML
+through one same-host Codex usage redirect (`307` followed to final `200`) and
+ended as `parse_error`, proving the blocker was the parser rather than browser
+import, Chromium `v10` decryption, Cookie header construction, transport, or
+one-hop redirect policy. The local post-change rerun was attempted with the
+requested environment command, but no valid marked throwaway fake home existed
+at `$CODEXBAR_WEB_HOME`; it failed before browser import with "throwaway fake
+home must exist", so no new local live parser result was observed.
+
+This slice does not change Shell code, D-Bus XML, JSON schemas, GSettings,
+packaging surfaces, localhost/TCP behavior, or production `linux_web` defaults.
+
 ## Goal
 
 Implement the first daemon-only Linux web provider adapter using in-memory
@@ -235,6 +266,14 @@ Suggested future layout:
   `same_host_usage_path`, follows it at most once through the existing redirect
   policy, blocks `/codex/cloud/other`, token-like query variants, userinfo,
   ports, and fragments, and keeps raw redirect locations out of public output.
+- Task 04D.1G emits only safe parser structure fields
+  (`htmlStructureClass`, `embeddedJsonCandidateCount`,
+  `embeddedJsonSafeKeyClasses`, `parserCandidate`, `parserFailureClass`,
+  `parserReached`), parses only synthetic next-data, `application/json`, and
+  allowlisted inline JSON assignment fixtures, fails closed for app shells,
+  missing usage fields, invalid UTF-8, excessive/unknown shapes, and rejected
+  candidate redaction, and keeps raw HTML, JSON, scripts, headers, cookies,
+  account identity, and profile paths out of public output.
 - Task 04D.1 live reconnaissance remains ignored by default and is selectable
   with `-- --ignored codex_web_live`.
 

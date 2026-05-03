@@ -2,7 +2,7 @@
 
 ## Status
 
-Task 04A provider-priority decision, updated through Task 04D.1. This roadmap
+Task 04A provider-priority decision, updated through Task 04D.1G. This roadmap
 does not promise support for every upstream provider, and the current Codex web
 path is still opt-in reconnaissance rather than default production `linux_web`
 support.
@@ -61,6 +61,13 @@ Task 04D.1 implementation status:
 - the live reconnaissance path classifies status, redirect, timeout,
   response-size, content-type, and parse outcomes safely without storing raw
   bodies or headers;
+- parser reconnaissance reports only safe HTML structure classes, embedded JSON
+  candidate counts, safe key classes, parser candidate classes, parser failure
+  classes, and parser reached state;
+- the fixture-shaped parser supports only synthetic next-data JSON,
+  `application/json` script JSON, and allowlisted inline JSON assignment
+  structures, plus fail-closed app-shell, login-shell, missing-usage, and
+  redaction-rejected fixtures;
 - 401/403 classify as provider cookie rejection, 429 as rate-limited provider
   unavailable, 5xx as provider unavailable, blocked redirects as
   `redirect_blocked`, one safe same-host Codex dashboard redirect may be
@@ -72,6 +79,9 @@ Task 04D.1 implementation status:
   enablement;
 - live provider scraping, default live provider HTTP, real browser profile
   scanning, and keyring access remain out of scope.
+- no raw live HTML, raw script text, raw JSON, live response snippets, provider
+  headers, cookies, profile paths, or account identity have been captured or
+  committed.
 
 ## Phase 2 Candidate
 

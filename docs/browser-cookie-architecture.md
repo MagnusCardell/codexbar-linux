@@ -37,6 +37,8 @@ adds redacted same-host redirect path-family, path-depth, query-class, and
 `redirectCanFollow` metadata while keeping raw redirect paths and queries out of
 public output. Task 04D.1F adds the exact same-host Codex cloud usage/settings
 route `/codex/cloud/settings/usage` to that existing one-hop policy.
+Task 04D.1G adds safe in-memory parser reconnaissance metadata and synthetic
+fixture-only embedded JSON parsing for the Codex web adapter.
 
 ## Thesis
 
@@ -148,7 +150,19 @@ and no raw response body was captured or committed. The 2026-05-03 Task 04D.1E
 live recon rerun failed before
 browser import because the configured throwaway fake home did not exist, so no
 live HTTP redirect, final status, response body, or parser outcome was
-observed.
+observed. Task 04D.1G later used a safe external signed-in throwaway summary
+showing authenticated HTML reached through one safe same-host Codex usage
+redirect, but still did not capture or commit raw live HTML. Its local rerun in
+this workspace again failed before browser import because the throwaway fake
+home environment value did not resolve to an existing marked home.
+
+Parser reconnaissance remains daemon-only and redacted. The daemon may classify
+the capped in-memory HTML body into `next_data`, `script_json`,
+`static_app_shell`, `login_shell`, `error_page`, or `unknown_html`, count
+bounded embedded JSON candidates, report only safe key classes, and report a
+safe parser candidate/failure class. It must not print, persist, cache,
+diagnose, or fixture-promote raw live body text, script text, JSON, account
+identity, headers, cookies, redirect URLs, or profile paths.
 
 ## Browser Support Sequence
 
@@ -445,6 +459,12 @@ Allowed diagnostic `details` keys are small redacted scalars only, such as:
 - `redirectBlocked`;
 - `responseBodyClass`;
 - `responseSizeBucket`;
+- `htmlStructureClass`;
+- `embeddedJsonCandidateCount`;
+- `embeddedJsonSafeKeyClasses`;
+- `parserCandidate`;
+- `parserFailureClass`;
+- `parserReached`;
 - `redactionClass`;
 - `recoverable`.
 

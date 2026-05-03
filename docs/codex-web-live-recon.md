@@ -8,7 +8,9 @@ classification. Task 04D.1D adds one safe same-host redirect hop for the static
 Codex dashboard URL. Task 04D.1E adds redacted same-host Codex redirect
 path-family classification and derives `redirectCanFollow` from that policy.
 Task 04D.1F adds the exact same-host Codex cloud usage/settings redirect route
-to that existing one-hop policy.
+to that existing one-hop policy. Task 04D.1G adds safe parser reconnaissance
+metadata, bounded embedded-JSON candidate scanning, and synthetic structural
+parser fixtures.
 This is not default production `linux_web` support and it must not be run
 against a real default browser profile.
 
@@ -27,6 +29,9 @@ When every live gate is present, the ignored test may:
   only the safe profile name `requestHeaderProfile="browser_like"`;
 - classify status, redirect, timeout, response-size, content-type, and parser
   outcomes into schema-valid provider states and diagnostics;
+- inspect capped HTML bodies in daemon memory for structural parser classes and
+  embedded JSON candidate counts without printing, persisting, or fixture-
+  promoting live bodies;
 - attach safe HTTP response metadata fields to diagnostics without exposing raw
   response headers, redirect locations, or bodies.
 
@@ -140,6 +145,20 @@ Allowed summary fields are:
 - `responseBodyClass`: one of `not_read`, `empty`, `within_cap`, `too_large`,
   or `invalid_encoding`;
 - `responseSizeBucket`: one of `zero`, `small`, `medium`, `large`, or `capped`;
+- `htmlStructureClass`: one of `next_data`, `script_json`,
+  `static_app_shell`, `login_shell`, `error_page`, or `unknown_html`;
+- `embeddedJsonCandidateCount`: bounded integer count of embedded JSON
+  candidates observed in the capped in-memory body;
+- `embeddedJsonSafeKeyClasses`: array containing only safe structural classes:
+  `usage`, `credits`, `quota`, `account`, `billing`, `featureFlags`, `route`,
+  or `unknown`;
+- `parserCandidate`: one of `none`, `next_data_script`,
+  `application_json_script`, `inline_state_script`, or `html_text_fallback`;
+- `parserFailureClass`: one of `none`, `no_candidate`,
+  `candidate_not_json`, `candidate_schema_unknown`,
+  `candidate_missing_usage_fields`, `candidate_redaction_rejected`, or
+  `unsupported_live_shape`;
+- `parserReached`: boolean;
 - `classification`: one value from the fixed safe classification set below;
 - `diagnosticCodes`: de-duplicated browser/web diagnostic codes filtered
   through a stable allowlist;
@@ -232,6 +251,16 @@ Safe HTTP response summary and diagnostic fields are limited to scalar metadata:
 - `responseBodyClass`: `not_read`, `empty`, `within_cap`, `too_large`, or
   `invalid_encoding`;
 - `responseSizeBucket`: `zero`, `small`, `medium`, `large`, or `capped`;
+- `htmlStructureClass`: `next_data`, `script_json`, `static_app_shell`,
+  `login_shell`, `error_page`, or `unknown_html`;
+- `embeddedJsonCandidateCount`: bounded integer;
+- `embeddedJsonSafeKeyClasses`: safe structural class list only;
+- `parserCandidate`: `none`, `next_data_script`, `application_json_script`,
+  `inline_state_script`, or `html_text_fallback`;
+- `parserFailureClass`: `none`, `no_candidate`, `candidate_not_json`,
+  `candidate_schema_unknown`, `candidate_missing_usage_fields`,
+  `candidate_redaction_rejected`, or `unsupported_live_shape`;
+- `parserReached`: boolean;
 - `redirectBlocked`: boolean on redirect-policy failures;
 - `requestHeaderProfile`: `browser_like` on request-start diagnostics.
 
@@ -275,12 +304,28 @@ values.
 
 ## Next Decision
 
+Task 04D.1G was motivated by a safe signed-in throwaway Chrome live summary
+where browser import, Chromium `v10` cookie decryption, Cookie header
+construction, transport, and one safe same-host Codex usage redirect all worked:
+the first response was a `307`, the one allowed follow reached final `200`
+HTML, the capped body was within limits, and the terminal classification was
+`parse_error`. No raw live HTML, script text, JSON, headers, cookies, profile
+paths, or account identity were captured or committed from that observation.
+
+The local Task 04D.1G rerun command was attempted on 2026-05-03 with
+`CODEXBAR_CODEX_WEB_LIVE=1` and
+`CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but this workspace
+had no valid throwaway fake home at that environment value. The ignored smoke
+failed before browser import with "throwaway fake home must exist", so no new
+local live HTTP request, parser candidate, or live parser success/failure class
+was observed in this execution.
+
 Use the summary classification to choose the next task:
 
 | Classification | Decision |
 | --- | --- |
 | `parser_succeeded` or `dashboard_reachable` | Consider Task 04D.2 production-shape parser work, still behind explicit review. |
-| `parse_error` with `cookiePresence="found"` or `cookiePresence="decrypted"` and `webFetch="finished"` | Update synthetic parser fixtures from hand-authored observations only. Do not copy raw live body. |
+| `parse_error` with `cookiePresence="found"` or `cookiePresence="decrypted"` and `webFetch="finished"` | Use `htmlStructureClass`, `parserCandidate`, and `parserFailureClass` to update synthetic parser fixtures from hand-authored observations only. Do not copy raw live body. |
 | `login_required` or `provider_cookie_rejected` | Investigate cookie/session material validity in the throwaway profile. |
 | `browser_cookie_missing` | Investigate browser import and cookie-domain selection. |
 | `browser_cookie_missing` with `cookieMaterial.plaintextValueRows > 0` and `usableSessionCookies=0` | Inspect validation/filtering policy with synthetic fixtures; do not print raw row data. |
@@ -357,7 +402,9 @@ redacted diagnostics may be retained.
   validation. The next blocker is Codex cookie-name/header-material policy, not
   v10 prefix support, HTTP transport, or parser work.
 - The live parser is not a real ChatGPT page parser. The only asserted
-  normalizer is the synthetic fixture parser.
+  normalizer is the synthetic fixture parser. Task 04D.1G supports only
+  bounded synthetic `next_data`, generic `application/json` script, and
+  allowlisted inline-state JSON assignment shapes.
 - The current live decryptor path supports only plaintext rows and the verified
   Chromium Linux basic/plain `v10` encrypted-value path. Secret Service,
   KWallet, app-bound encryption, `v20`, encrypted-value-prefix `v24`, and

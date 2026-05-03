@@ -18,6 +18,12 @@ required = {
     "dashboard_login_required.html",
     "dashboard_account_mismatch.html",
     "dashboard_parse_error.html",
+    "next_data_usage_success.html",
+    "inline_state_usage_success.html",
+    "app_shell_no_data.html",
+    "login_shell.html",
+    "embedded_json_missing_usage.html",
+    "embedded_json_redaction_rejected.html",
     "dashboard_too_large.marker",
     "redirect_wrong_host.json",
     "non_200.json",
@@ -67,7 +73,6 @@ real_provider_domains = {
     "ollama.com",
 }
 raw_provider_markers = [
-    "__NEXT_DATA__",
     "client-bootstrap",
     "cf-chl",
     "cloudflare",
@@ -97,6 +102,8 @@ def check_text(path: Path, text: str) -> None:
         if domain.endswith(".example.invalid"):
             continue
         if domain in {"doctype.html"}:
+            continue
+        if domain == "example.invalid":
             continue
         if any(domain.endswith("." + allowed) for allowed in ["example.invalid"]):
             continue

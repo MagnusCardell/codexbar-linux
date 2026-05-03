@@ -27,7 +27,8 @@ The MVP is:
 ## Current status
 
 This repository is at **Task 04B.4 Codex cookie header/session-material policy plus
-Task 04D.1 gated Codex web transport and live reconnaissance** status. The Task
+Task 04D.1G gated Codex web transport, live reconnaissance, and synthetic parser
+reconnaissance** status. The Task
 03 GNOME Shell vertical slice and design gate are
 complete enough for the browser-cookie implementation phase, with live GNOME 46
 Wayland activation smoke proven.
@@ -80,7 +81,7 @@ Present:
   runs the ignored live `TestBrowserImport` smoke. Fake-home env roots now
   require canonical throwaway homes with `.codexbar-throwaway-browser-root`,
   reject real home/config roots, and keep public results path-free.
-- Task 04D.1 daemon-only Codex web transport and reconnaissance:
+- Task 04D.1G daemon-only Codex web transport and reconnaissance:
   `daemon/src/web/` defines a bounded web request/response abstraction, static
   Codex web policy, redaction-safe web diagnostics, fake HTTP client, a gated
   async Rustls-backed static GET client, and Codex parser/normalizer against
@@ -90,6 +91,12 @@ Present:
   reconnaissance is ignored by default and requires `CODEXBAR_CODEX_WEB_LIVE=1`,
   a marked throwaway fake browser home, explicit provider `codex`, and explicit
   `sourceAdapterPolicy.only(["linux_web"])`.
+  Parser reconnaissance reports only safe structure classes, embedded JSON
+  candidate counts, safe key classes, parser candidate classes, parser failure
+  classes, and parser reached state. Synthetic parser fixtures cover next-data,
+  `application/json`, inline state, app-shell, login-shell, missing-usage, and
+  redaction-rejected shapes. No raw live HTML, script text, JSON, headers,
+  cookies, profile paths, or provider identity are captured or committed.
   Web fixtures live under `daemon/fixtures/web/codex/` and are checked by
   `scripts/validate-web-fixtures.sh`.
 - Task 04B.3 signed-in Codex throwaway recon result and Task 04B.4 follow-up:
@@ -103,7 +110,7 @@ Present:
   throwaway fake home and was not run in this workspace because
   `CODEXBAR_WEB_HOME`/`CODEXBAR_BROWSER_IMPORT_FAKE_HOME` was unavailable.
 
-Not implemented after Task 04D.1:
+Not implemented after Task 04D.1G:
 
 - default production live provider fetch or default `linux_web` refresh;
 - real provider scraping;

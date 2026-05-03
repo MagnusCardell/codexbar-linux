@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::browser;
 use crate::browser::session_material::SessionMaterial;
@@ -15,6 +15,16 @@ use crate::web::policy::{CodexWebPolicy, RedirectTargetClass, RedirectTargetSumm
 
 pub const PROVIDER_ID: &str = "codex";
 pub const DISPLAY_NAME: &str = "Codex";
+const MAX_EMBEDDED_JSON_CANDIDATES: usize = 16;
+const MAX_INLINE_STATE_SCRIPT_BYTES: usize = 128 * 1024;
+const MAX_SAFE_KEY_CLASS_KEYS: usize = 64;
+const MAX_SAFE_KEY_CLASS_DEPTH: usize = 6;
+const INLINE_JSON_ASSIGNMENT_MARKERS: &[&str] = &[
+    "window.__CODEX_DASHBOARD__",
+    "window.__CODEXBAR_DASHBOARD__",
+    "globalThis.__CODEX_DASHBOARD__",
+    "globalThis.__CODEXBAR_DASHBOARD__",
+];
 
 #[derive(Clone, Debug)]
 pub struct CodexWebFetchResult {
@@ -462,17 +472,22 @@ where
         );
     }
 
-    let parsed = match parse_dashboard_response(response.body()) {
+    let parse_attempt = parse_dashboard_response(response.body());
+    let parsed = match parse_attempt.parsed {
         Ok(parsed) => parsed,
-        Err(()) if looks_like_login_required(response.body()) => ParsedDashboard::LoginRequired,
-        Err(()) => {
+        Err(_) => {
             events.push(diagnostics::event(
                 diagnostics::FETCH_PARSE_ERROR,
                 DiagnosticSeverity::Warning,
                 "Codex web response could not be parsed",
                 now,
                 PROVIDER_ID,
-                response_metadata_details(&response, &redirect_trace, content_type_class),
+                response_metadata_details_with_parser(
+                    &response,
+                    &redirect_trace,
+                    content_type_class,
+                    Some(&parse_attempt.recon),
+                ),
             ));
             return failure_with_extra_codes(
                 ProviderState::ParseError,
@@ -493,7 +508,12 @@ where
                 "Codex web rejected the supplied browser session material",
                 now,
                 PROVIDER_ID,
-                BTreeMap::new(),
+                response_metadata_details_with_parser(
+                    &response,
+                    &redirect_trace,
+                    content_type_class,
+                    Some(&parse_attempt.recon),
+                ),
             ));
             failure_with_extra_codes(
                 ProviderState::CookieRejected,
@@ -506,13 +526,20 @@ where
         }
         ParsedDashboard::Success(payload) => {
             if account_mismatched(expected_account_email, payload.signed_in_email.as_deref()) {
+                let mut details = response_metadata_details_with_parser(
+                    &response,
+                    &redirect_trace,
+                    content_type_class,
+                    Some(&parse_attempt.recon),
+                );
+                details.insert("accountMismatch".to_string(), Value::Bool(true));
                 events.push(diagnostics::event(
                     diagnostics::ACCOUNT_MISMATCH,
                     DiagnosticSeverity::Warning,
                     "Codex web account identity did not match the expected account",
                     now,
                     PROVIDER_ID,
-                    diagnostics::details(&[("accountMismatch", Value::Bool(true))]),
+                    details,
                 ));
                 return failure_with_extra_codes(
                     ProviderState::CookieRejected,
@@ -529,7 +556,12 @@ where
                 "Codex web fetch finished",
                 now,
                 PROVIDER_ID,
-                response_metadata_details(&response, &redirect_trace, content_type_class),
+                response_metadata_details_with_parser(
+                    &response,
+                    &redirect_trace,
+                    content_type_class,
+                    Some(&parse_attempt.recon),
+                ),
             ));
             events.push(diagnostics::event(
                 diagnostics::FETCH_REDACTION_APPLIED,
@@ -650,28 +682,569 @@ fn success_provider(payload: DashboardPayload, timestamp: &str, codes: Vec<Strin
     }
 }
 
-fn parse_dashboard_response(body: &[u8]) -> Result<ParsedDashboard, ()> {
-    let text = std::str::from_utf8(body).map_err(|_| ())?;
-    redact::validate_public_json_text(text).map_err(|_| ())?;
-    let json_text = if text.trim_start().starts_with('{') {
-        text.trim()
-    } else {
-        embedded_fixture_json(text).ok_or(())?
-    };
-    let payload: DashboardPayload = serde_json::from_str(json_text).map_err(|_| ())?;
-    match payload.state.as_deref() {
-        Some("ok") | Some("account_mismatch") => Ok(ParsedDashboard::Success(Box::new(payload))),
-        Some("login_required") => Ok(ParsedDashboard::LoginRequired),
-        _ => Err(()),
+struct DashboardParseAttempt {
+    parsed: Result<ParsedDashboard, ()>,
+    recon: ParserRecon,
+}
+
+#[derive(Clone, Debug)]
+struct ParserRecon {
+    parser_reached: bool,
+    html_structure_class: &'static str,
+    embedded_json_candidate_count: u64,
+    embedded_json_safe_key_classes: String,
+    parser_candidate: &'static str,
+    parser_failure_class: &'static str,
+}
+
+impl ParserRecon {
+    fn reached() -> Self {
+        Self {
+            parser_reached: true,
+            html_structure_class: "unknown_html",
+            embedded_json_candidate_count: 0,
+            embedded_json_safe_key_classes: "none".to_string(),
+            parser_candidate: "none",
+            parser_failure_class: "no_candidate",
+        }
+    }
+
+    fn append_details(&self, details: &mut BTreeMap<String, Value>) {
+        details.insert(
+            "htmlStructureClass".to_string(),
+            Value::from(self.html_structure_class),
+        );
+        details.insert(
+            "embeddedJsonCandidateCount".to_string(),
+            Value::from(self.embedded_json_candidate_count),
+        );
+        details.insert(
+            "embeddedJsonSafeKeyClasses".to_string(),
+            Value::from(self.embedded_json_safe_key_classes.as_str()),
+        );
+        details.insert(
+            "parserCandidate".to_string(),
+            Value::from(self.parser_candidate),
+        );
+        details.insert(
+            "parserFailureClass".to_string(),
+            Value::from(self.parser_failure_class),
+        );
+        details.insert(
+            "parserReached".to_string(),
+            Value::Bool(self.parser_reached),
+        );
     }
 }
 
-fn embedded_fixture_json(text: &str) -> Option<&str> {
-    let marker = "<script id=\"codexbar-fixture\" type=\"application/json\">";
-    let start = text.find(marker)? + marker.len();
-    let rest = &text[start..];
-    let end = rest.find("</script>")?;
-    Some(rest[..end].trim())
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParserCandidateKind {
+    DirectJson,
+    CodexbarFixture,
+    NextData,
+    ApplicationJsonScript,
+    InlineJsonAssignment,
+}
+
+impl ParserCandidateKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DirectJson | Self::CodexbarFixture | Self::ApplicationJsonScript => {
+                "application_json_script"
+            }
+            Self::NextData => "next_data_script",
+            Self::InlineJsonAssignment => "inline_state_script",
+        }
+    }
+
+    fn html_structure_class(self) -> &'static str {
+        match self {
+            Self::DirectJson
+            | Self::CodexbarFixture
+            | Self::ApplicationJsonScript
+            | Self::InlineJsonAssignment => "script_json",
+            Self::NextData => "next_data",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct JsonCandidate<'a> {
+    kind: ParserCandidateKind,
+    json: &'a str,
+}
+
+#[derive(Default)]
+struct JsonCandidateSet<'a> {
+    candidates: Vec<JsonCandidate<'a>>,
+    embedded_json_candidate_count: u64,
+    safe_key_classes: BTreeSet<&'static str>,
+    candidate_too_large: bool,
+    too_many_candidates: bool,
+    unsafe_candidate: bool,
+}
+
+impl<'a> JsonCandidateSet<'a> {
+    fn add(&mut self, kind: ParserCandidateKind, json: &'a str, embedded: bool) {
+        if embedded {
+            self.embedded_json_candidate_count = self
+                .embedded_json_candidate_count
+                .saturating_add(1)
+                .min(MAX_EMBEDDED_JSON_CANDIDATES as u64);
+        }
+        if json.len() > MAX_INLINE_STATE_SCRIPT_BYTES {
+            self.candidate_too_large = true;
+            return;
+        }
+        if self.candidates.len() >= MAX_EMBEDDED_JSON_CANDIDATES {
+            self.too_many_candidates = true;
+            return;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(json) {
+            collect_safe_key_classes(&value, &mut self.safe_key_classes);
+            if candidate_redaction_unsafe(&value) {
+                self.unsafe_candidate = true;
+            }
+        }
+        self.candidates.push(JsonCandidate { kind, json });
+    }
+}
+
+fn parse_dashboard_response(body: &[u8]) -> DashboardParseAttempt {
+    let mut recon = ParserRecon::reached();
+    let text = match std::str::from_utf8(body) {
+        Ok(text) => text,
+        Err(_) => {
+            recon.parser_failure_class = "unsupported_live_shape";
+            return DashboardParseAttempt {
+                parsed: Err(()),
+                recon,
+            };
+        }
+    };
+    recon.html_structure_class = html_structure_class(text);
+
+    let candidates = extract_json_candidates(text);
+    recon.embedded_json_candidate_count = candidates.embedded_json_candidate_count;
+    recon.embedded_json_safe_key_classes = safe_key_classes_text(&candidates.safe_key_classes);
+    if candidates.unsafe_candidate {
+        recon.parser_failure_class = "candidate_redaction_rejected";
+        return DashboardParseAttempt {
+            parsed: Err(()),
+            recon,
+        };
+    }
+    if candidates.candidates.is_empty() {
+        if looks_like_login_required(body) {
+            recon.html_structure_class = "login_shell";
+            recon.parser_candidate = "html_text_fallback";
+            recon.parser_failure_class = "no_candidate";
+            return DashboardParseAttempt {
+                parsed: Ok(ParsedDashboard::LoginRequired),
+                recon,
+            };
+        }
+        recon.parser_failure_class =
+            if candidates.too_many_candidates || candidates.candidate_too_large {
+                "unsupported_live_shape"
+            } else {
+                "no_candidate"
+            };
+        return DashboardParseAttempt {
+            parsed: Err(()),
+            recon,
+        };
+    }
+
+    let mut failure_class = if candidates.too_many_candidates || candidates.candidate_too_large {
+        "unsupported_live_shape"
+    } else {
+        "candidate_schema_unknown"
+    };
+    for candidate in candidates.candidates {
+        recon.parser_candidate = candidate.kind.as_str();
+        match parse_dashboard_candidate(candidate.json) {
+            Ok(parsed) => {
+                recon.html_structure_class = candidate.kind.html_structure_class();
+                recon.parser_failure_class = "none";
+                return DashboardParseAttempt {
+                    parsed: Ok(parsed),
+                    recon,
+                };
+            }
+            Err(class) => {
+                failure_class = class;
+            }
+        }
+    }
+
+    if looks_like_login_required(body) {
+        recon.html_structure_class = "login_shell";
+        recon.parser_candidate = "html_text_fallback";
+        return DashboardParseAttempt {
+            parsed: Ok(ParsedDashboard::LoginRequired),
+            recon,
+        };
+    }
+    recon.parser_failure_class = failure_class;
+    DashboardParseAttempt {
+        parsed: Err(()),
+        recon,
+    }
+}
+
+fn parse_dashboard_candidate(json_text: &str) -> Result<ParsedDashboard, &'static str> {
+    let value: Value = serde_json::from_str(json_text).map_err(|_| "candidate_not_json")?;
+    if candidate_redaction_unsafe(&value) {
+        return Err("candidate_redaction_rejected");
+    }
+    let mut failure_class = "candidate_schema_unknown";
+    for candidate in dashboard_payload_candidates(&value) {
+        let Ok(payload) = serde_json::from_value::<DashboardPayload>(candidate.clone()) else {
+            continue;
+        };
+        match dashboard_payload_to_parsed(payload) {
+            Ok(parsed) => return Ok(parsed),
+            Err(class) => failure_class = class,
+        }
+    }
+    Err(failure_class)
+}
+
+fn dashboard_payload_to_parsed(payload: DashboardPayload) -> Result<ParsedDashboard, &'static str> {
+    if payload.schema_version != 1 {
+        return Err("candidate_schema_unknown");
+    }
+    match payload.state.as_deref() {
+        Some("ok") | Some("account_mismatch") if payload_has_usage_fields(&payload) => {
+            Ok(ParsedDashboard::Success(Box::new(payload)))
+        }
+        Some("ok") | Some("account_mismatch") => Err("candidate_missing_usage_fields"),
+        Some("login_required") => Ok(ParsedDashboard::LoginRequired),
+        _ => Err("candidate_schema_unknown"),
+    }
+}
+
+fn payload_has_usage_fields(payload: &DashboardPayload) -> bool {
+    payload.credits.is_some()
+        || payload.usage.as_ref().is_some_and(|usage| {
+            usage.session.is_some() || usage.weekly.is_some() || usage.code_review.is_some()
+        })
+}
+
+fn dashboard_payload_candidates(value: &Value) -> Vec<&Value> {
+    let mut candidates = vec![value];
+    for path in [
+        &["codexbarDashboard"][..],
+        &["codexUsage"][..],
+        &["dashboard"][..],
+        &["data", "codexbarDashboard"][..],
+        &["props", "pageProps", "codexbarDashboard"][..],
+        &["props", "pageProps", "codexUsage"][..],
+        &["props", "pageProps", "dashboard"][..],
+        &["props", "pageProps", "usageDashboard"][..],
+        &["props", "pageProps", "initialData", "codexbarDashboard"][..],
+    ] {
+        if let Some(candidate) = value_at_path(value, path) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = value;
+    for key in path {
+        current = current.as_object()?.get(*key)?;
+    }
+    Some(current)
+}
+
+fn extract_json_candidates(text: &str) -> JsonCandidateSet<'_> {
+    let mut set = JsonCandidateSet::default();
+    if text.trim_start().starts_with('{') {
+        set.add(ParserCandidateKind::DirectJson, text.trim(), false);
+    }
+    collect_script_json_candidates(text, &mut set);
+    set
+}
+
+fn collect_script_json_candidates<'a>(text: &'a str, set: &mut JsonCandidateSet<'a>) {
+    let lower = text.to_ascii_lowercase();
+    let mut offset = 0;
+    while let Some(script_start_relative) = lower[offset..].find("<script") {
+        let script_start = offset + script_start_relative;
+        let Some(tag_end_relative) = lower[script_start..].find('>') else {
+            break;
+        };
+        let tag_end = script_start + tag_end_relative;
+        let content_start = tag_end + 1;
+        let Some(close_relative) = lower[content_start..].find("</script>") else {
+            break;
+        };
+        let content_end = content_start + close_relative;
+        let tag = &lower[script_start..=tag_end];
+        let content = text[content_start..content_end].trim();
+
+        if script_tag_has_attr_value(tag, "id", "codexbar-fixture") {
+            set.add(ParserCandidateKind::CodexbarFixture, content, true);
+        } else if script_tag_has_attr_value(tag, "id", "__next_data__") {
+            set.add(ParserCandidateKind::NextData, content, true);
+        } else if script_tag_attr_contains(tag, "type", "application/json") {
+            set.add(ParserCandidateKind::ApplicationJsonScript, content, true);
+        }
+
+        if content.len() <= MAX_INLINE_STATE_SCRIPT_BYTES {
+            for marker in INLINE_JSON_ASSIGNMENT_MARKERS {
+                if let Some(json) = inline_assignment_json(content, marker) {
+                    set.add(ParserCandidateKind::InlineJsonAssignment, json, true);
+                }
+            }
+        }
+
+        offset = content_end + "</script>".len();
+    }
+}
+
+fn inline_assignment_json<'a>(content: &'a str, marker: &str) -> Option<&'a str> {
+    let marker_start = content.find(marker)?;
+    let after_marker = marker_start + marker.len();
+    let equals_relative = content[after_marker..].find('=')?;
+    let after_equals = after_marker + equals_relative + 1;
+    let whitespace = content[after_equals..]
+        .find(|ch: char| !ch.is_whitespace())
+        .unwrap_or(0);
+    balanced_json_slice(content, after_equals + whitespace)
+}
+
+fn balanced_json_slice(text: &str, start: usize) -> Option<&str> {
+    let open = text[start..].chars().next()?;
+    let close = match open {
+        '{' => '}',
+        '[' => ']',
+        _ => return None,
+    };
+    let mut depth = 0_u32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (relative, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+        } else if ch == open {
+            depth = depth.saturating_add(1);
+        } else if ch == close {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                let end = start + relative + ch.len_utf8();
+                return Some(&text[start..end]);
+            }
+        }
+    }
+    None
+}
+
+fn script_tag_has_attr_value(tag: &str, attr: &str, value: &str) -> bool {
+    script_tag_attr_contains(tag, attr, value)
+}
+
+fn script_tag_attr_contains(tag: &str, attr: &str, needle: &str) -> bool {
+    for quote in ['"', '\''] {
+        let marker = format!("{attr}={quote}");
+        let mut offset = 0;
+        while let Some(relative) = tag[offset..].find(&marker) {
+            let value_start = offset + relative + marker.len();
+            let Some(value_end_relative) = tag[value_start..].find(quote) else {
+                return false;
+            };
+            let value = &tag[value_start..value_start + value_end_relative];
+            if value.contains(needle) {
+                return true;
+            }
+            offset = value_start + value_end_relative + quote.len_utf8();
+        }
+    }
+    false
+}
+
+fn html_structure_class(text: &str) -> &'static str {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') {
+        return "script_json";
+    }
+    let lower = text.to_ascii_lowercase();
+    if looks_like_login_required(text.as_bytes()) {
+        "login_shell"
+    } else if lower.contains("id=\"__next_data__\"") || lower.contains("id='__next_data__'") {
+        "next_data"
+    } else if lower.contains("id=\"codexbar-fixture\"")
+        || lower.contains("id='codexbar-fixture'")
+        || lower.contains("__codex_dashboard__")
+        || lower.contains("__codexbar_dashboard__")
+        || lower.contains("type=\"application/json\"")
+        || lower.contains("type='application/json'")
+    {
+        "script_json"
+    } else if lower.contains("static-app-shell")
+        || lower.contains("id=\"app\"")
+        || lower.contains("id='app'")
+        || lower.contains("id=\"app-root\"")
+        || lower.contains("id='app-root'")
+    {
+        "static_app_shell"
+    } else if lower.contains("error")
+        || lower.contains("unavailable")
+        || lower.contains("something went wrong")
+    {
+        "error_page"
+    } else {
+        "unknown_html"
+    }
+}
+
+fn collect_safe_key_classes(value: &Value, classes: &mut BTreeSet<&'static str>) {
+    let mut visited = 0_usize;
+    collect_safe_key_classes_inner(value, classes, 0, &mut visited);
+}
+
+fn collect_safe_key_classes_inner(
+    value: &Value,
+    classes: &mut BTreeSet<&'static str>,
+    depth: usize,
+    visited: &mut usize,
+) {
+    if depth > MAX_SAFE_KEY_CLASS_DEPTH || *visited >= MAX_SAFE_KEY_CLASS_KEYS {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                if *visited >= MAX_SAFE_KEY_CLASS_KEYS {
+                    return;
+                }
+                *visited += 1;
+                classes.insert(safe_key_class(key));
+                collect_safe_key_classes_inner(value, classes, depth + 1, visited);
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter().take(4) {
+                collect_safe_key_classes_inner(item, classes, depth + 1, visited);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn safe_key_class(key: &str) -> &'static str {
+    let normalized: String = key
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    match normalized.as_str() {
+        "schemaversion" | "state" => "unknown",
+        "props" | "pageprops" | "initialdata" | "buildid" | "page" | "query" | "runtimeconfig"
+        | "scriptloader" | "gsp" | "nextdata" | "route" | "path" => "route",
+        "codexbardashboard" | "codexusage" | "dashboard" | "usagedashboard" => "usage",
+        "usage" | "session" | "weekly" | "codereview" | "usedpercent" | "remainingpercent"
+        | "windowminutes" | "resetsat" | "label" | "detail" => "usage",
+        "credits" | "remaining" | "unit" => "credits",
+        "quota" | "limit" | "limits" | "reset" | "resets" => "quota",
+        "signedinemail" | "account" | "identity" | "user" | "organization" | "workspace" => {
+            "account"
+        }
+        "billing" | "subscription" | "invoice" | "plan" => "billing",
+        "features" | "featureflags" | "featureflag" | "flags" => "featureFlags",
+        _ => "unknown",
+    }
+}
+
+fn candidate_redaction_unsafe(value: &Value) -> bool {
+    candidate_redaction_unsafe_inner(value, 0, &mut 0)
+}
+
+fn candidate_redaction_unsafe_inner(value: &Value, depth: usize, visited: &mut usize) -> bool {
+    if depth > MAX_SAFE_KEY_CLASS_DEPTH || *visited >= MAX_SAFE_KEY_CLASS_KEYS {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                *visited += 1;
+                if unsafe_candidate_key(key)
+                    || candidate_redaction_unsafe_inner(value, depth + 1, visited)
+                {
+                    return true;
+                }
+            }
+            false
+        }
+        Value::Array(items) => items
+            .iter()
+            .take(8)
+            .any(|item| candidate_redaction_unsafe_inner(item, depth + 1, visited)),
+        Value::String(value) => redact::validate_public_json_text(value).is_err(),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+fn unsafe_candidate_key(key: &str) -> bool {
+    let normalized: String = key
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    matches!(
+        normalized.as_str(),
+        "authorization"
+            | "cookie"
+            | "cookies"
+            | "setcookie"
+            | "headers"
+            | "requestheaders"
+            | "responseheaders"
+            | "raw"
+            | "rawpayload"
+            | "rawresponse"
+            | "rawbody"
+            | "rawheader"
+            | "rawcookie"
+            | "rawurl"
+            | "rawpath"
+            | "rawquery"
+            | "rawfragment"
+            | "rawlocation"
+            | "accesstoken"
+            | "refreshtoken"
+            | "sessiontoken"
+            | "sessionkey"
+            | "sessionid"
+            | "sid"
+            | "apikey"
+            | "secret"
+            | "password"
+            | "provideraccountid"
+            | "organizationid"
+            | "workspaceid"
+    )
+}
+
+fn safe_key_classes_text(classes: &BTreeSet<&'static str>) -> String {
+    if classes.is_empty() {
+        "none".to_string()
+    } else {
+        classes.iter().copied().collect::<Vec<_>>().join(",")
+    }
 }
 
 fn looks_like_login_required(body: &[u8]) -> bool {
@@ -679,8 +1252,11 @@ fn looks_like_login_required(body: &[u8]) -> bool {
         return false;
     };
     let lower = text.to_ascii_lowercase();
-    (lower.contains("login_required") || lower.contains("/auth/login") || lower.contains("log in"))
-        && (lower.contains("chatgpt") || lower.contains("openai"))
+    (lower.contains("login_required")
+        || lower.contains("/auth/login")
+        || lower.contains("log in")
+        || lower.contains("sign in"))
+        && (lower.contains("chatgpt") || lower.contains("openai") || lower.contains("codex"))
 }
 
 enum ParsedDashboard {
@@ -692,7 +1268,7 @@ enum ParsedDashboard {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DashboardPayload {
     #[serde(rename = "schemaVersion")]
-    _schema_version: u8,
+    schema_version: u8,
     state: Option<String>,
     signed_in_email: Option<String>,
     usage: Option<DashboardUsage>,
@@ -852,9 +1428,18 @@ fn response_metadata_details(
     redirect_trace: &RedirectTrace,
     content_type_class: &'static str,
 ) -> BTreeMap<String, Value> {
+    response_metadata_details_with_parser(response, redirect_trace, content_type_class, None)
+}
+
+fn response_metadata_details_with_parser(
+    response: &WebResponse,
+    redirect_trace: &RedirectTrace,
+    content_type_class: &'static str,
+    parser_recon: Option<&ParserRecon>,
+) -> BTreeMap<String, Value> {
     let initial_response = redirect_trace.initial_response(response);
     let final_status = redirect_trace.final_status(response);
-    diagnostics::details(&[
+    let mut details = diagnostics::details(&[
         (
             "httpStatusCode",
             Value::from(initial_response.status() as u64),
@@ -913,7 +1498,11 @@ fn response_metadata_details(
             "responseSizeBucket",
             Value::from(response_size_bucket(response)),
         ),
-    ])
+    ]);
+    if let Some(parser_recon) = parser_recon {
+        parser_recon.append_details(&mut details);
+    }
+    details
 }
 
 fn redirect_host_class(response: &WebResponse, target_class: RedirectTargetClass) -> &'static str {
