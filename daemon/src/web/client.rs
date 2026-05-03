@@ -6,6 +6,7 @@ use std::time::Duration;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, LOCATION, USER_AGENT};
 
+use crate::browser::session_material::CookieHeader;
 use crate::web::policy::CodexWebPolicy;
 
 #[derive(Clone)]
@@ -14,7 +15,7 @@ pub struct WebRequest {
     user_agent: String,
     accept: String,
     accept_language: Option<String>,
-    session_header: Option<String>,
+    session_header: Option<CookieHeader>,
     timeout: Duration,
     response_size_limit: usize,
 }
@@ -49,7 +50,7 @@ impl WebRequest {
     }
 
     pub fn session_material_bytes(&self) -> usize {
-        self.session_header.as_ref().map_or(0, String::len)
+        self.session_header.as_ref().map_or(0, CookieHeader::len)
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -62,7 +63,7 @@ impl WebRequest {
         self
     }
 
-    pub(crate) fn with_session_header(mut self, value: String) -> Self {
+    pub(crate) fn with_session_header(mut self, value: CookieHeader) -> Self {
         self.session_header = Some(value);
         self
     }
@@ -310,7 +311,7 @@ impl ReqwestStaticGetClient {
 impl WebClient for ReqwestStaticGetClient {
     fn request(&self, request: WebRequest) -> Result<WebResponse, WebClientError> {
         Self::validate_request(&request)?;
-        let Some(session_header) = request.session_header.as_deref() else {
+        let Some(session_header) = request.session_header.as_ref() else {
             return Err(WebClientError::TransportUnavailable);
         };
 
@@ -323,7 +324,7 @@ impl WebClient for ReqwestStaticGetClient {
             .get(request.url())
             .header(USER_AGENT, header_value(&request.user_agent)?)
             .header(ACCEPT, header_value(&request.accept)?)
-            .header(COOKIE, header_value(session_header)?);
+            .header(COOKIE, header_value(session_header.as_str())?);
         if let Some(accept_language) = &request.accept_language {
             builder = builder.header(ACCEPT_LANGUAGE, header_value(accept_language)?);
         }

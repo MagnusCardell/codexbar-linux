@@ -13,7 +13,10 @@ use crate::browser::keyring::{
     CookieDecryptContext, CookieDecryptor, DecryptError, DecryptionStatus, DecryptorBackend,
 };
 use crate::browser::profile::{path_is_under, BrowserProfileDescriptor};
-use crate::browser::session_material::{ScopedCookie, SessionMaterial, SessionMaterialError};
+use crate::browser::session_material::{
+    cookie_domain_matches, cookie_path_matches, CookieRequestTarget, ScopedCookie, SessionMaterial,
+    SessionMaterialError, SessionMaterialPolicy,
+};
 use crate::model::KeyringState;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -23,6 +26,7 @@ pub struct CookieQuery {
     provider: String,
     domains: Vec<String>,
     names: Vec<String>,
+    target_url: Option<&'static str>,
 }
 
 impl CookieQuery {
@@ -35,11 +39,13 @@ impl CookieQuery {
                     "openai.example.invalid".to_string(),
                 ],
                 names: vec!["quota_marker".to_string(), "usage_marker".to_string()],
+                target_url: None,
             },
             "claude" => Self {
                 provider: provider.to_string(),
                 domains: vec!["claude.example.invalid".to_string()],
                 names: vec!["quota_marker".to_string()],
+                target_url: None,
             },
             _ => Self {
                 provider: provider.to_string(),
@@ -48,6 +54,7 @@ impl CookieQuery {
                     provider_domain_label(provider)
                 )],
                 names: vec!["quota_marker".to_string()],
+                target_url: None,
             },
         }
     }
@@ -58,6 +65,7 @@ impl CookieQuery {
                 provider: provider.to_string(),
                 domains: vec!["chatgpt.com".to_string()],
                 names: Vec::new(),
+                target_url: Some(SessionMaterialPolicy::codex_dashboard().target_url()),
             },
             _ => Self::for_provider(provider),
         }
@@ -65,6 +73,10 @@ impl CookieQuery {
 
     pub fn provider(&self) -> &str {
         &self.provider
+    }
+
+    fn request_target(&self) -> Option<CookieRequestTarget> {
+        self.target_url.and_then(CookieRequestTarget::parse)
     }
 
     fn host_keys(&self) -> Vec<String> {
@@ -142,10 +154,18 @@ pub struct CookieStoreSessionOutcome {
 pub struct BrowserCookieMaterialSummary {
     pub profiles_discovered: u64,
     pub candidate_cookie_rows: u64,
+    pub domain_matched_rows: u64,
+    pub path_matched_rows: u64,
+    pub secure_matched_rows: u64,
     pub plaintext_value_rows: u64,
     pub encrypted_value_rows: u64,
     pub encrypted_prefixes: EncryptedPrefixCounts,
     pub expired_rows: u64,
+    pub decrypted_rows: u64,
+    pub header_eligible_rows: u64,
+    pub header_rejected_rows: u64,
+    pub header_rejected_by_class: HeaderRejectedByClassCounts,
+    pub cookie_header_status: CookieHeaderStatus,
     pub usable_session_cookies: u64,
     pub decryptor_backend: DecryptorBackend,
     pub decryption_status: DecryptionStatus,
@@ -157,10 +177,18 @@ impl Default for BrowserCookieMaterialSummary {
         Self {
             profiles_discovered: 0,
             candidate_cookie_rows: 0,
+            domain_matched_rows: 0,
+            path_matched_rows: 0,
+            secure_matched_rows: 0,
             plaintext_value_rows: 0,
             encrypted_value_rows: 0,
             encrypted_prefixes: EncryptedPrefixCounts::default(),
             expired_rows: 0,
+            decrypted_rows: 0,
+            header_eligible_rows: 0,
+            header_rejected_rows: 0,
+            header_rejected_by_class: HeaderRejectedByClassCounts::default(),
+            cookie_header_status: CookieHeaderStatus::NotAttempted,
             usable_session_cookies: 0,
             decryptor_backend: DecryptorBackend::Unavailable,
             decryption_status: DecryptionStatus::NotNeeded,
@@ -183,10 +211,20 @@ impl BrowserCookieMaterialSummary {
 
     pub fn combine_profile(&mut self, other: BrowserCookieMaterialSummary) {
         self.candidate_cookie_rows += other.candidate_cookie_rows;
+        self.domain_matched_rows += other.domain_matched_rows;
+        self.path_matched_rows += other.path_matched_rows;
+        self.secure_matched_rows += other.secure_matched_rows;
         self.plaintext_value_rows += other.plaintext_value_rows;
         self.encrypted_value_rows += other.encrypted_value_rows;
         self.encrypted_prefixes.combine(other.encrypted_prefixes);
         self.expired_rows += other.expired_rows;
+        self.decrypted_rows += other.decrypted_rows;
+        self.header_eligible_rows += other.header_eligible_rows;
+        self.header_rejected_rows += other.header_rejected_rows;
+        self.header_rejected_by_class
+            .combine(other.header_rejected_by_class);
+        self.cookie_header_status =
+            combine_cookie_header_status(self.cookie_header_status, other.cookie_header_status);
         self.usable_session_cookies += other.usable_session_cookies;
         self.decryption_status =
             combine_decryption_status(self.decryption_status, other.decryption_status);
@@ -199,7 +237,7 @@ impl BrowserCookieMaterialSummary {
     fn observe_rows(&mut self, rows: &[CookieRow]) {
         for row in rows {
             self.candidate_cookie_rows += 1;
-            if !row.value.is_empty() {
+            if row.encrypted_value.is_empty() {
                 self.plaintext_value_rows += 1;
             }
             if !row.encrypted_value.is_empty() {
@@ -211,6 +249,37 @@ impl BrowserCookieMaterialSummary {
                 self.expired_rows += 1;
             }
         }
+    }
+
+    fn record_domain_match(&mut self) {
+        self.domain_matched_rows += 1;
+    }
+
+    fn record_path_match(&mut self) {
+        self.path_matched_rows += 1;
+    }
+
+    fn record_secure_match(&mut self) {
+        self.secure_matched_rows += 1;
+    }
+
+    fn record_decrypted_row(&mut self) {
+        self.decrypted_rows += 1;
+        self.decryption_status =
+            combine_decryption_status(self.decryption_status, DecryptionStatus::Succeeded);
+    }
+
+    fn record_header_eligible_row(&mut self) {
+        self.header_eligible_rows += 1;
+    }
+
+    fn record_header_rejection(&mut self, class: HeaderRejectedClass) {
+        self.header_rejected_rows += 1;
+        self.header_rejected_by_class.record(class);
+    }
+
+    fn record_cookie_header_status(&mut self, status: CookieHeaderStatus) {
+        self.cookie_header_status = combine_cookie_header_status(self.cookie_header_status, status);
     }
 
     fn record_usable_session_cookies(&mut self, count: u64, decrypted: bool) {
@@ -289,6 +358,77 @@ impl EncryptedPrefixCounts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CookieHeaderStatus {
+    #[default]
+    NotAttempted,
+    Built,
+    Empty,
+    HeaderTooLarge,
+    TooManyCookies,
+    InvalidMaterial,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct HeaderRejectedByClassCounts {
+    pub invalid_name: u64,
+    pub invalid_value: u64,
+    pub empty_name: u64,
+    pub too_long: u64,
+    pub expired: u64,
+    pub domain_mismatch: u64,
+    pub path_mismatch: u64,
+    pub secure_mismatch: u64,
+    pub unsupported_prefix: u64,
+    pub decrypt_failed: u64,
+}
+
+impl HeaderRejectedByClassCounts {
+    fn record(&mut self, class: HeaderRejectedClass) {
+        match class {
+            HeaderRejectedClass::InvalidName => self.invalid_name += 1,
+            HeaderRejectedClass::InvalidValue => self.invalid_value += 1,
+            HeaderRejectedClass::EmptyName => self.empty_name += 1,
+            HeaderRejectedClass::TooLong => self.too_long += 1,
+            HeaderRejectedClass::Expired => self.expired += 1,
+            HeaderRejectedClass::DomainMismatch => self.domain_mismatch += 1,
+            HeaderRejectedClass::PathMismatch => self.path_mismatch += 1,
+            HeaderRejectedClass::SecureMismatch => self.secure_mismatch += 1,
+            HeaderRejectedClass::UnsupportedPrefix => self.unsupported_prefix += 1,
+            HeaderRejectedClass::DecryptFailed => self.decrypt_failed += 1,
+        }
+    }
+
+    fn combine(&mut self, other: Self) {
+        self.invalid_name += other.invalid_name;
+        self.invalid_value += other.invalid_value;
+        self.empty_name += other.empty_name;
+        self.too_long += other.too_long;
+        self.expired += other.expired;
+        self.domain_mismatch += other.domain_mismatch;
+        self.path_mismatch += other.path_mismatch;
+        self.secure_mismatch += other.secure_mismatch;
+        self.unsupported_prefix += other.unsupported_prefix;
+        self.decrypt_failed += other.decrypt_failed;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HeaderRejectedClass {
+    InvalidName,
+    InvalidValue,
+    EmptyName,
+    TooLong,
+    Expired,
+    DomainMismatch,
+    PathMismatch,
+    SecureMismatch,
+    UnsupportedPrefix,
+    DecryptFailed,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EncryptedCookiePrefix {
     V10,
@@ -324,6 +464,23 @@ fn combine_decryption_status(
         (Unavailable, _) | (_, Unavailable) => Unavailable,
         (Succeeded, _) | (_, Succeeded) => Succeeded,
         (NotNeeded, NotNeeded) => NotNeeded,
+    }
+}
+
+fn combine_cookie_header_status(
+    current: CookieHeaderStatus,
+    next: CookieHeaderStatus,
+) -> CookieHeaderStatus {
+    use CookieHeaderStatus::{
+        Built, Empty, HeaderTooLarge, InvalidMaterial, NotAttempted, TooManyCookies,
+    };
+    match (current, next) {
+        (HeaderTooLarge, _) | (_, HeaderTooLarge) => HeaderTooLarge,
+        (TooManyCookies, _) | (_, TooManyCookies) => TooManyCookies,
+        (InvalidMaterial, _) | (_, InvalidMaterial) => InvalidMaterial,
+        (Built, _) | (_, Built) => Built,
+        (Empty, _) | (_, Empty) => Empty,
+        (NotAttempted, NotAttempted) => NotAttempted,
     }
 }
 
@@ -578,37 +735,68 @@ pub fn read_profile_session_material(
 
     for query in queries {
         match query_cookie_rows(&connection, &columns, query, encrypted_value_has_host_hash) {
-            Ok(rows) => {
+            Ok(mut rows) => {
                 outcome.material_summary.observe_rows(&rows);
+                rows.sort_by(|left, right| {
+                    right
+                        .path
+                        .len()
+                        .cmp(&left.path.len())
+                        .then(left.creation_utc.cmp(&right.creation_utc))
+                });
+                let target = query.request_target();
                 let mut cookies = Vec::new();
                 let mut decrypted_cookie = false;
                 let mut used_keyring = false;
-                let mut provider_had_material_error = false;
+                let mut provider_had_hard_material_error = false;
+                let mut provider_had_header_reject = false;
                 for row in rows {
-                    if row.is_expired() {
+                    row.record_request_matches(target.as_ref(), &mut outcome.material_summary);
+                    if let Some(class) = row.request_rejection(target.as_ref()) {
+                        outcome.material_summary.record_header_rejection(class);
                         continue;
                     }
-                    match row.scoped_cookie(decryptor) {
+                    match row.scoped_cookie_for_header(decryptor) {
                         Ok(Some((kind, cookie))) => {
                             decrypted_cookie |= kind.was_decrypted();
                             used_keyring |= kind.requires_keyring();
+                            if kind.was_decrypted() {
+                                outcome.material_summary.record_decrypted_row();
+                            }
+                            outcome.material_summary.record_header_eligible_row();
                             cookies.push(cookie);
                         }
                         Ok(None) => {}
-                        Err(error) => {
-                            provider_had_material_error = true;
+                        Err(CookieRowHeaderError::Decrypt(error)) => {
+                            provider_had_hard_material_error = true;
+                            outcome
+                                .material_summary
+                                .record_header_rejection(header_rejected_class_from_decrypt(error));
                             outcome.material_summary.record_decryption_error(error);
                             record_decrypt_error(&mut outcome, query.provider(), error);
                         }
+                        Err(CookieRowHeaderError::Header { kind, error }) => {
+                            provider_had_header_reject = true;
+                            if kind.was_decrypted() {
+                                decrypted_cookie = true;
+                                outcome.material_summary.record_decrypted_row();
+                            }
+                            outcome.material_summary.record_header_rejection(
+                                header_rejected_class_from_session_material(error),
+                            );
+                        }
                     }
                 }
-                if provider_had_material_error {
+                if provider_had_hard_material_error {
                     cookies.clear();
                 }
                 if !cookies.is_empty() {
                     let provider_count = cookies.len() as u64;
                     match SessionMaterial::try_new(query.provider(), cookies) {
                         Ok(material) => {
+                            outcome
+                                .material_summary
+                                .record_cookie_header_status(CookieHeaderStatus::Built);
                             if used_keyring {
                                 record_keyring_state(&mut outcome, KeyringState::Unlocked);
                             }
@@ -628,6 +816,9 @@ pub fn read_profile_session_material(
                             sessions.insert(query.provider().to_string(), material);
                         }
                         Err(error) => {
+                            outcome.material_summary.record_cookie_header_status(
+                                cookie_header_status_from_session_material(error),
+                            );
                             let error = CookieRowDecryptError {
                                 kind: if decrypted_cookie {
                                     CookieMaterialKind::BasicEncrypted
@@ -640,11 +831,28 @@ pub fn read_profile_session_material(
                             record_decrypt_error(&mut outcome, query.provider(), error);
                         }
                     }
+                } else if provider_had_header_reject {
+                    outcome
+                        .material_summary
+                        .record_cookie_header_status(CookieHeaderStatus::InvalidMaterial);
+                    let error = CookieRowDecryptError {
+                        kind: if decrypted_cookie {
+                            CookieMaterialKind::BasicEncrypted
+                        } else {
+                            CookieMaterialKind::Plaintext
+                        },
+                        error: DecryptError::InvalidMaterial,
+                    };
+                    outcome.material_summary.record_decryption_error(error);
+                    record_decrypt_error(&mut outcome, query.provider(), error);
                 } else if !outcome
                     .provider_diagnostic_codes
                     .get(query.provider())
                     .is_some_and(|codes| diagnostics::contains_dependency_failure(codes))
                 {
+                    outcome
+                        .material_summary
+                        .record_cookie_header_status(CookieHeaderStatus::Empty);
                     outcome.push_provider_code(query.provider(), diagnostics::COOKIE_MISSING);
                 }
             }
@@ -856,7 +1064,7 @@ fn query_cookie_rows(
     let source_scheme = optional_column(columns, "source_scheme");
     let source_port = optional_column(columns, "source_port");
     let mut sql = format!(
-        "SELECT host_key, name, path, value, encrypted_value, expires_utc, is_secure, is_httponly, {samesite}, {source_scheme}, {source_port} FROM cookies WHERE host_key IN ({host_placeholders})"
+        "SELECT creation_utc, host_key, name, path, value, encrypted_value, expires_utc, is_secure, is_httponly, {samesite}, {source_scheme}, {source_port} FROM cookies WHERE host_key IN ({host_placeholders})"
     );
     if !query.names.is_empty() {
         sql.push_str(" AND name IN (");
@@ -911,12 +1119,14 @@ fn optional_column(columns: &BTreeSet<String>, name: &str) -> &'static str {
 }
 
 struct CookieRow {
+    creation_utc: i64,
     host_key: String,
     name: String,
     path: String,
     value: String,
     encrypted_value: Vec<u8>,
     expires_utc: i64,
+    is_secure: bool,
     encrypted_value_has_host_hash: bool,
 }
 
@@ -982,24 +1192,27 @@ impl CookieRow {
         row: &rusqlite::Row<'_>,
         encrypted_value_has_host_hash: bool,
     ) -> rusqlite::Result<Self> {
-        let host_key: String = row.get(0)?;
-        let name: String = row.get(1)?;
-        let path: String = row.get(2)?;
-        let value: String = row.get(3)?;
-        let encrypted_value: Vec<u8> = row.get(4)?;
-        let expires_utc: i64 = row.get(5)?;
-        let _secure: i64 = row.get(6)?;
-        let _http_only: i64 = row.get(7)?;
-        let _same_site: Option<i64> = row.get(8)?;
-        let _source_scheme: Option<i64> = row.get(9)?;
-        let _source_port: Option<i64> = row.get(10)?;
+        let creation_utc: i64 = row.get(0)?;
+        let host_key: String = row.get(1)?;
+        let name: String = row.get(2)?;
+        let path: String = row.get(3)?;
+        let value: String = row.get(4)?;
+        let encrypted_value: Vec<u8> = row.get(5)?;
+        let expires_utc: i64 = row.get(6)?;
+        let secure: i64 = row.get(7)?;
+        let _http_only: i64 = row.get(8)?;
+        let _same_site: Option<i64> = row.get(9)?;
+        let _source_scheme: Option<i64> = row.get(10)?;
+        let _source_port: Option<i64> = row.get(11)?;
         Ok(Self {
+            creation_utc,
             host_key,
             name,
             path,
             value,
             encrypted_value,
             expires_utc,
+            is_secure: secure != 0,
             encrypted_value_has_host_hash,
         })
     }
@@ -1009,6 +1222,53 @@ impl CookieRow {
             return false;
         }
         self.expires_utc <= chromium_now_utc()
+    }
+
+    fn request_rejection(
+        &self,
+        target: Option<&CookieRequestTarget>,
+    ) -> Option<HeaderRejectedClass> {
+        let Some(target) = target else {
+            return self.is_expired().then_some(HeaderRejectedClass::Expired);
+        };
+        if self.is_expired() {
+            return Some(HeaderRejectedClass::Expired);
+        }
+        if !cookie_domain_matches(&self.host_key, target.host()) {
+            return Some(HeaderRejectedClass::DomainMismatch);
+        }
+        if !cookie_path_matches(&self.path, target.path()) {
+            return Some(HeaderRejectedClass::PathMismatch);
+        }
+        if self.is_secure && !target.is_https() {
+            return Some(HeaderRejectedClass::SecureMismatch);
+        }
+        None
+    }
+
+    fn record_request_matches(
+        &self,
+        target: Option<&CookieRequestTarget>,
+        summary: &mut BrowserCookieMaterialSummary,
+    ) {
+        let Some(target) = target else {
+            return;
+        };
+        if self.is_expired() {
+            return;
+        }
+        if !cookie_domain_matches(&self.host_key, target.host()) {
+            return;
+        }
+        summary.record_domain_match();
+        if !cookie_path_matches(&self.path, target.path()) {
+            return;
+        }
+        summary.record_path_match();
+        if self.is_secure && !target.is_https() {
+            return;
+        }
+        summary.record_secure_match();
     }
 
     fn session_material(
@@ -1069,6 +1329,59 @@ impl CookieRow {
             })
     }
 
+    fn scoped_cookie_for_header(
+        &self,
+        decryptor: &dyn CookieDecryptor,
+    ) -> Result<Option<(CookieMaterialKind, ScopedCookie)>, CookieRowHeaderError> {
+        match self.material_kind() {
+            CookieMaterialKind::Plaintext => self
+                .scoped_cookie_from_value_for_header(
+                    self.value.clone(),
+                    CookieMaterialKind::Plaintext,
+                )
+                .map(Some),
+            CookieMaterialKind::BasicEncrypted | CookieMaterialKind::KeyringEncrypted => {
+                let kind = self.material_kind();
+                let value = decryptor
+                    .decrypt(
+                        &self.encrypted_value,
+                        CookieDecryptContext {
+                            host_key: &self.host_key,
+                            db_version: self.encrypted_value_has_host_hash.then_some(24),
+                        },
+                    )
+                    .map_err(|error| {
+                        CookieRowHeaderError::Decrypt(CookieRowDecryptError { kind, error })
+                    })?;
+                self.scoped_cookie_from_value_for_header(value, kind)
+                    .map(Some)
+            }
+            CookieMaterialKind::UnknownEncrypted => {
+                Err(CookieRowHeaderError::Decrypt(CookieRowDecryptError {
+                    kind: CookieMaterialKind::UnknownEncrypted,
+                    error: DecryptError::Unavailable,
+                }))
+            }
+            CookieMaterialKind::Empty => Ok(None),
+        }
+    }
+
+    fn scoped_cookie_from_value_for_header(
+        &self,
+        value: String,
+        kind: CookieMaterialKind,
+    ) -> Result<(CookieMaterialKind, ScopedCookie), CookieRowHeaderError> {
+        ScopedCookie::try_new_for_domain_with_secure(
+            &self.host_key,
+            &self.path,
+            self.is_secure,
+            self.name.clone(),
+            value,
+        )
+        .map(|cookie| (kind, cookie))
+        .map_err(|error| CookieRowHeaderError::Header { kind, error })
+    }
+
     fn material_kind(&self) -> CookieMaterialKind {
         if self.encrypted_value.starts_with(b"v10") {
             CookieMaterialKind::BasicEncrypted
@@ -1076,12 +1389,21 @@ impl CookieRow {
             CookieMaterialKind::KeyringEncrypted
         } else if !self.encrypted_value.is_empty() {
             CookieMaterialKind::UnknownEncrypted
-        } else if !self.value.is_empty() {
-            CookieMaterialKind::Plaintext
-        } else {
+        } else if self.value.is_empty() {
             CookieMaterialKind::Empty
+        } else {
+            CookieMaterialKind::Plaintext
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CookieRowHeaderError {
+    Decrypt(CookieRowDecryptError),
+    Header {
+        kind: CookieMaterialKind,
+        error: SessionMaterialError,
+    },
 }
 
 fn decrypt_error_from_session_material(error: SessionMaterialError) -> DecryptError {
@@ -1089,10 +1411,63 @@ fn decrypt_error_from_session_material(error: SessionMaterialError) -> DecryptEr
         SessionMaterialError::TooManyCookies => DecryptError::TooManyCookies,
         SessionMaterialError::HeaderTooLarge => DecryptError::HeaderTooLarge,
         SessionMaterialError::InvalidProvider
+        | SessionMaterialError::EmptyCookieName
+        | SessionMaterialError::CookieNameTooLong
         | SessionMaterialError::InvalidCookieName
+        | SessionMaterialError::CookieValueTooLong
         | SessionMaterialError::InvalidCookieValue
         | SessionMaterialError::InvalidCookieDomain
         | SessionMaterialError::InvalidCookiePath => DecryptError::InvalidMaterial,
+    }
+}
+
+fn header_rejected_class_from_session_material(error: SessionMaterialError) -> HeaderRejectedClass {
+    match error {
+        SessionMaterialError::EmptyCookieName => HeaderRejectedClass::EmptyName,
+        SessionMaterialError::InvalidCookieName => HeaderRejectedClass::InvalidName,
+        SessionMaterialError::InvalidCookieValue => HeaderRejectedClass::InvalidValue,
+        SessionMaterialError::CookieNameTooLong | SessionMaterialError::CookieValueTooLong => {
+            HeaderRejectedClass::TooLong
+        }
+        SessionMaterialError::InvalidCookieDomain | SessionMaterialError::InvalidCookiePath => {
+            HeaderRejectedClass::InvalidValue
+        }
+        SessionMaterialError::InvalidProvider
+        | SessionMaterialError::TooManyCookies
+        | SessionMaterialError::HeaderTooLarge => HeaderRejectedClass::DecryptFailed,
+    }
+}
+
+fn cookie_header_status_from_session_material(error: SessionMaterialError) -> CookieHeaderStatus {
+    match error {
+        SessionMaterialError::TooManyCookies => CookieHeaderStatus::TooManyCookies,
+        SessionMaterialError::HeaderTooLarge => CookieHeaderStatus::HeaderTooLarge,
+        SessionMaterialError::InvalidProvider
+        | SessionMaterialError::EmptyCookieName
+        | SessionMaterialError::CookieNameTooLong
+        | SessionMaterialError::InvalidCookieName
+        | SessionMaterialError::CookieValueTooLong
+        | SessionMaterialError::InvalidCookieValue
+        | SessionMaterialError::InvalidCookieDomain
+        | SessionMaterialError::InvalidCookiePath => CookieHeaderStatus::InvalidMaterial,
+    }
+}
+
+fn header_rejected_class_from_decrypt(error: CookieRowDecryptError) -> HeaderRejectedClass {
+    match error.error {
+        DecryptError::UnsupportedFormat => HeaderRejectedClass::UnsupportedPrefix,
+        DecryptError::Unavailable if error.kind == CookieMaterialKind::UnknownEncrypted => {
+            HeaderRejectedClass::UnsupportedPrefix
+        }
+        DecryptError::Unavailable
+        | DecryptError::Locked
+        | DecryptError::PromptRequired
+        | DecryptError::Failed
+        | DecryptError::MalformedCiphertext
+        | DecryptError::WrongKey
+        | DecryptError::InvalidMaterial
+        | DecryptError::HeaderTooLarge
+        | DecryptError::TooManyCookies => HeaderRejectedClass::DecryptFailed,
     }
 }
 

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::model::KeyringState;
 
 use aes::Aes128;
@@ -131,10 +133,19 @@ pub trait CookieDecryptor {
     ) -> Result<String, DecryptError>;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct CookieDecryptContext<'a> {
     pub host_key: &'a str,
     pub db_version: Option<i64>,
+}
+
+impl fmt::Debug for CookieDecryptContext<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CookieDecryptContext")
+            .field("host_key", &"[redacted]")
+            .field("db_version", &self.db_version)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]

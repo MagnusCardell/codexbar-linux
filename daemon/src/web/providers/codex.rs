@@ -64,7 +64,11 @@ where
             &preflight_codes,
         );
     };
-    let Some(session_header) = material.cookie_header_value_for_url(policy.dashboard_url()) else {
+    let Some(session_header) = material
+        .cookie_header_for_url(policy.dashboard_url())
+        .ok()
+        .flatten()
+    else {
         return failure_with_extra_codes(
             state_from_session_codes(&preflight_codes),
             diagnostics::COOKIE_ABSENT,
@@ -538,13 +542,12 @@ fn looks_like_login_redirect_url(url: &str) -> bool {
     lower.contains("/auth/") || lower.contains("/login") || lower.contains("/log-in")
 }
 
-#[derive(Debug)]
 enum ParsedDashboard {
     Success(Box<DashboardPayload>),
     LoginRequired,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DashboardPayload {
     #[serde(rename = "schemaVersion")]
@@ -555,7 +558,7 @@ struct DashboardPayload {
     credits: Option<DashboardCredits>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DashboardUsage {
     session: Option<MeterPayload>,
@@ -563,7 +566,7 @@ struct DashboardUsage {
     code_review: Option<MeterPayload>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MeterPayload {
     used_percent: Option<f64>,
@@ -574,7 +577,7 @@ struct MeterPayload {
     detail: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DashboardCredits {
     remaining: Option<f64>,

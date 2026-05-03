@@ -12,6 +12,11 @@ production/plain backend, and a noninteractive Secret Service probe abstraction.
 Task 04B.3 adds Chromium Linux basic/plain `v10` decryption for the verified
 OSCrypt basic password-store path, using pure RustCrypto primitives inside the
 daemon and keeping Secret Service/KWallet/newer formats out of scope.
+Task 04B.4 adds daemon-side session-material policy support for the Codex
+static dashboard request. It preserves Chromium host-only versus domain-cookie
+matching, builds Cookie headers only in memory, and exposes only counts/classes
+for header eligibility. It does not verify Codex cookie names, enable default
+live web refresh, change parsers, or promote live fixtures.
 Task 04D.0 adds a daemon-only Codex web adapter skeleton with fake HTTP
 fixtures, static policy/URL allowlists, response-size/redirect/timeout
 handling, and normalization into the existing snapshot provider shape. Task
@@ -197,6 +202,27 @@ Rules:
 - Do not persist raw cookie headers, cookies, decrypted secrets, bearer tokens,
   session keys, OAuth tokens, or local storage tokens.
 - `Debug` for in-memory session material must be redacted or unavailable.
+- Provider-specific session-material policy may compute Cookie-header
+  eligibility for a static request before a provider fetch, but public summaries
+  must contain only counts/classes such as target match counts, rejection
+  classes including secure-cookie applicability, and size classes. They must
+  not include cookie names, values, exact domains, profile paths, encrypted
+  bytes, or header strings.
+- For Task 04B.4 the Codex policy is fixed to
+  `https://chatgpt.com/codex/settings/usage`. It does not accept arbitrary
+  provider URLs, caller-provided cookie names, caller-provided profile paths, or
+  manual Cookie headers.
+- Chromium-family host keys without a leading dot are host-only for URL
+  matching; leading-dot domain cookies can match the request host and
+  subdomains when the request path also matches according to browser path-match
+  rules. For Task 04B.4 this is covered synthetically for
+  `https://chatgpt.com/codex/settings/usage`.
+- Header-ineligible rows that decrypted successfully and fail only strict
+  Cookie-header name/value syntax validation may be skipped when at least one
+  valid request-eligible cookie remains. If all request-eligible rows are
+  header-ineligible, the result is `invalid_material`. Decryption failures,
+  unsupported encrypted prefixes, malformed ciphertext, and wrong keys still
+  fail closed and discard partial provider material.
 
 Chromium-family decryption must use a reviewed Secret Service path or a small
 reviewed crate. Firefox cookie values are read from the Firefox cookie store
@@ -224,9 +250,9 @@ Unsupported encrypted formats remain fail-closed:
   cookie material produce redaction-safe failure classes and discard partial
   provider material.
 - empty cookie values are valid Cookie-header material (`name=`), but
-  control characters, semicolons, quotes, backslashes, invalid domains, invalid
-  paths, excessive values, excessive cookie counts, and oversized Cookie
-  headers fail closed with redaction-safe classes.
+  control characters, whitespace, commas, semicolons, quotes, backslashes,
+  invalid domains, invalid paths, excessive values, excessive cookie counts,
+  and oversized Cookie headers are rejected with redaction-safe classes.
 
 Scheduled/background refresh must not trigger surprise keyring prompts.
 Interactive keyring unlock is out of scope until a later UX and schema task

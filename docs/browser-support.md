@@ -10,8 +10,10 @@ cookie material summaries, plaintext Chromium row support, fail-closed
 encrypted row classification, fake/test decryptor separation, and a
 noninteractive Secret Service probe abstraction. Task 04B.3 adds daemon-only
 Chromium Linux basic/plain `v10` decryption for the verified OSCrypt basic
-password-store path. Task 04D.1 adds Codex web live
-reconnaissance against a marked throwaway fake home only. These tasks do not
+password-store path. Task 04B.4 adds session-material policy support for the
+Codex static dashboard request, including browser-style host-only versus domain
+cookie matching and counts-only header eligibility summaries. Task 04D.1 adds
+Codex web live reconnaissance against a marked throwaway fake home only. These tasks do not
 enable real user profile scanning by default, real Secret Service or KWallet
 extraction, default provider web fetches, or Firefox import.
 
@@ -114,11 +116,12 @@ The summary never prints cookie names, values, encrypted bytes, exact domains,
 profile paths, SQL rows, Cookie headers, Authorization headers, account
 identity, or raw provider payloads.
 
-Current behavior after Task 04B.3:
+Current behavior after Task 04B.4:
 
-- Chromium rows with non-empty `value` and empty `encrypted_value` are usable
+- Chromium rows with `value` and empty `encrypted_value` are usable
   after provider domain/path validation. This is the path that covers any
-  browser profile where `--password-store=basic` yields plaintext rows.
+  browser profile where `--password-store=basic` yields plaintext rows,
+  including valid empty cookie values.
 - Chromium Linux basic/plain `v10` rows are supported by the production/plain
   backend only for the verified OSCrypt basic path:
   - prefix: `v10` encrypted cookie value;
@@ -141,11 +144,31 @@ Current behavior after Task 04B.3:
 - If a provider-scoped encrypted row fails while another provider-scoped
   plaintext row exists, the daemon discards the partial material and web fetch
   is not attempted.
+- Header-ineligible rows are different from decryption failures. For the static
+  Codex request, rows that decrypt successfully but fail only strict
+  Cookie-header name/value syntax validation are skipped when at least one
+  valid header-safe cookie remains. If all request-relevant material is
+  header-ineligible, the profile fails with `invalid_material`.
+- `header_too_large` and `too_many_cookies` remain fail-closed header
+  construction failures. Unsupported encrypted prefixes, malformed ciphertext,
+  wrong keys, keyring-needed rows, and other decryption failures still discard
+  partial provider material and do not send a Cookie header.
 - Safe live summaries now include `decryptionFailureClass` so an ignored recon
   run can distinguish `keyring_needed`, `unsupported_format`,
   `malformed_ciphertext`, `wrong_key`, `invalid_material`,
   `header_too_large`, `too_many_cookies`, `unavailable`, and generic `failed`
   without printing cookie material.
+- Task 04B.4 keeps Cookie-header construction in memory and adds a
+  Codex-dashboard session policy summary with counts/classes only:
+  `domainMatchedRows`, `pathMatchedRows`, `secureMatchedRows`,
+  `decryptedRows`, `headerEligibleRows`, `headerRejectedRows`,
+  `headerRejectedByClass`, and `cookieHeaderStatus`. The summary does not
+  include cookie names, values, exact domains, profile paths, encrypted bytes,
+  or Cookie headers.
+- Chromium host keys without a leading dot are now treated as host-only during
+  session-material URL matching; leading-dot domain cookies may match the
+  registrable host and subdomains. This is synthetic policy coverage for the
+  static Codex URL, not default live-profile scanning.
 
 The Task 04B.3 local Chrome throwaway smoke used `--password-store=basic` and
 reproduced the pre-fix failure mode: the seeded cookie was present but the
@@ -160,9 +183,11 @@ rows were `v10`, 0 were plaintext, 2 were expired, and the plain decryptor
 reached UTF-8 output, but the domain-wide cookie set included material that
 failed safe Cookie-header validation. The safe summary reported
 `decryptionFailureClass=invalid_material`, `usableSessionCookies=0`, and
-`webFetch=not_attempted`. The next task should verify required Codex cookie
-names or header material policy with synthetic fixtures; it should not broaden
-provider parsing from live response bodies.
+`webFetch=not_attempted`. Task 04B.4 addresses that class of blocker with
+synthetic policy coverage. The gated live recon has not been rerun in this
+workspace because no marked throwaway fake home was available through
+`CODEXBAR_WEB_HOME` or `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`; parser work and
+default live fetch remain out of scope.
 
 ## Google Chrome
 

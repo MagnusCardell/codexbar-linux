@@ -26,7 +26,7 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 04B.3 Chromium basic/plain v10 decryption plus
+This repository is at **Task 04B.4 Codex cookie header/session-material policy plus
 Task 04D.1 gated Codex web transport and live reconnaissance** status. The Task
 03 GNOME Shell vertical slice and design gate are
 complete enough for the browser-cookie implementation phase, with live GNOME 46
@@ -68,10 +68,11 @@ Present:
   bounded fake-root discovery for Chrome, Chromium, Chromium snap-shaped roots,
   and Brave; private temp-copy SQLite cookie DB reads; synthetic plaintext and
   fake encrypted cookie-row handling; verified Linux basic/plain `v10`
-  decryption for Chromium OSCrypt rows; safe encrypted-prefix and
-  failure-class summaries; fake keyring/decryptor states; memory-only session
-  material; redaction-safe `TestBrowserImport` results; and browser fixture
-  validation under `scripts/validate-browser-fixtures.sh`.
+  decryption for Chromium OSCrypt rows; browser-like Codex static-request
+  cookie matching; safe encrypted-prefix, header-eligibility, and failure-class
+  summaries; fake keyring/decryptor states; memory-only session material;
+  redaction-safe `TestBrowserImport` results; and browser fixture validation
+  under `scripts/validate-browser-fixtures.sh`.
 - Task 04B.1 opt-in throwaway browser verification:
   `scripts/chromium-throwaway-smoke.sh` creates a private temp home, launches a
   Chromium-family browser only with a throwaway user-data-dir, seeds only a
@@ -91,13 +92,16 @@ Present:
   `sourceAdapterPolicy.only(["linux_web"])`.
   Web fixtures live under `daemon/fixtures/web/codex/` and are checked by
   `scripts/validate-web-fixtures.sh`.
-- Task 04B.3 signed-in Codex throwaway recon result:
+- Task 04B.3 signed-in Codex throwaway recon result and Task 04B.4 follow-up:
   the browser layer found 19 provider-domain encrypted `v10` rows and no
   plaintext rows, but still produced no usable session material because the
   domain-wide cookie set included material that failed safe Cookie-header
-  validation. This keeps parser work and default live fetch enablement out of
-  scope until required Codex cookie names or header material policy are
-  verified with synthetic fixtures.
+  validation. Task 04B.4 now builds Codex Cookie headers only in memory for the
+  fixed `https://chatgpt.com/codex/settings/usage` request, skips only
+  syntax-invalid header rows when valid material remains, and records
+  counts/classes only. A signed-in live recon rerun still requires a marked
+  throwaway fake home and was not run in this workspace because
+  `CODEXBAR_WEB_HOME`/`CODEXBAR_BROWSER_IMPORT_FAKE_HOME` was unavailable.
 
 Not implemented after Task 04D.1:
 

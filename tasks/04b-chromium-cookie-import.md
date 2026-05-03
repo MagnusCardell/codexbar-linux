@@ -194,6 +194,48 @@ extension of the existing plain backend:
   Parser and HTTP transport remain out of scope until cookie-name/header
   material policy is verified.
 
+## Task 04B.4 Result
+
+Implemented session-material policy support for the Codex static dashboard
+request without parser, Shell, D-Bus XML, JSON schema, default live refresh,
+keyring-prompt, browser-scan, or live-fixture changes:
+
+- Cookie URL matching now preserves Chromium host-key semantics: host keys
+  without a leading dot are host-only, while leading-dot domain cookies may
+  match the request host and subdomains.
+- Cookie path matching remains segment-aware for the static request
+  `https://chatgpt.com/codex/settings/usage`.
+- Cookie headers are still constructed only in memory, bounded by existing
+  count and size limits, and redacted from `Debug`. The internal web request
+  consumes a redacted `CookieHeader` wrapper rather than exposing the header
+  string.
+- Request eligibility is checked before decryption for live Codex collection:
+  expired rows, domain mismatches, path mismatches, and Secure cookies on
+  non-HTTPS targets are skipped and counted by class.
+- Decryption failures, unsupported encrypted prefixes, malformed ciphertext,
+  wrong keys, header-too-large, and too-many-cookies still fail closed.
+  Header-ineligible rows that decrypted successfully but fail strict
+  name/value/header syntax validation are skipped only when at least one valid
+  header-safe cookie remains; if all request-relevant rows are header-ineligible,
+  the result is `invalid_material`.
+- Safe material summaries now include counts/classes only:
+  `domainMatchedRows`, `pathMatchedRows`, `secureMatchedRows`,
+  `decryptedRows`, `headerEligibleRows`, `headerRejectedRows`,
+  `headerRejectedByClass`, and `cookieHeaderStatus`. They do not include cookie
+  names, values, encrypted bytes, exact domains, profile paths, SQL rows, or
+  Cookie headers.
+- Added synthetic tests for the Codex static dashboard policy, safe summary
+  serialization, provider mismatch, host-only versus domain-cookie matching,
+  Secure filtering, deterministic longer-path header ordering, skipped invalid
+  name/value rows when valid material remains, all-invalid `invalid_material`,
+  expired/path/domain-mismatch skips, header size caps, and cookie count caps.
+- The gated live recon rerun is pending in this workspace because no marked
+  throwaway fake home was available through `CODEXBAR_WEB_HOME` or
+  `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`.
+- Codex cookie-name verification remains unresolved. Production `linux_web`
+  remains disabled by default and live recon must still use a marked throwaway
+  fake home.
+
 ## Checks To Run
 
 ```bash

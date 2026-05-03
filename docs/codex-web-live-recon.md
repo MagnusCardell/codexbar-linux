@@ -105,8 +105,15 @@ Allowed summary fields are:
 - `cookieMaterial`: safe browser-cookie material summary with only:
   `profilesDiscovered`, `candidateCookieRows`, `plaintextValueRows`,
   `encryptedValueRows`, `encryptedPrefixes`, `expiredRows`,
-  `usableSessionCookies`, `decryptorBackend`, `decryptionStatus`, and
-  `decryptionFailureClass`;
+  `domainMatchedRows`, `pathMatchedRows`, `secureMatchedRows`,
+  `decryptedRows`, `headerEligibleRows`, `headerRejectedRows`,
+  `headerRejectedByClass`, `cookieHeaderStatus`, `usableSessionCookies`,
+  `decryptorBackend`, `decryptionStatus`, and `decryptionFailureClass`.
+  `headerRejectedByClass` may contain only `invalid_name`, `invalid_value`,
+  `empty_name`, `too_long`, `expired`, `domain_mismatch`, `path_mismatch`,
+  `secure_mismatch`, `unsupported_prefix`, and `decrypt_failed`.
+  `cookieHeaderStatus` may be only `not_attempted`, `built`, `empty`,
+  `header_too_large`, `too_many_cookies`, or `invalid_material`;
 - `cookiePresence`: one of `none`, `found`, `decrypted`, `unavailable`, or
   `unknown`;
 - `webFetch`: one of `not_attempted`, `attempted`, `finished`, `blocked`,
@@ -203,6 +210,15 @@ redacted diagnostics may be retained.
 
 ## Known Limits
 
+- Task 04B.4 adds synthetic session-material policy support for the static
+  Codex dashboard URL. It can classify target-domain/path eligibility with
+  counts/classes only and preserves host-only versus domain-cookie matching,
+  skips only syntax-invalid header rows when valid material remains, and fails
+  closed for decrypt/unsupported-prefix/header cap failures. It does not verify
+  required live Codex cookie names or enable production web refresh.
+- The Task 04B.4 live recon rerun is pending in this workspace because no
+  marked throwaway fake home was available through `CODEXBAR_WEB_HOME` or
+  `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`.
 - Task 04B.3 live recon against the signed-in throwaway profile reached 19
   candidate `v10` rows and the plain decryptor, but produced
   `usableSessionCookies=0`, `cookiePresence="unavailable"`, and

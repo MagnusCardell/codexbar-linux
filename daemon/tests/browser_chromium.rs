@@ -10,7 +10,7 @@ use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
 use aes::Aes128;
 use codexbar_linuxd::app::{App, AppRuntime};
 use codexbar_linuxd::browser::cookie_store::{
-    copy_cookie_db_to_private_temp, DecryptionFailureClass,
+    copy_cookie_db_to_private_temp, CookieHeaderStatus, DecryptionFailureClass,
 };
 use codexbar_linuxd::browser::keyring::{
     BrowserDecryptorMode, DecryptionStatus, DecryptorBackend, FakeDecryptorMode,
@@ -796,6 +796,223 @@ fn live_codex_session_collection_constructs_material_from_plain_v10_basic_cookie
 }
 
 #[test]
+fn live_codex_session_collection_skips_header_invalid_rows_when_valid_material_remains() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open header policy fixture db");
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "valid_alpha", "/", "fixture-alpha"),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "value_bad", "/", "bad,value"),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "bad;name", "/", "fixture-beta"),
+    );
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    });
+    let material = collection.sessions.get("codex").expect("codex material");
+    let summary_json = serde_json::to_string(&collection.material_summary).expect("summary json");
+
+    assert_eq!(material.cookie_count(), 1);
+    assert_eq!(collection.material_summary.header_eligible_rows, 1);
+    assert_eq!(collection.material_summary.header_rejected_rows, 2);
+    assert_eq!(
+        collection
+            .material_summary
+            .header_rejected_by_class
+            .invalid_value,
+        1
+    );
+    assert_eq!(
+        collection
+            .material_summary
+            .header_rejected_by_class
+            .invalid_name,
+        1
+    );
+    assert_eq!(
+        collection.material_summary.cookie_header_status,
+        CookieHeaderStatus::Built
+    );
+    assert_eq!(collection.material_summary.usable_session_cookies, 1);
+    assert!(collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .is_some_and(|codes| codes.contains(&"browser_cookie_found".to_string())));
+    assert!(!summary_json.contains("valid_alpha"));
+    assert!(!summary_json.contains("value_bad"));
+    assert!(!summary_json.contains("fixture-alpha"));
+    assert!(!summary_json.contains("bad,value"));
+    assert_public_browser_json_safe(tmp.path(), &summary_json);
+}
+
+#[test]
+fn live_codex_session_collection_all_header_invalid_rows_are_invalid_material() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open all-invalid fixture db");
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "value_bad", "/", "bad,value"),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "bad;name", "/", "fixture-beta"),
+    );
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    });
+    let codes = collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .expect("codex diagnostics");
+
+    assert!(!collection.sessions.contains_key("codex"));
+    assert!(codes.contains(&"browser_cookie_decryption_failed".to_string()));
+    assert_eq!(
+        collection.material_summary.cookie_header_status,
+        CookieHeaderStatus::InvalidMaterial
+    );
+    assert_eq!(
+        collection.material_summary.decryption_failure_class,
+        DecryptionFailureClass::InvalidMaterial
+    );
+    assert_eq!(collection.material_summary.usable_session_cookies, 0);
+    assert_eq!(collection.material_summary.header_rejected_rows, 2);
+}
+
+#[test]
+fn live_codex_session_collection_ignores_expired_path_and_domain_mismatch_before_header_validation()
+{
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open match policy fixture db");
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "valid_alpha", "/codex", "fixture-alpha"),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "expired_bad", "/", "bad,value").expired(),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".chatgpt.com", "path_bad", "/other", "bad,value"),
+    );
+    insert_cookie_row_with_attrs(
+        &connection,
+        CookieAttrs::new(".openai.com", "domain_bad", "/", "bad,value"),
+    );
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    });
+
+    assert!(collection.sessions.contains_key("codex"));
+    assert_eq!(collection.material_summary.expired_rows, 1);
+    assert_eq!(collection.material_summary.domain_matched_rows, 2);
+    assert_eq!(collection.material_summary.path_matched_rows, 1);
+    assert_eq!(
+        collection.material_summary.header_rejected_by_class.expired,
+        1
+    );
+    assert_eq!(
+        collection
+            .material_summary
+            .header_rejected_by_class
+            .path_mismatch,
+        1
+    );
+    assert_eq!(
+        collection.material_summary.cookie_header_status,
+        CookieHeaderStatus::Built
+    );
+}
+
+#[test]
+fn live_codex_session_collection_caps_header_size_and_cookie_count() {
+    for (row_count, value_len, expected_status, expected_class) in [
+        (
+            5,
+            4096,
+            CookieHeaderStatus::HeaderTooLarge,
+            DecryptionFailureClass::HeaderTooLarge,
+        ),
+        (
+            129,
+            16,
+            CookieHeaderStatus::TooManyCookies,
+            DecryptionFailureClass::TooManyCookies,
+        ),
+    ] {
+        let (tmp, _paths) = common::temp_paths();
+        let db = create_network_cookie_db(
+            tmp.path(),
+            ".config/google-chrome/Default",
+            "locked-or-wal/schema.sql",
+        );
+        let connection = Connection::open(&db).expect("open cap fixture db");
+        let value = "a".repeat(value_len);
+        for index in 0..row_count {
+            insert_cookie_row_with_attrs(
+                &connection,
+                CookieAttrs::new(".chatgpt.com", &format!("valid_{index}"), "/", &value),
+            );
+        }
+        drop(connection);
+
+        let collection = browser::collect_session_material(BrowserSessionRequest {
+            providers: vec!["codex".to_string()],
+            settings: Default::default(),
+            roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+            decryptor_mode: BrowserDecryptorMode::Plain,
+        });
+
+        assert!(!collection.sessions.contains_key("codex"));
+        assert_eq!(
+            collection.material_summary.cookie_header_status,
+            expected_status
+        );
+        assert_eq!(
+            collection.material_summary.decryption_failure_class,
+            expected_class
+        );
+        assert_eq!(collection.material_summary.usable_session_cookies, 0);
+    }
+}
+
+#[test]
 fn malformed_v10_and_wrong_host_hash_fail_closed_with_safe_classes() {
     for (encrypted_value, expected_class) in [
         (
@@ -1219,10 +1436,59 @@ fn insert_cookie_row(
     value: &str,
     encrypted_value: &[u8],
 ) {
+    insert_cookie_row_with_attrs(
+        connection,
+        CookieAttrs::new(host_key, name, "/", value).encrypted_value(encrypted_value),
+    );
+}
+
+struct CookieAttrs<'a> {
+    host_key: &'a str,
+    name: &'a str,
+    path: &'a str,
+    value: &'a str,
+    encrypted_value: &'a [u8],
+    expires_utc: i64,
+    secure: i64,
+}
+
+impl<'a> CookieAttrs<'a> {
+    fn new(host_key: &'a str, name: &'a str, path: &'a str, value: &'a str) -> Self {
+        Self {
+            host_key,
+            name,
+            path,
+            value,
+            encrypted_value: b"",
+            expires_utc: 20_000_000_000_000_000,
+            secure: 1,
+        }
+    }
+
+    fn encrypted_value(mut self, encrypted_value: &'a [u8]) -> Self {
+        self.encrypted_value = encrypted_value;
+        self
+    }
+
+    fn expired(mut self) -> Self {
+        self.expires_utc = 1;
+        self
+    }
+}
+
+fn insert_cookie_row_with_attrs(connection: &Connection, attrs: CookieAttrs<'_>) {
     connection
         .execute(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, ?1, ?2, ?3, ?4, '/', 20000000000000000, 1, 1, 1)",
-            params![host_key, name, value, encrypted_value],
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, 1)",
+            params![
+                attrs.host_key,
+                attrs.name,
+                attrs.value,
+                attrs.encrypted_value,
+                attrs.path,
+                attrs.expires_utc,
+                attrs.secure,
+            ],
         )
         .expect("insert synthetic cookie row");
 }
