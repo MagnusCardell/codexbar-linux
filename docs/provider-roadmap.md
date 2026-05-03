@@ -63,9 +63,10 @@ Task 04D.1 implementation status:
   bodies or headers;
 - 401/403 classify as provider cookie rejection, 429 as rate-limited provider
   unavailable, 5xx as provider unavailable, blocked redirects as
-  `redirect_blocked`, allowed non-login redirects as `redirect_blocked` because
-  redirect following is disabled, and other non-success statuses as `non_200` in
-  the safe live reconnaissance summary;
+  `redirect_blocked`, one safe same-host Codex dashboard redirect may be
+  followed, auth/login redirects classify as provider cookie rejection, and
+  other non-success statuses as `non_200` in the safe live reconnaissance
+  summary;
 - Codex live cookie scope is temporarily `chatgpt.com` domain-wide because
   required cookie names have not been verified; this is not production
   enablement;

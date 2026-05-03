@@ -76,6 +76,38 @@ The gated signed-in live rerun was not performed in this workspace because no
 marked throwaway home was available through `CODEXBAR_WEB_HOME` or
 `CODEXBAR_BROWSER_IMPORT_FAKE_HOME`.
 
+## Task 04D.1D Status
+
+Complete as a safe same-host redirect refinement. The daemon still starts from
+only the static Codex dashboard URL. If that first response is a 3xx, it may
+perform at most one follow-up GET only when the resolved target is
+`https://chatgpt.com`, has no userinfo or fragment, uses the same dashboard path
+or trailing-slash dashboard path, and has either no query or a bounded
+non-token-like query classified only as metadata. The follow-up request reuses
+the daemon's in-memory browser session material only after cookie path/domain
+matching for the redirect target.
+
+The adapter does not follow redirects to `openai.com`, attacker-controlled
+hosts, private/local hosts, same-host unknown paths, auth/login paths,
+userinfo-bearing URLs, fragments, token-like queries, or a second redirect hop.
+Same-host auth/login redirects map to `cookie_rejected` rather than parser
+work. Public diagnostics and live-recon summaries include only
+`redirectTargetClass`, `redirectFollowed`, `redirectHopCount`,
+`finalHttpStatusCode`, and `finalHttpStatusClass`. They still do not include
+raw `Location` values, raw response headers, query strings, fragments, bodies,
+cookies, Cookie headers, profile paths, or tokens.
+
+This refinement does not change parsers, does not promote live bodies or
+fixtures, does not enable default live provider fetch, and does not change
+Shell, D-Bus XML, JSON schemas, localhost, or TCP surfaces.
+
+The 2026-05-03 live recon rerun was attempted with
+`CODEXBAR_CODEX_WEB_LIVE=1` and
+`CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but
+`CODEXBAR_WEB_HOME` was empty in this workspace. The ignored smoke failed
+before browser import with "throwaway fake home must exist", so no live HTTP
+request, redirect, final status, response body, or parser outcome was observed.
+
 ## Goal
 
 Implement the first daemon-only Linux web provider adapter using in-memory
@@ -134,6 +166,10 @@ Suggested future layout:
 - Task 04D.1 transport policy rejects arbitrary hosts, private/local targets,
   userinfo, ports, query/fragment, wrong final paths, and non-allowlisted
   redirects.
+- Task 04D.1D follows at most one safe same-host Codex dashboard redirect,
+  blocks second-hop redirects, blocks same-host unknown/login/token-like targets
+  from follow, maps login/auth redirects to cookie rejection, and emits only
+  redacted redirect target classes.
 - Task 04D.1 live reconnaissance remains ignored by default and is selectable
   with `-- --ignored codex_web_live`.
 

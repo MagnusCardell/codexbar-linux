@@ -35,6 +35,7 @@ pub struct WebRequest {
     session_header: Option<CookieHeader>,
     timeout: Duration,
     response_size_limit: usize,
+    policy_validated_redirect: bool,
 }
 
 impl WebRequest {
@@ -48,6 +49,14 @@ impl WebRequest {
             session_header: None,
             timeout: Duration::from_secs(15),
             response_size_limit: 512 * 1024,
+            policy_validated_redirect: false,
+        }
+    }
+
+    pub(crate) fn new_policy_validated_redirect(url: impl Into<String>) -> Self {
+        Self {
+            policy_validated_redirect: true,
+            ..Self::new(url)
         }
     }
 
@@ -61,6 +70,10 @@ impl WebRequest {
 
     pub fn response_size_limit(&self) -> usize {
         self.response_size_limit
+    }
+
+    pub(crate) fn policy_validated_redirect(&self) -> bool {
+        self.policy_validated_redirect
     }
 
     pub fn request_header_profile(&self) -> &'static str {
@@ -95,10 +108,8 @@ impl fmt::Debug for WebRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebRequest")
             .field("url", &redacted_url_shape(&self.url))
-            .field("user_agent", &self.user_agent)
-            .field("accept", &self.accept)
-            .field("accept_language", &self.accept_language)
             .field("request_header_profile", &self.request_header_profile)
+            .field("policy_validated_redirect", &self.policy_validated_redirect)
             .field(
                 "session_material_attached",
                 &self.session_material_attached(),
@@ -242,6 +253,13 @@ impl FakeWebClient {
         }
     }
 
+    pub fn responding_sequence(responses: Vec<WebResponse>) -> Self {
+        Self {
+            outcome: Arc::new(Mutex::new(FakeWebOutcome::ResponseSequence(responses))),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
     pub fn failing(error: WebClientError) -> Self {
         Self {
             outcome: Arc::new(Mutex::new(FakeWebOutcome::Error(error))),
@@ -331,8 +349,15 @@ impl WebClient for FakeWebClient {
             });
         }
         let result = match self.outcome.lock() {
-            Ok(outcome) => match &*outcome {
+            Ok(mut outcome) => match &mut *outcome {
                 FakeWebOutcome::Response(response) => Ok(response.clone()),
+                FakeWebOutcome::ResponseSequence(responses) => {
+                    if responses.is_empty() {
+                        Err(WebClientError::TransportUnavailable)
+                    } else {
+                        Ok(responses.remove(0))
+                    }
+                }
                 FakeWebOutcome::Error(error) => Err(*error),
             },
             Err(_) => Err(WebClientError::TransportUnavailable),
@@ -371,9 +396,13 @@ impl ReqwestStaticGetClient {
     }
 
     fn validate_request(request: &WebRequest) -> Result<(), WebClientError> {
-        CodexWebPolicy::new()
-            .validate_dashboard_url(request.url())
-            .map_err(|_| WebClientError::TransportUnavailable)
+        let policy = CodexWebPolicy::new();
+        let result = if request.policy_validated_redirect() {
+            policy.validate_follow_redirect_url(request.url())
+        } else {
+            policy.validate_dashboard_url(request.url())
+        };
+        result.map_err(|_| WebClientError::TransportUnavailable)
     }
 
     fn build_client() -> Result<Client, WebClientError> {
@@ -541,6 +570,7 @@ fn session_material_size_class(bytes: usize) -> &'static str {
 #[derive(Clone, Debug)]
 enum FakeWebOutcome {
     Response(WebResponse),
+    ResponseSequence(Vec<WebResponse>),
     Error(WebClientError),
 }
 

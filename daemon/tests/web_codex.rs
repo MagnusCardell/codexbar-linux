@@ -27,7 +27,7 @@ use codexbar_linuxd::web::client::{
     WebResponse,
 };
 use codexbar_linuxd::web::diagnostics;
-use codexbar_linuxd::web::policy::CodexWebPolicy;
+use codexbar_linuxd::web::policy::{CodexWebPolicy, RedirectTargetClass};
 use codexbar_linuxd::web::providers::codex;
 use codexbar_linuxd::web::{self, WebRefreshRequest};
 use pbkdf2::pbkdf2_hmac;
@@ -89,12 +89,51 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
     assert!(policy
         .validate_redirect_url("https://chatgpt.com/codex/settings/usage")
         .is_ok());
+    assert!(policy
+        .validate_redirect_url("https://chatgpt.com/codex/settings/usage/")
+        .is_ok());
+    assert!(policy
+        .validate_redirect_url("https://chatgpt.com/codex/settings/usage?utm_campaign=limits")
+        .is_ok());
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/codex/settings/usage"), false,),
+        RedirectTargetClass::SameHostCanonical
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/codex/settings/usage/"), false,),
+        RedirectTargetClass::SameHostCanonical
+    );
+    assert_eq!(
+        policy.classify_redirect_target(
+            Some("https://chatgpt.com/codex/settings/usage?utm_campaign=limits"),
+            false,
+        ),
+        RedirectTargetClass::SameHostCanonical
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/auth/login"), false),
+        RedirectTargetClass::SameHostLoginPath
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/not-codex"), false),
+        RedirectTargetClass::SameHostOther
+    );
     for rejected in [
+        "https://openai.com/codex/settings/usage",
         "https://codex-test.example.invalid/callback",
+        "https://chatgpt.com/callback",
         "https://chatgpt.com/callback?token=fixture",
+        "https://chatgpt.com/callback#access_token=fixture",
         "https://user@chatgpt.com/callback",
         "http://chatgpt.com/callback",
+        "https://chatgpt.com/codex/settings/usage?token=fixture",
+        "https://chatgpt.com/codex/settings/usage#fragment",
+        "https://chatgpt.com/auth/login",
         "https://127.0.0.1/callback",
+        "https://10.0.0.1/callback",
+        "https://172.16.0.1/callback",
+        "https://192.168.1.1/callback",
+        "https://169.254.169.254/callback",
         "https://[::1]/callback",
     ] {
         assert!(
@@ -102,20 +141,52 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
             "redirect policy accepted {rejected}"
         );
     }
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/callback?token=fixture"), false,),
+        RedirectTargetClass::Invalid
+    );
+    assert_eq!(
+        policy.classify_redirect_target(
+            Some("https://chatgpt.com/callback#access_token=fixture"),
+            false,
+        ),
+        RedirectTargetClass::Invalid
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://user@chatgpt.com/callback"), false),
+        RedirectTargetClass::Invalid
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://127.0.0.1/callback"), false),
+        RedirectTargetClass::BlockedHost
+    );
 }
 
 #[test]
-fn codex_policy_allows_openai_redirect_only_when_explicitly_configured() {
+fn codex_policy_allows_openai_redirect_class_only_when_explicitly_configured() {
     let default_policy = CodexWebPolicy::new();
     assert!(default_policy
         .validate_redirect_url("https://openai.com/codex/settings/usage")
         .is_err());
+    assert_eq!(
+        default_policy
+            .classify_redirect_target(Some("https://openai.com/codex/settings/usage"), false,),
+        RedirectTargetClass::BlockedHost
+    );
 
     let openai_policy =
         CodexWebPolicy::with_redirect_hosts_for_tests(&["chatgpt.com", "openai.com"]);
     assert!(openai_policy
         .validate_redirect_url("https://openai.com/codex/settings/usage")
-        .is_ok());
+        .is_err());
+    assert!(openai_policy
+        .validate_follow_redirect_url("https://openai.com/codex/settings/usage")
+        .is_err());
+    assert_eq!(
+        openai_policy
+            .classify_redirect_target(Some("https://openai.com/codex/settings/usage"), false,),
+        RedirectTargetClass::AllowedHostOther
+    );
 }
 
 #[test]
@@ -123,6 +194,18 @@ fn reqwest_live_client_rejects_non_static_hosts_before_network() {
     let request = WebRequest::new("https://attacker.example.invalid/codex/settings/usage");
     assert_eq!(
         ReqwestStaticGetClient::validate_request_for_tests(&request).unwrap_err(),
+        WebClientError::TransportUnavailable
+    );
+
+    let same_host_other_path = WebRequest::new("https://chatgpt.com/not-codex/settings/usage");
+    assert_eq!(
+        ReqwestStaticGetClient::validate_request_for_tests(&same_host_other_path).unwrap_err(),
+        WebClientError::TransportUnavailable
+    );
+
+    let direct_redirect_target = WebRequest::new("https://chatgpt.com/codex/settings/usage/");
+    assert_eq!(
+        ReqwestStaticGetClient::validate_request_for_tests(&direct_redirect_target).unwrap_err(),
         WebClientError::TransportUnavailable
     );
 }
@@ -560,6 +643,7 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
     .expect("web refresh");
     let provider = &refresh.snapshot.providers[0];
 
+    assert_eq!(client.request_count(), 1);
     assert_eq!(provider.state, ProviderState::ProviderUnavailable);
     assert!(provider
         .diagnostic_codes
@@ -583,6 +667,26 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
         Some(&serde_json::Value::from("blocked"))
     );
     assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("blocked_host"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(0_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusClass"),
+        Some(&serde_json::Value::from("none"))
+    );
+    assert_eq!(
         event.details.get("redirectBlocked"),
         Some(&serde_json::Value::Bool(true))
     );
@@ -590,11 +694,12 @@ fn redirect_to_wrong_host_is_blocked_without_following() {
 }
 
 #[test]
-fn allowed_non_login_redirect_status_is_blocked_without_following() {
-    let client = FakeWebClient::responding(
-        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+fn same_path_redirect_is_followed_once_with_safe_final_status_metadata() {
+    let client = FakeWebClient::responding_sequence(vec![
+        WebResponse::new(307, CodexWebPolicy::new().dashboard_url(), "")
             .with_redirect(CodexWebPolicy::new().dashboard_url()),
-    );
+        html_response("dashboard_success.html"),
+    ]);
     let refresh = block_on_web(web::refresh_with_client(
         web_request(Some(session())),
         &client,
@@ -603,16 +708,38 @@ fn allowed_non_login_redirect_status_is_blocked_without_following() {
     let payload =
         serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
     let provider = &refresh.snapshot.providers[0];
-    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_FINISHED);
 
-    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert_eq!(client.request_count(), 2);
+    assert_eq!(
+        client.requests()[0].url,
+        CodexWebPolicy::new().dashboard_url()
+    );
+    assert_eq!(
+        client.requests()[1].url,
+        CodexWebPolicy::new().dashboard_url()
+    );
+    for request in client.requests() {
+        assert_eq!(request.request_header_profile, "browser_like");
+        assert!(request.session_material_attached);
+        assert!(request.session_material_bytes > 0);
+        assert_eq!(request.timeout_ms, 15_000);
+        assert_eq!(
+            request.response_size_limit,
+            CodexWebPolicy::new().response_size_limit()
+        );
+        let request_debug = format!("{request:?}");
+        assert!(!request_debug.contains("fixture_session"));
+        assert!(!request_debug.contains("fixture-value"));
+    }
+    assert_eq!(provider.state, ProviderState::Ok);
     assert!(provider
         .diagnostic_codes
-        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+        .contains(&diagnostics::FETCH_FINISHED.to_string()));
     assert_allowed_response_detail_keys(event);
     assert_eq!(
         event.details.get("httpStatusCode"),
-        Some(&serde_json::Value::from(302_u64))
+        Some(&serde_json::Value::from(307_u64))
     );
     assert_eq!(
         event.details.get("httpStatusClass"),
@@ -627,11 +754,197 @@ fn allowed_non_login_redirect_status_is_blocked_without_following() {
         Some(&serde_json::Value::from("allowed"))
     );
     assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_canonical"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(1_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::from(200_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusClass"),
+        Some(&serde_json::Value::from("success"))
+    );
+    assert!(!payload.contains("Location"));
+    assert!(!payload.contains("fixture_session"));
+    assert!(!payload.contains("fixture-value"));
+    assert!(!payload.contains("Cookie:"));
+    assert!(!payload.contains("Set-Cookie"));
+    assert!(!payload.contains("Authorization"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn trailing_slash_redirect_is_followed_once() {
+    let trailing = "https://chatgpt.com/codex/settings/usage/";
+    let client = FakeWebClient::responding_sequence(vec![
+        WebResponse::new(308, CodexWebPolicy::new().dashboard_url(), "").with_redirect(trailing),
+        html_response_at(trailing, "dashboard_success.html"),
+    ]);
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_FINISHED);
+
+    assert_eq!(client.request_count(), 2);
+    assert_eq!(client.requests()[1].url, trailing);
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_canonical"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(1_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::from(200_u64))
+    );
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn multi_hop_redirect_stops_after_one_follow() {
+    let client = FakeWebClient::responding_sequence(vec![
+        WebResponse::new(307, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect(CodexWebPolicy::new().dashboard_url()),
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect("https://chatgpt.com/codex/settings/usage/"),
+    ]);
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(client.request_count(), 2);
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(307_u64))
+    );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_canonical"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(1_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::from(302_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusClass"),
+        Some(&serde_json::Value::from("redirect"))
+    );
+    assert_eq!(
         event.details.get("redirectBlocked"),
         Some(&serde_json::Value::Bool(true))
     );
     assert!(!payload.contains("Location"));
-    assert!(!payload.contains("/codex/settings/usage"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn same_host_unknown_redirect_path_is_not_followed() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect("https://chatgpt.com/not-codex"),
+    );
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(client.request_count(), 1);
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::REDIRECT_BLOCKED.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_other"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("redirectBlocked"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert!(!payload.contains("not-codex"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn openai_redirect_is_not_followed_by_default() {
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+            .with_redirect("https://openai.com/codex/settings/usage"),
+    );
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(client.request_count(), 1);
+    assert_eq!(
+        refresh.snapshot.providers[0].state,
+        ProviderState::ProviderUnavailable
+    );
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("blocked"))
+    );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("blocked_host"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
 }
 
@@ -664,8 +977,66 @@ fn invalid_redirect_location_is_blocked_without_location_exposure() {
         event.details.get("redirectHostClass"),
         Some(&serde_json::Value::from("invalid"))
     );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("invalid"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
     assert!(!payload.contains("Location"));
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn unsafe_same_host_redirect_shapes_are_rejected_without_location_exposure() {
+    for (location, forbidden) in [
+        (
+            "https://user:fixture-secret@chatgpt.com/codex/settings/usage",
+            "fixture-secret",
+        ),
+        (
+            "https://chatgpt.com/codex/settings/usage#access_token=fixture-secret",
+            "access_token",
+        ),
+        (
+            "https://chatgpt.com/codex/settings/usage?token=fixture-secret",
+            "token=",
+        ),
+    ] {
+        let client = FakeWebClient::responding(
+            WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "")
+                .with_redirect(location),
+        );
+        let refresh = block_on_web(web::refresh_with_client(
+            web_request(Some(session())),
+            &client,
+        ))
+        .expect("web refresh");
+        let payload = serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics))
+            .expect("refresh json");
+        let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+        assert_eq!(client.request_count(), 1);
+        assert_eq!(
+            refresh.snapshot.providers[0].state,
+            ProviderState::ProviderUnavailable
+        );
+        assert_allowed_response_detail_keys(event);
+        assert_eq!(
+            event.details.get("redirectTargetClass"),
+            Some(&serde_json::Value::from("invalid"))
+        );
+        assert_eq!(
+            event.details.get("redirectFollowed"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert!(!payload.contains("Location"));
+        assert!(!payload.contains(forbidden));
+        assert!(!payload.contains("fixture-secret"));
+        common::assert_public_json_safe(&payload);
+    }
 }
 
 #[test]
@@ -683,6 +1054,7 @@ fn allowed_login_redirect_maps_to_cookie_rejected_without_location_exposure() {
         serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
     let provider = &refresh.snapshot.providers[0];
 
+    assert_eq!(client.request_count(), 1);
     assert_eq!(provider.state, ProviderState::CookieRejected);
     assert!(provider
         .diagnostic_codes
@@ -699,6 +1071,18 @@ fn allowed_login_redirect_maps_to_cookie_rejected_without_location_exposure() {
     assert_eq!(
         event.details.get("redirectHostClass"),
         Some(&serde_json::Value::from("allowed"))
+    );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_login_path"))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::Null)
     );
     assert!(!payload.contains("auth/login"));
     assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
@@ -802,6 +1186,10 @@ fn web_request_and_response_debug_redact_url_secrets_and_bodies() {
     assert!(!request_debug.contains("user@"));
     assert!(!request_debug.contains("token="));
     assert!(!request_debug.contains("fixture-secret"));
+    assert!(!request_debug.contains("Mozilla/5.0"));
+    assert!(!request_debug.contains("text/html,application/xhtml+xml"));
+    assert!(!request_debug.contains("en-US,en;q=0.9"));
+    assert!(request_debug.contains("request_header_profile"));
 
     let response_debug = format!(
         "{:?}",
@@ -907,11 +1295,21 @@ fn live_recon_summary_includes_safe_http_response_metadata_only() {
     assert_eq!(summary.http_response.http_status_class, "server_error");
     assert!(!summary.http_response.redirect_present);
     assert_eq!(summary.http_response.redirect_host_class, "none");
+    assert_eq!(summary.http_response.redirect_target_class, "none");
+    assert!(!summary.http_response.redirect_followed);
+    assert_eq!(summary.http_response.redirect_hop_count, 0);
+    assert_eq!(summary.http_response.final_http_status_code, None);
+    assert_eq!(summary.http_response.final_http_status_class, "none");
     assert_eq!(summary.http_response.content_type_class, "text");
     assert_eq!(summary.http_response.response_body_class, "within_cap");
     assert_eq!(summary.http_response.response_size_bucket, "small");
     assert!(summary_json.contains(r#""httpStatusCode":503"#));
     assert!(summary_json.contains(r#""httpStatusClass":"server_error""#));
+    assert!(summary_json.contains(r#""redirectTargetClass":"none""#));
+    assert!(summary_json.contains(r#""redirectFollowed":false"#));
+    assert!(summary_json.contains(r#""redirectHopCount":0"#));
+    assert!(summary_json.contains(r#""finalHttpStatusCode":null"#));
+    assert!(summary_json.contains(r#""finalHttpStatusClass":"none""#));
     assert!(!summary_json.contains("summary response body marker"));
     assert!(!summary_json.contains("Location"));
     assert!(!summary_json.contains("Set-Cookie"));
@@ -1975,6 +2373,11 @@ struct LiveReconHttpResponseSummary {
     http_status_class: String,
     redirect_present: bool,
     redirect_host_class: String,
+    redirect_target_class: String,
+    redirect_followed: bool,
+    redirect_hop_count: u64,
+    final_http_status_code: Option<u16>,
+    final_http_status_class: String,
     content_type_class: String,
     response_body_class: String,
     response_size_bucket: String,
@@ -1987,6 +2390,11 @@ impl LiveReconHttpResponseSummary {
             http_status_class: "unknown".to_string(),
             redirect_present: false,
             redirect_host_class: "none".to_string(),
+            redirect_target_class: "none".to_string(),
+            redirect_followed: false,
+            redirect_hop_count: 0,
+            final_http_status_code: None,
+            final_http_status_class: "none".to_string(),
             content_type_class: "missing".to_string(),
             response_body_class: if has_code(codes, diagnostics::RESPONSE_TOO_LARGE) {
                 "too_large".to_string()
@@ -2035,6 +2443,50 @@ impl LiveReconHttpResponseSummary {
             event,
             "redirectHostClass",
             &["none", "allowed", "blocked", "missing", "invalid"],
+            "none",
+        );
+        summary.redirect_target_class = safe_detail_class(
+            event,
+            "redirectTargetClass",
+            &[
+                "none",
+                "same_host_canonical",
+                "same_host_usage_path",
+                "same_host_login_path",
+                "same_host_other",
+                "allowed_host_other",
+                "blocked_host",
+                "invalid",
+            ],
+            "none",
+        );
+        summary.redirect_followed = event
+            .details
+            .get("redirectFollowed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        summary.redirect_hop_count = event
+            .details
+            .get("redirectHopCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        summary.final_http_status_code = event
+            .details
+            .get("finalHttpStatusCode")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok());
+        summary.final_http_status_class = safe_detail_class(
+            event,
+            "finalHttpStatusClass",
+            &[
+                "none",
+                "informational",
+                "success",
+                "redirect",
+                "client_error",
+                "server_error",
+                "unknown",
+            ],
             "none",
         );
         summary.content_type_class = safe_detail_class(
@@ -2410,12 +2862,11 @@ fn recon_refresh_result(
 }
 
 fn html_response(name: &str) -> WebResponse {
-    WebResponse::new(
-        200,
-        CodexWebPolicy::new().dashboard_url(),
-        fixture_text(name).into_bytes(),
-    )
-    .with_content_type("text/html")
+    html_response_at(CodexWebPolicy::new().dashboard_url(), name)
+}
+
+fn html_response_at(url: &str, name: &str) -> WebResponse {
+    WebResponse::new(200, url, fixture_text(name).into_bytes()).with_content_type("text/html")
 }
 
 fn web_request(session: Option<SessionMaterial>) -> WebRefreshRequest {
@@ -2464,11 +2915,16 @@ fn assert_allowed_response_detail_keys(event: &DiagnosticEvent) {
             matches!(
                 key.as_str(),
                 "contentTypeClass"
+                    | "finalHttpStatusClass"
+                    | "finalHttpStatusCode"
                     | "httpStatusCode"
                     | "httpStatusClass"
                     | "redirectBlocked"
+                    | "redirectFollowed"
                     | "redirectHostClass"
+                    | "redirectHopCount"
                     | "redirectPresent"
+                    | "redirectTargetClass"
                     | "requestHeaderProfile"
                     | "responseBodyClass"
                     | "responseSizeBucket"

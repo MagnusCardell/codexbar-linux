@@ -4,8 +4,9 @@
 
 Task 04D.1 adds an opt-in daemon-only reconnaissance path for the Codex web
 adapter. Task 04D.1C refines Codex web request parity and non-2xx response
-classification. This is not default production `linux_web` support and it must
-not be run against a real default browser profile.
+classification. Task 04D.1D adds one safe same-host redirect hop for the static
+Codex dashboard URL. This is not default production `linux_web` support and it
+must not be run against a real default browser profile.
 
 ## What It Does
 
@@ -15,6 +16,8 @@ When every live gate is present, the ignored test may:
 - read `chatgpt.com` cookies from that throwaway profile into daemon memory;
 - build an internal Cookie header for the static Codex dashboard URL;
 - make one bounded async GET to `https://chatgpt.com/codex/settings/usage`;
+- make at most one follow-up GET when that first response redirects to a safe
+  same-host Codex usage target on `https://chatgpt.com`;
 - send static browser-like navigation headers for that dashboard GET and report
   only the safe profile name `requestHeaderProfile="browser_like"`;
 - classify status, redirect, timeout, response-size, content-type, and parser
@@ -111,6 +114,15 @@ Allowed summary fields are:
 - `redirectPresent`: boolean;
 - `redirectHostClass`: one of `none`, `allowed`, `blocked`, `missing`, or
   `invalid`;
+- `redirectTargetClass`: one of `none`, `same_host_canonical`,
+  `same_host_usage_path`, `same_host_login_path`, `same_host_other`,
+  `allowed_host_other`, `blocked_host`, or `invalid`;
+- `redirectFollowed`: boolean;
+- `redirectHopCount`: `0` or `1`;
+- `finalHttpStatusCode`: numeric HTTP status from the one allowed follow-up
+  response when a redirect was followed;
+- `finalHttpStatusClass`: one of `none`, `informational`, `success`,
+  `redirect`, `client_error`, `server_error`, or `unknown`;
 - `contentTypeClass`: one of `html`, `json`, `text`, `other`, or `missing`;
 - `responseBodyClass`: one of `not_read`, `empty`, `within_cap`, `too_large`,
   or `invalid_encoding`;
@@ -152,8 +164,9 @@ The live test may produce these safe outcomes:
   succeeded;
 - `login_required` or `provider_cookie_rejected` when the response indicates an
   authentication flow or rejected session material;
-- `redirect_blocked` when `Location` or final URL policy fails, or when a
-  non-login redirect target is allowed but redirect following remains disabled;
+- `redirect_blocked` when `Location` or final URL policy fails, when the target
+  is outside the safe same-host Codex usage policy, or when a second redirect
+  hop appears after the one allowed follow;
 - `non_200` for non-success HTTP statuses that are not mapped to a more specific
   authentication, redirect, timeout, response-size, or parse classification.
   Rate limits retain `classification="non_200"` but carry
@@ -185,6 +198,15 @@ Safe HTTP response summary and diagnostic fields are limited to scalar metadata:
   `server_error`, or `unknown`;
 - `redirectPresent`: boolean;
 - `redirectHostClass`: `none`, `allowed`, `blocked`, `missing`, or `invalid`;
+- `redirectTargetClass`: `none`, `same_host_canonical`,
+  `same_host_usage_path`, `same_host_login_path`, `same_host_other`,
+  `allowed_host_other`, `blocked_host`, or `invalid`;
+- `redirectFollowed`: boolean;
+- `redirectHopCount`: `0` or `1`;
+- `finalHttpStatusCode`: exact numeric HTTP status for the one allowed follow-up
+  response when present;
+- `finalHttpStatusClass`: `none`, `informational`, `success`, `redirect`,
+  `client_error`, `server_error`, or `unknown`;
 - `contentTypeClass`: `missing`, `html`, `json`, `text`, or `other`;
 - `responseBodyClass`: `not_read`, `empty`, `within_cap`, `too_large`, or
   `invalid_encoding`;
@@ -195,6 +217,13 @@ Safe HTTP response summary and diagnostic fields are limited to scalar metadata:
 These fields intentionally do not include raw request headers, raw response
 headers, `Location`, final URLs, query strings, fragments, response bodies, or
 cookie material.
+
+The only redirect follow permitted in Task 04D.1D starts from the static Codex
+dashboard URL and follows one same-host `https://chatgpt.com` target whose path
+is the same dashboard path or its trailing-slash form. Same-host auth/login
+paths are not followed and map to `provider_cookie_rejected`. `openai.com`,
+attacker, private/local, userinfo-bearing, fragment-bearing, token-like query,
+same-host unknown-path, and second-hop redirects fail closed.
 
 `cookieMaterial.decryptionFailureClass` is safe class metadata, not secret
 material. It may be `none`, `keyring_needed`, `unsupported_format`,
@@ -224,7 +253,7 @@ Use the summary classification to choose the next task:
 | `unknown_safe_failure` with `decryptionFailureClass="unsupported_format"` | Do not broaden decryption in this task. Split Secret Service/KWallet/newer-prefix work into a reviewed follow-up. |
 | `unknown_safe_failure` with `decryptionFailureClass="malformed_ciphertext"` or `"wrong_key"` | Treat the cookie material as unusable; inspect browser version/profile setup with safe counts only. |
 | `unknown_safe_failure` with `decryptionFailureClass="invalid_material"`, `"header_too_large"`, or `"too_many_cookies"` | Browser cookie decryption is past the prefix/key step, but domain-wide cookie material cannot safely form a header. Verify required cookie names or header material policy with synthetic fixtures before parser work. |
-| `redirect_blocked` | Review the redirect host/path policy with safe host/path-class evidence only. |
+| `redirect_blocked` | Review the redirect target policy with safe target/follow/final-status evidence only. |
 | `timeout`, `non_200`, or `response_too_large` | Follow up on transport/classification behavior before parser work. |
 | `browser_keyring_unavailable` or `browser_profile_not_found` | Fix the throwaway browser setup or decryption prerequisite before retrying live recon. |
 | `linux_web_live_http_disabled` or `unknown_safe_failure` | Confirm gates and stable diagnostic coverage before broadening implementation. |
@@ -260,6 +289,13 @@ redacted diagnostics may be retained.
   same reason. The implementation now emits `classification="non_200"` instead
   of the earlier spelling drift `non200`, and adds safe HTTP response summary
   fields, but no new signed-in live provider response was observed here.
+- The Task 04D.1D live recon rerun was attempted on 2026-05-03 with
+  `CODEXBAR_CODEX_WEB_LIVE=1` and
+  `CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but
+  `CODEXBAR_WEB_HOME` was empty in this workspace. The ignored smoke failed
+  before browser import with "throwaway fake home must exist", so no HTTP
+  request, redirect target, final status, response body, or parser outcome was
+  observed.
 - Task 04B.3 live recon against the signed-in throwaway profile reached 19
   candidate `v10` rows and the plain decryptor, but produced
   `usableSessionCookies=0`, `cookiePresence="unavailable"`, and

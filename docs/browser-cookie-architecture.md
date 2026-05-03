@@ -30,7 +30,9 @@ production web scraping. Task 04D.1C adds a static browser-like request header
 profile for the Codex dashboard GET, reports only
 `requestHeaderProfile="browser_like"`, and classifies non-2xx, redirect,
 rate-limit, authentication-rejection, and server-error responses with safe
-scalar metadata only.
+scalar metadata only. Task 04D.1D permits at most one same-host safe redirect
+follow for the static Codex dashboard URL and reports only redacted redirect
+target class, follow state, hop count, and final status metadata.
 
 ## Thesis
 
@@ -128,7 +130,10 @@ gate is enabled. The live Codex reconnaissance gate requires
 source adapter `linux_web`. The Codex dashboard request uses a static
 browser-like navigation header profile, but public output reports only the
 profile class `browser_like`; raw request headers are not logged, cached,
-diagnosed, or emitted over D-Bus.
+diagnosed, or emitted over D-Bus. Redirect handling remains daemon-only and
+bounded: the first request is always the static dashboard URL, and Task 04D.1D
+may issue one follow-up request only to a classified-safe same-host
+`https://chatgpt.com` Codex usage target.
 
 ## Browser Support Sequence
 
@@ -290,6 +295,12 @@ Rules:
 - Do not accept arbitrary URLs from D-Bus, settings, provider responses, or
   diagnostics.
 - Block redirects to unexpected hosts.
+- For the Task 04D.1D Codex dashboard recon path, follow at most one redirect
+  only when the first static dashboard request returns a safe same-host
+  `https://chatgpt.com` Codex usage target with no userinfo or fragment and no
+  token-like query. Do not follow `openai.com`, attacker, private/local,
+  same-host unknown, auth/login, userinfo, fragment, token-like query, or
+  second-hop redirect targets.
 - Bound response bodies.
 - Classify status, redirect, content-type, timeout, and body-size outcomes
   before parser logic.
@@ -310,6 +321,9 @@ web support:
 - request, redirect, and cookie policy defaults to `chatgpt.com` only;
 - `openai.com` redirects and cookies are not used unless a future task verifies
   that they are required and explicitly expands the allowlist;
+- one safe same-host redirect hop may be followed for the static dashboard
+  request; auth/login redirects map to `cookie_rejected` and second-hop
+  redirects map to `provider_redirect_blocked`;
 - Codex cookie names are not yet verified, so the temporary exception for
   all `chatgpt.com` cookies is restricted to a marked throwaway fake home and
   opt-in reconnaissance;
@@ -377,7 +391,7 @@ The stable browser/web diagnostic code registry for future implementation is:
 | `provider_web_fetch_parse_error` | Provider response shape was unexpected. | `parse_error` |
 | `provider_web_fetch_redaction_applied` | Redaction was applied before public output. | none |
 | `provider_domain_not_allowed` | Request host was outside the allowlist. | `provider_unavailable` |
-| `provider_redirect_blocked` | Redirect host was outside the allowlist. | `provider_unavailable` |
+| `provider_redirect_blocked` | Redirect host/path/query/follow policy failed, or a second redirect hop appeared. | `provider_unavailable` |
 | `provider_response_too_large` | Provider response exceeded the size cap. | `parse_error` |
 
 Allowed diagnostic `details` keys are small redacted scalars only, such as:
@@ -394,6 +408,11 @@ Allowed diagnostic `details` keys are small redacted scalars only, such as:
 - `contentTypeClass`;
 - `redirectPresent`;
 - `redirectHostClass`;
+- `redirectTargetClass`;
+- `redirectFollowed`;
+- `redirectHopCount`;
+- `finalHttpStatusCode`;
+- `finalHttpStatusClass`;
 - `redirectBlocked`;
 - `responseBodyClass`;
 - `responseSizeBucket`;

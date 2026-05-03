@@ -14,6 +14,82 @@ pub enum WebPolicyError {
     TargetNotAllowed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RedirectTargetClass {
+    None,
+    SameHostCanonical,
+    SameHostUsagePath,
+    SameHostLoginPath,
+    SameHostOther,
+    AllowedHostOther,
+    BlockedHost,
+    Invalid,
+}
+
+impl RedirectTargetClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SameHostCanonical => "same_host_canonical",
+            Self::SameHostUsagePath => "same_host_usage_path",
+            Self::SameHostLoginPath => "same_host_login_path",
+            Self::SameHostOther => "same_host_other",
+            Self::AllowedHostOther => "allowed_host_other",
+            Self::BlockedHost => "blocked_host",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RedirectTargetSummary {
+    target_class: RedirectTargetClass,
+    scheme_class: &'static str,
+    host_class: &'static str,
+    query_class: &'static str,
+    fragment_class: &'static str,
+}
+
+impl RedirectTargetSummary {
+    const fn none() -> Self {
+        Self {
+            target_class: RedirectTargetClass::None,
+            scheme_class: "none",
+            host_class: "none",
+            query_class: "none",
+            fragment_class: "none",
+        }
+    }
+
+    const fn invalid() -> Self {
+        Self {
+            target_class: RedirectTargetClass::Invalid,
+            scheme_class: "invalid",
+            host_class: "invalid",
+            query_class: "invalid",
+            fragment_class: "invalid",
+        }
+    }
+
+    pub(crate) fn target_class(&self) -> RedirectTargetClass {
+        self.target_class
+    }
+
+    pub(crate) fn target_class_str(&self) -> &'static str {
+        self.target_class.as_str()
+    }
+
+    fn followable(&self) -> bool {
+        matches!(
+            self.target_class,
+            RedirectTargetClass::SameHostCanonical | RedirectTargetClass::SameHostUsagePath
+        ) && self.scheme_class == "https"
+            && self.host_class == "allowed"
+            && matches!(self.query_class, "none" | "empty" | "safe")
+            && self.fragment_class == "none"
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CodexWebPolicy {
     request_hosts: &'static [&'static str],
@@ -76,6 +152,13 @@ impl CodexWebPolicy {
             .with_response_size_limit(self.response_size_limit)
     }
 
+    pub fn redirect_follow_request(&self, url: &str) -> Result<WebRequest, WebPolicyError> {
+        self.validate_follow_redirect_url(url)?;
+        Ok(WebRequest::new_policy_validated_redirect(url.to_string())
+            .with_timeout(self.timeout)
+            .with_response_size_limit(self.response_size_limit))
+    }
+
     pub fn validate_dashboard_url(&self, url: &str) -> Result<(), WebPolicyError> {
         let parsed = ParsedHttpsUrl::parse(url)?;
         ensure_not_local(&parsed.host)?;
@@ -110,18 +193,123 @@ impl CodexWebPolicy {
     }
 
     pub fn validate_redirect_url(&self, url: &str) -> Result<(), WebPolicyError> {
-        let parsed = ParsedHttpsUrl::parse(url)?;
-        ensure_not_local(&parsed.host)?;
-        if parsed.port.is_some() {
-            return Err(WebPolicyError::PortNotAllowed);
+        self.validate_follow_redirect_url(url)
+    }
+
+    pub fn validate_follow_redirect_url(&self, url: &str) -> Result<(), WebPolicyError> {
+        if self
+            .classify_redirect_target_summary(Some(url), false)
+            .followable()
+        {
+            Ok(())
+        } else {
+            Err(WebPolicyError::TargetNotAllowed)
         }
-        if !self.redirect_hosts.contains(&parsed.host.as_str()) {
-            return Err(WebPolicyError::HostNotAllowed);
+    }
+
+    pub fn validate_follow_response_url(&self, url: &str) -> Result<(), WebPolicyError> {
+        self.validate_follow_redirect_url(url)
+    }
+
+    pub fn classify_redirect_target(
+        &self,
+        redirect_url: Option<&str>,
+        redirect_invalid: bool,
+    ) -> RedirectTargetClass {
+        self.classify_redirect_target_summary(redirect_url, redirect_invalid)
+            .target_class()
+    }
+
+    pub(crate) fn classify_redirect_target_summary(
+        &self,
+        redirect_url: Option<&str>,
+        redirect_invalid: bool,
+    ) -> RedirectTargetSummary {
+        if redirect_invalid {
+            return RedirectTargetSummary::invalid();
         }
-        if parsed.query_or_fragment {
-            return Err(WebPolicyError::TargetNotAllowed);
+        let Some(url) = redirect_url else {
+            return RedirectTargetSummary::none();
+        };
+        let Ok(parsed) = url::Url::parse(url) else {
+            return RedirectTargetSummary::invalid();
+        };
+
+        let scheme_class = if parsed.scheme() == "https" {
+            "https"
+        } else {
+            "blocked"
+        };
+        let fragment_class = if parsed.fragment().is_some() {
+            "present"
+        } else {
+            "none"
+        };
+        let (query_class, query_allowed) = classify_redirect_query(parsed.query());
+        let host = parsed.host_str().map(str::to_ascii_lowercase);
+        let host_allowed = parsed.port().is_none()
+            && host
+                .as_deref()
+                .is_some_and(|host| ensure_not_local(host).is_ok())
+            && host
+                .as_deref()
+                .is_some_and(|host| self.redirect_hosts.contains(&host));
+        let host_class = if host_allowed { "allowed" } else { "blocked" };
+        let path = parsed.path();
+        let target_class = if parsed.scheme() != "https"
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.port().is_some()
+            || fragment_class != "none"
+        {
+            RedirectTargetClass::Invalid
+        } else if !host_allowed {
+            RedirectTargetClass::BlockedHost
+        } else if host.as_deref() != Some("chatgpt.com") {
+            RedirectTargetClass::AllowedHostOther
+        } else if self.is_login_path(path) {
+            RedirectTargetClass::SameHostLoginPath
+        } else if !query_allowed {
+            RedirectTargetClass::Invalid
+        } else if path == self.dashboard_path || self.is_dashboard_path_with_slash(path) {
+            RedirectTargetClass::SameHostCanonical
+        } else if self.is_canonical_usage_path(path) {
+            RedirectTargetClass::SameHostUsagePath
+        } else if host.as_deref() == Some("chatgpt.com") {
+            RedirectTargetClass::SameHostOther
+        } else {
+            RedirectTargetClass::BlockedHost
+        };
+        RedirectTargetSummary {
+            target_class,
+            scheme_class,
+            host_class,
+            query_class,
+            fragment_class,
         }
-        Ok(())
+    }
+
+    pub fn should_follow_redirect(&self, redirect_url: &str) -> bool {
+        self.classify_redirect_target_summary(Some(redirect_url), false)
+            .followable()
+    }
+
+    fn is_dashboard_path_with_slash(&self, path: &str) -> bool {
+        path.len() == self.dashboard_path.len() + 1
+            && path.starts_with(self.dashboard_path)
+            && path.ends_with('/')
+    }
+
+    fn is_canonical_usage_path(&self, _path: &str) -> bool {
+        false
+    }
+
+    fn is_login_path(&self, path: &str) -> bool {
+        let lower = path.to_ascii_lowercase();
+        lower.contains("/auth/")
+            || lower.contains("/login")
+            || lower.contains("/log-in")
+            || lower.ends_with("/auth")
     }
 }
 
@@ -168,6 +356,71 @@ impl ParsedHttpsUrl {
             query_or_fragment,
         })
     }
+}
+
+fn classify_redirect_query(query: Option<&str>) -> (&'static str, bool) {
+    let Some(query) = query else {
+        return ("none", true);
+    };
+    if query.is_empty() {
+        return ("empty", true);
+    }
+    if query.len() > 128 || query_is_token_like(query) {
+        return ("token_like", false);
+    }
+    let pairs = url::form_urlencoded::parse(query.as_bytes()).collect::<Vec<_>>();
+    if pairs.is_empty() || pairs.len() > 4 {
+        return ("unsafe", false);
+    }
+    for (key, value) in pairs {
+        if key.is_empty()
+            || key.len() > 32
+            || value.len() > 64
+            || !query_component_is_safe(&key)
+            || !query_component_is_safe(&value)
+            || query_is_token_like(&key)
+            || query_is_token_like(&value)
+        {
+            return ("unsafe", false);
+        }
+    }
+    ("safe", true)
+}
+
+fn query_component_is_safe(value: &str) -> bool {
+    value.bytes().all(|byte| {
+        matches!(
+            byte,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~'
+        )
+    })
+}
+
+fn query_is_token_like(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if [
+        "access", "auth", "bearer", "code", "continue", "cookie", "csrf", "id_token", "jwt", "key",
+        "login", "next", "redirect", "refresh", "return", "secret", "session", "sso", "state",
+        "token", "url",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        return true;
+    }
+    value.len() >= 16
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'A'..=b'Z'
+                    | b'a'..=b'z'
+                    | b'0'..=b'9'
+                    | b'-'
+                    | b'_'
+                    | b'.'
+                    | b'~'
+            )
+        })
 }
 
 fn parse_authority(authority: &str) -> Result<(String, Option<u16>), WebPolicyError> {
