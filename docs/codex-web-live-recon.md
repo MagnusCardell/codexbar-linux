@@ -80,10 +80,11 @@ ignored live tests.
 
 After the ignored live smoke completes its existing snapshot, refresh-result,
 diagnostics, provider-event, and cache redaction assertions, it prints one
-compact JSON summary line. The summary is derived only from normalized provider
-state and refresh-result state; it does not inspect raw browser stores, request
-headers, response headers, redirect locations, response bodies, or diagnostics
-details.
+compact JSON summary line. The summary is derived from normalized provider
+state, refresh-result state, and a daemon browser-cookie material summary that
+contains only counts/classes. It does not print raw browser rows, cookie names
+or values, request headers, response headers, redirect locations, response
+bodies, or diagnostics details.
 
 A passing live test by itself only proves the safety assertions held. The
 summary `classification` is the useful reconnaissance result, because it tells
@@ -101,16 +102,21 @@ Allowed summary fields are:
 - `classification`: one value from the fixed safe classification set below;
 - `diagnosticCodes`: de-duplicated browser/web diagnostic codes filtered
   through a stable allowlist;
+- `cookieMaterial`: safe browser-cookie material summary with only:
+  `profilesDiscovered`, `candidateCookieRows`, `plaintextValueRows`,
+  `encryptedValueRows`, `encryptedPrefixes`, `expiredRows`,
+  `usableSessionCookies`, `decryptorBackend`, and `decryptionStatus`;
 - `cookiePresence`: one of `none`, `found`, `decrypted`, `unavailable`, or
   `unknown`;
 - `webFetch`: one of `not_attempted`, `attempted`, `finished`, `blocked`,
   `timeout`, or `parse_error`;
 - `redactionApplied`: always `true`.
 
-The summary must not include cookie names or values, Cookie or Authorization
-headers, Set-Cookie headers, raw response bodies, full URLs with query or
-fragment data, redirect locations, profile or home paths, account email or ID
-values, raw diagnostic details, or raw provider payloads.
+The summary must not include cookie names or values, encrypted values, Cookie
+or Authorization headers, Set-Cookie headers, raw response bodies, full URLs
+with query or fragment data, redirect locations, exact domains, profile or home
+paths, account email or ID values, SQL rows, raw diagnostic details, or raw
+provider payloads.
 
 ## Safe Classifications
 
@@ -155,6 +161,8 @@ Use the summary classification to choose the next task:
 | `parse_error` with `cookiePresence="found"` or `cookiePresence="decrypted"` and `webFetch="finished"` | Update synthetic parser fixtures from hand-authored observations only. Do not copy raw live body. |
 | `login_required` or `provider_cookie_rejected` | Investigate cookie/session material validity in the throwaway profile. |
 | `browser_cookie_missing` | Investigate browser import and cookie-domain selection. |
+| `browser_cookie_missing` with `cookieMaterial.plaintextValueRows > 0` and `usableSessionCookies=0` | Inspect validation/filtering policy with synthetic fixtures; do not print raw row data. |
+| `browser_keyring_unavailable` with encrypted prefix counts | Secret Service or unsupported encrypted-prefix work is the blocker; do not work on the Codex parser yet. |
 | `redirect_blocked` | Review the redirect host/path policy with safe host/path-class evidence only. |
 | `timeout`, `non_200`, or `response_too_large` | Follow up on transport/classification behavior before parser work. |
 | `browser_keyring_unavailable` or `browser_profile_not_found` | Fix the throwaway browser setup or decryption prerequisite before retrying live recon. |
@@ -181,8 +189,12 @@ redacted diagnostics may be retained.
 - The live parser is not a real ChatGPT page parser. The only asserted
   normalizer is the synthetic fixture parser.
 - The current live decryptor path does not unlock real encrypted Chromium
-  cookies. Encrypted sessions usually classify as missing dependency until a
-  reviewed noninteractive Secret Service implementation exists.
+  cookies. The production/env backend is `plain`: plaintext rows can produce
+  in-memory session material, while encrypted rows usually classify as missing
+  dependency until a reviewed noninteractive Secret Service decryptor exists.
+- A noninteractive Secret Service probe abstraction exists only to classify
+  unavailable, locked, and prompt-required states. It does not extract or
+  persist the Chromium secret.
 - Codex cookie names have not been verified. Task 04D.1 permits domain-wide
   `chatgpt.com` cookies only inside marked throwaway reconnaissance. Production
   enablement must narrow cookie names or document why all `chatgpt.com` cookies

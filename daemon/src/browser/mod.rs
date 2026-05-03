@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::browser::chromium::discover_chromium_profiles;
 use crate::browser::cookie_store::{
-    read_profile_cookies, read_profile_session_material, CookieQuery,
+    read_profile_cookies, read_profile_session_material, BrowserCookieMaterialSummary, CookieQuery,
 };
-use crate::browser::keyring::{FakeCookieDecryptor, FakeDecryptorMode};
+use crate::browser::keyring::{BrowserCookieDecryptor, BrowserDecryptorMode};
 use crate::browser::profile::{is_safe_profile_id, BrowserDiscoveryRoots};
 use crate::browser::session_material::SessionMaterial;
 use crate::model::{
@@ -25,7 +25,7 @@ pub struct BrowserImportRequest {
     pub options: BrowserImportOptions,
     pub settings: Settings,
     pub roots: Option<BrowserDiscoveryRoots>,
-    pub decryptor_mode: FakeDecryptorMode,
+    pub decryptor_mode: BrowserDecryptorMode,
     pub tested_at: String,
 }
 
@@ -34,7 +34,7 @@ pub struct BrowserSessionRequest {
     pub providers: Vec<String>,
     pub settings: Settings,
     pub roots: Option<BrowserDiscoveryRoots>,
-    pub decryptor_mode: FakeDecryptorMode,
+    pub decryptor_mode: BrowserDecryptorMode,
 }
 
 #[derive(Debug)]
@@ -42,6 +42,7 @@ pub struct BrowserSessionCollection {
     pub sessions: BTreeMap<String, SessionMaterial>,
     pub provider_diagnostic_codes: BTreeMap<String, Vec<String>>,
     pub diagnostic_codes: Vec<String>,
+    pub material_summary: BrowserCookieMaterialSummary,
 }
 
 pub fn test_import(request: BrowserImportRequest) -> BrowserImportResult {
@@ -161,7 +162,7 @@ pub fn test_import(request: BrowserImportRequest) -> BrowserImportResult {
     let mut profiles = Vec::new();
     let mut provider_counts = BTreeMap::<String, u64>::new();
     let mut provider_codes = BTreeMap::<String, Vec<String>>::new();
-    let decryptor = FakeCookieDecryptor::new(request.decryptor_mode);
+    let decryptor = BrowserCookieDecryptor::new(request.decryptor_mode);
     let queries = eligible_providers
         .iter()
         .map(|provider| CookieQuery::for_provider(provider))
@@ -220,7 +221,11 @@ pub fn test_import(request: BrowserImportRequest) -> BrowserImportResult {
                     provider,
                     BrowserProviderStatus::Success,
                     BrowserSourceAdapter::LinuxWeb,
-                    vec![diagnostics::COOKIE_FOUND.to_string()],
+                    if codes.is_empty() {
+                        vec![diagnostics::COOKIE_FOUND.to_string()]
+                    } else {
+                        codes
+                    },
                     include_diagnostics,
                 )
             } else if diagnostics::contains_dependency_failure(&codes) {
@@ -263,6 +268,8 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
     let mut diagnostic_codes = vec![diagnostics::IMPORT_STARTED.to_string()];
     let mut provider_codes = BTreeMap::<String, Vec<String>>::new();
     let mut sessions = BTreeMap::<String, SessionMaterial>::new();
+    let mut material_summary =
+        BrowserCookieMaterialSummary::with_backend(request.decryptor_mode.backend());
     let provider_ids = request.providers;
     let policy = match request.settings.browser_import.policy {
         BrowserImportPolicy::Auto => BrowserImportPolicy::ChromiumFamily,
@@ -271,7 +278,8 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
 
     let finish = |sessions: BTreeMap<String, SessionMaterial>,
                   provider_codes: BTreeMap<String, Vec<String>>,
-                  mut diagnostic_codes: Vec<String>| {
+                  mut diagnostic_codes: Vec<String>,
+                  material_summary: BrowserCookieMaterialSummary| {
         diagnostics::push_code(&mut diagnostic_codes, diagnostics::IMPORT_FINISHED);
         BrowserSessionCollection {
             sessions,
@@ -280,6 +288,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
                 .map(|(provider, codes)| (provider, diagnostics::unique_codes(codes)))
                 .collect(),
             diagnostic_codes: diagnostics::unique_codes(diagnostic_codes),
+            material_summary,
         }
     };
 
@@ -291,7 +300,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
                 .or_default()
                 .push(diagnostics::IMPORT_DISABLED.to_string());
         }
-        return finish(sessions, provider_codes, diagnostic_codes);
+        return finish(sessions, provider_codes, diagnostic_codes, material_summary);
     }
 
     if policy == BrowserImportPolicy::Firefox {
@@ -302,7 +311,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
                 .or_default()
                 .push(diagnostics::FIREFOX_NOT_IMPLEMENTED.to_string());
         }
-        return finish(sessions, provider_codes, diagnostic_codes);
+        return finish(sessions, provider_codes, diagnostic_codes, material_summary);
     }
 
     let Some(roots) = request.roots else {
@@ -314,7 +323,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
                 diagnostics::PROFILE_SKIPPED.to_string(),
             ]);
         }
-        return finish(sessions, provider_codes, diagnostic_codes);
+        return finish(sessions, provider_codes, diagnostic_codes, material_summary);
     };
 
     let eligible_providers = eligible_providers(&provider_ids, &request.settings);
@@ -326,10 +335,11 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
                 .or_default()
                 .push(diagnostics::PROFILE_SKIPPED.to_string());
         }
-        return finish(sessions, provider_codes, diagnostic_codes);
+        return finish(sessions, provider_codes, diagnostic_codes, material_summary);
     }
 
     let discovery = discover_chromium_profiles(&roots);
+    material_summary.add_profiles_discovered(discovery.profiles.len());
     diagnostic_codes.extend(discovery.diagnostic_codes);
     let settings_profile_ids = request
         .settings
@@ -338,7 +348,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let decryptor = FakeCookieDecryptor::new(request.decryptor_mode);
+    let decryptor = BrowserCookieDecryptor::new(request.decryptor_mode);
     let queries = eligible_providers
         .iter()
         .map(|provider| CookieQuery::for_live_web_provider(provider))
@@ -353,6 +363,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
         }
         visited_profile = true;
         let outcome = read_profile_session_material(&profile, &queries, &decryptor);
+        material_summary.combine_profile(outcome.profile.material_summary.clone());
         diagnostic_codes.extend(outcome.profile.diagnostic_codes.clone());
         for (provider, codes) in outcome.profile.provider_diagnostic_codes {
             provider_codes.entry(provider).or_default().extend(codes);
@@ -383,7 +394,7 @@ pub fn collect_session_material(request: BrowserSessionRequest) -> BrowserSessio
         }
     }
 
-    finish(sessions, provider_codes, diagnostic_codes)
+    finish(sessions, provider_codes, diagnostic_codes, material_summary)
 }
 
 pub fn validate_profile_ids(profile_ids: &[String]) -> bool {

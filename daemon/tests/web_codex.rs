@@ -3,11 +3,16 @@ mod common;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
 use codexbar_linuxd::browser::diagnostics as browser_diagnostics;
+use codexbar_linuxd::browser::keyring::{
+    BrowserDecryptorMode, DecryptionStatus, DecryptorBackend, FakeDecryptorMode,
+};
+use codexbar_linuxd::browser::profile::BrowserDiscoveryRoots;
 use codexbar_linuxd::browser::session_material::{ScopedCookie, SessionMaterial};
+use codexbar_linuxd::browser::{self, BrowserSessionRequest};
 use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{
     Provider, ProviderState, RefreshProviderResult, RefreshProviderStatus, RefreshReason,
@@ -20,6 +25,7 @@ use codexbar_linuxd::web::diagnostics;
 use codexbar_linuxd::web::policy::CodexWebPolicy;
 use codexbar_linuxd::web::providers::codex;
 use codexbar_linuxd::web::{self, WebRefreshRequest};
+use rusqlite::Connection;
 
 const NOW: &str = "2026-05-02T12:00:00Z";
 const LINUX_WEB_LIVE_HTTP_DISABLED: &str = "linux_web_live_http_disabled";
@@ -590,6 +596,60 @@ fn live_recon_summary_filters_to_safe_stable_fields() {
 }
 
 #[test]
+fn live_recon_summary_includes_safe_cookie_material_counts_only() {
+    let (tmp, _paths) = common::temp_paths();
+    create_chatgpt_cookie_db(
+        tmp.path(),
+        &[
+            ChatgptCookieRow::plaintext("plain_live", "fixture-chatgpt-live"),
+            ChatgptCookieRow::encrypted_v11("encrypted_live"),
+        ],
+    );
+    let material_summary = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    })
+    .material_summary;
+    let provider = recon_provider(
+        ProviderState::MissingDependency,
+        vec![
+            browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
+            diagnostics::COOKIE_ABSENT,
+        ],
+    );
+    let result = recon_refresh_result(RefreshStatus::Error, false, []);
+
+    let summary =
+        LiveReconSummary::from_provider_result_and_material(&provider, &result, material_summary);
+    let summary_json = serde_json::to_string(&summary).expect("summary json");
+
+    assert_eq!(summary.cookie_material.profiles_discovered, 1);
+    assert_eq!(summary.cookie_material.candidate_cookie_rows, 2);
+    assert_eq!(summary.cookie_material.plaintext_value_rows, 1);
+    assert_eq!(summary.cookie_material.encrypted_value_rows, 1);
+    assert_eq!(summary.cookie_material.encrypted_prefixes.v11, 1);
+    assert_eq!(summary.cookie_material.usable_session_cookies, 0);
+    assert_eq!(
+        summary.cookie_material.decryptor_backend,
+        DecryptorBackend::Plain
+    );
+    assert_eq!(
+        summary.cookie_material.decryption_status,
+        DecryptionStatus::Unavailable
+    );
+    assert!(!summary_json.contains("plain_live"));
+    assert!(!summary_json.contains("encrypted_live"));
+    assert!(!summary_json.contains("fixture-chatgpt-live"));
+    assert!(!summary_json.contains(".chatgpt.com"));
+    assert!(!summary_json.contains(&tmp.path().display().to_string()));
+    assert!(!summary_json.contains("Network/Cookies"));
+    common::assert_public_json_safe(&summary_json);
+    assert_no_live_web_secret_markers("live Codex web material summary", &summary_json);
+}
+
+#[test]
 fn live_recon_summary_classifies_required_outcomes() {
     for (state, codes, classification, cookie_presence, web_fetch) in [
         (
@@ -626,6 +686,16 @@ fn live_recon_summary_classifies_required_outcomes() {
                 diagnostics::COOKIE_ABSENT,
             ],
             LiveReconClassification::BrowserKeyringUnavailable,
+            LiveReconCookiePresence::Unavailable,
+            LiveReconWebFetch::NotAttempted,
+        ),
+        (
+            ProviderState::MissingDependency,
+            vec![
+                browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
+                diagnostics::COOKIE_ABSENT,
+            ],
+            LiveReconClassification::UnknownSafeFailure,
             LiveReconCookiePresence::Unavailable,
             LiveReconWebFetch::NotAttempted,
         ),
@@ -866,6 +936,197 @@ async fn live_transport_gate_requires_explicit_codex_provider() {
 }
 
 #[tokio::test]
+async fn live_transport_with_plaintext_cookie_builds_session_material() {
+    let (tmp, paths) = common::temp_paths();
+    create_chatgpt_cookie_db(
+        tmp.path(),
+        &[ChatgptCookieRow::plaintext(
+            "plain_live",
+            "fixture-chatgpt-live",
+        )],
+    );
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production()
+            .with_browser_roots(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_codex_web_live_transport_for_tests(true)
+            .with_codex_web_fixture(CodexWebFixture::Success),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+    let provider = &snapshot.providers[0];
+    let payload =
+        serde_json::to_string(&(&snapshot, &result, &completion.provider_events)).expect("payload");
+
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert!(result.cache_written);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::COOKIE_FOUND.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_STARTED.to_string()));
+    assert!(!provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert!(!payload.contains("plain_live"));
+    assert!(!payload.contains("fixture-chatgpt-live"));
+    common::assert_public_json_safe(&payload);
+    assert_no_live_web_secret_markers("plaintext live transport payload", &payload);
+}
+
+#[tokio::test]
+async fn live_transport_plain_backend_does_not_fetch_with_encrypted_cookie_only() {
+    let (tmp, paths) = common::temp_paths();
+    create_chatgpt_cookie_db(
+        tmp.path(),
+        &[ChatgptCookieRow::encrypted_v11("encrypted_live")],
+    );
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production()
+            .with_browser_roots(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_codex_web_live_transport_for_tests(true)
+            .with_codex_web_fixture(CodexWebFixture::Success),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+    let provider = &snapshot.providers[0];
+    let payload =
+        serde_json::to_string(&(&snapshot, &result, &completion.provider_events)).expect("payload");
+
+    assert_eq!(provider.state, ProviderState::MissingDependency);
+    assert!(!result.cache_written);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::KEYRING_UNAVAILABLE.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert!(!provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_STARTED.to_string()));
+    assert!(!payload.contains("encrypted_live"));
+    common::assert_public_json_safe(&payload);
+    assert_no_live_web_secret_markers("encrypted unavailable live payload", &payload);
+}
+
+#[tokio::test]
+async fn live_transport_fake_decryptor_success_is_test_only_and_fetches() {
+    let (tmp, paths) = common::temp_paths();
+    create_chatgpt_cookie_db(
+        tmp.path(),
+        &[ChatgptCookieRow::encrypted_v11("encrypted_live")],
+    );
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production()
+            .with_browser_roots(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_browser_decryptor_mode(FakeDecryptorMode::Success)
+            .with_codex_web_live_transport_for_tests(true)
+            .with_codex_web_fixture(CodexWebFixture::Success),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+    let provider = &snapshot.providers[0];
+
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert!(result.cache_written);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::COOKIE_DECRYPTED.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_STARTED.to_string()));
+    common::assert_public_json_safe(&completion.snapshot_json);
+    assert_no_live_web_secret_markers("fake decryptor live payload", &completion.snapshot_json);
+}
+
+#[tokio::test]
+async fn live_transport_mixed_plaintext_and_failed_encrypted_cookie_fails_closed() {
+    let (tmp, paths) = common::temp_paths();
+    create_chatgpt_cookie_db(
+        tmp.path(),
+        &[
+            ChatgptCookieRow::plaintext("plain_live", "fixture-chatgpt-live"),
+            ChatgptCookieRow::encrypted_v11("encrypted_live"),
+        ],
+    );
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production()
+            .with_browser_roots(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_browser_decryptor_mode(FakeDecryptorMode::Failure)
+            .with_codex_web_live_transport_for_tests(true)
+            .with_codex_web_fixture(CodexWebFixture::Success),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+    let provider = &snapshot.providers[0];
+    let payload = serde_json::to_string(&(&snapshot, &result)).expect("payload");
+
+    assert_eq!(provider.state, ProviderState::MissingDependency);
+    assert!(!result.cache_written);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::COOKIE_DECRYPTION_FAILED.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert!(!provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_STARTED.to_string()));
+    assert!(!payload.contains("plain_live"));
+    assert!(!payload.contains("encrypted_live"));
+    assert!(!payload.contains("fixture-chatgpt-live"));
+    common::assert_public_json_safe(&payload);
+    assert_no_live_web_secret_markers("mixed failed material payload", &payload);
+}
+
+#[tokio::test]
 async fn failed_linux_web_refresh_preserves_previous_stale_snapshot() {
     let (_tmp, paths) = common::temp_paths();
     let fake_app = App::new_with_runtime(
@@ -985,7 +1246,10 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
         "browser_live_profiles_disabled"
             | "browser_profile_not_found"
             | "browser_cookie_db_locked"
+            | "browser_cookie_decryption_unavailable"
+            | "browser_keyring_unavailable"
             | "browser_keyring_locked"
+            | "browser_keyring_prompt_required"
             | "browser_cookie_missing"
             | "browser_cookie_found"
             | "browser_cookie_decrypted"
@@ -1015,7 +1279,9 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
         assert_no_live_web_fake_home_path("live Codex web cache", &cache_json, &fake_home);
     }
 
-    let summary = LiveReconSummary::from_provider_and_result(provider, &result);
+    let material_summary = live_cookie_material_summary(&fake_home);
+    let summary =
+        LiveReconSummary::from_provider_result_and_material(provider, &result, material_summary);
     let summary_json = serde_json::to_string(&summary).expect("live recon summary json");
     common::assert_public_json_safe(&summary_json);
     assert_no_live_web_secret_markers("live Codex web summary", &summary_json);
@@ -1026,6 +1292,78 @@ async fn codex_web_live_throwaway_recon_smoke_redacts_outputs() {
 fn refresh_for_response(response: WebResponse) -> codexbar_linuxd::web::WebRefresh {
     let client = FakeWebClient::responding(response);
     web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh")
+}
+
+#[derive(Clone, Copy)]
+struct ChatgptCookieRow<'a> {
+    name: &'a str,
+    value: &'a str,
+    encrypted_hex: &'a str,
+}
+
+impl<'a> ChatgptCookieRow<'a> {
+    fn plaintext(name: &'a str, value: &'a str) -> Self {
+        Self {
+            name,
+            value,
+            encrypted_hex: "",
+        }
+    }
+
+    fn encrypted_v11(name: &'a str) -> Self {
+        Self {
+            name,
+            value: "",
+            encrypted_hex: "763131666978747572652d636861746770742d6b657972696e67",
+        }
+    }
+}
+
+fn create_chatgpt_cookie_db(home: &Path, rows: &[ChatgptCookieRow<'_>]) -> PathBuf {
+    let profile = home.join(".config/google-chrome/Default/Network");
+    fs::create_dir_all(&profile).expect("profile network");
+    let db = profile.join("Cookies");
+    let connection = Connection::open(&db).expect("open chatgpt fixture db");
+    connection
+        .execute_batch(
+            r#"
+CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR);
+INSERT INTO meta(key, value) VALUES('version', '24');
+CREATE TABLE cookies(
+  creation_utc INTEGER NOT NULL,
+  host_key TEXT NOT NULL,
+  top_frame_site_key TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  encrypted_value BLOB NOT NULL DEFAULT X'',
+  path TEXT NOT NULL,
+  expires_utc INTEGER NOT NULL,
+  is_secure INTEGER NOT NULL,
+  is_httponly INTEGER NOT NULL,
+  last_access_utc INTEGER NOT NULL,
+  has_expires INTEGER NOT NULL DEFAULT 1,
+  is_persistent INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 1,
+  samesite INTEGER NOT NULL DEFAULT -1,
+  source_scheme INTEGER NOT NULL DEFAULT 2,
+  source_port INTEGER NOT NULL DEFAULT 443,
+  last_update_utc INTEGER NOT NULL DEFAULT 0,
+  source_type INTEGER NOT NULL DEFAULT 0,
+  has_cross_site_ancestor INTEGER NOT NULL DEFAULT 0
+);
+"#,
+        )
+        .expect("chatgpt fixture schema");
+    for row in rows {
+        let sql = format!(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', ?1, ?2, X'{}', '/', 20000000000000000, 1, 1, 1)",
+            row.encrypted_hex
+        );
+        connection
+            .execute(&sql, [row.name, row.value])
+            .expect("insert chatgpt fixture cookie");
+    }
+    db
 }
 
 fn live_throwaway_fake_home() -> Option<PathBuf> {
@@ -1055,6 +1393,18 @@ fn live_throwaway_fake_home() -> Option<PathBuf> {
         "throwaway fake home marker is required"
     );
     Some(fake_home)
+}
+
+fn live_cookie_material_summary(
+    fake_home: &Path,
+) -> codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary {
+    browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(fake_home.to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    })
+    .material_summary
 }
 
 fn assert_no_live_web_secret_markers(label: &str, text: &str) {
@@ -1123,13 +1473,18 @@ struct LiveReconSummary {
     source_adapter: SourceAdapter,
     classification: LiveReconClassification,
     diagnostic_codes: Vec<String>,
+    cookie_material: codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary,
     cookie_presence: LiveReconCookiePresence,
     web_fetch: LiveReconWebFetch,
     redaction_applied: bool,
 }
 
 impl LiveReconSummary {
-    fn from_provider_and_result(provider: &Provider, result: &RefreshResult) -> Self {
+    fn from_provider_result_and_material(
+        provider: &Provider,
+        result: &RefreshResult,
+        cookie_material: codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary,
+    ) -> Self {
         let diagnostic_codes = safe_recon_diagnostic_codes(provider, result);
         let classification = classify_live_recon(provider.state, &diagnostic_codes);
         let cookie_presence = classify_cookie_presence(&diagnostic_codes);
@@ -1143,10 +1498,19 @@ impl LiveReconSummary {
             source_adapter: SourceAdapter::LinuxWeb,
             classification,
             diagnostic_codes,
+            cookie_material,
             cookie_presence,
             web_fetch,
             redaction_applied: true,
         }
+    }
+
+    fn from_provider_and_result(provider: &Provider, result: &RefreshResult) -> Self {
+        Self::from_provider_result_and_material(
+            provider,
+            result,
+            codexbar_linuxd::browser::cookie_store::BrowserCookieMaterialSummary::default(),
+        )
     }
 }
 
@@ -1311,8 +1675,6 @@ fn classify_live_recon(provider_state: ProviderState, codes: &[String]) -> LiveR
     if has_any_code(
         codes,
         &[
-            browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
-            browser_diagnostics::COOKIE_DECRYPTION_FAILED,
             browser_diagnostics::KEYRING_LOCKED,
             browser_diagnostics::KEYRING_PROMPT_REQUIRED,
             browser_diagnostics::KEYRING_UNAVAILABLE,
@@ -1323,6 +1685,8 @@ fn classify_live_recon(provider_state: ProviderState, codes: &[String]) -> LiveR
     if has_any_code(
         codes,
         &[
+            browser_diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
+            browser_diagnostics::COOKIE_DECRYPTION_FAILED,
             browser_diagnostics::COOKIE_DB_MISSING,
             browser_diagnostics::COOKIE_DB_UNREADABLE,
             browser_diagnostics::COOKIE_DB_LOCKED,

@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 use crate::browser::diagnostics;
-use crate::browser::keyring::{CookieDecryptor, DecryptError};
+use crate::browser::keyring::{CookieDecryptor, DecryptError, DecryptionStatus, DecryptorBackend};
 use crate::browser::profile::{path_is_under, BrowserProfileDescriptor};
 use crate::browser::session_material::{ScopedCookie, SessionMaterial};
 use crate::model::KeyringState;
@@ -92,6 +92,7 @@ pub struct CookieStoreProfileOutcome {
     pub diagnostic_codes: Vec<String>,
     pub provider_counts: BTreeMap<String, u64>,
     pub provider_diagnostic_codes: BTreeMap<String, Vec<String>>,
+    pub material_summary: BrowserCookieMaterialSummary,
 }
 
 impl Default for CookieStoreProfileOutcome {
@@ -102,6 +103,7 @@ impl Default for CookieStoreProfileOutcome {
             diagnostic_codes: Vec::new(),
             provider_counts: BTreeMap::new(),
             provider_diagnostic_codes: BTreeMap::new(),
+            material_summary: BrowserCookieMaterialSummary::default(),
         }
     }
 }
@@ -133,6 +135,163 @@ pub struct CookieStoreSessionOutcome {
     pub sessions: BTreeMap<String, SessionMaterial>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserCookieMaterialSummary {
+    pub profiles_discovered: u64,
+    pub candidate_cookie_rows: u64,
+    pub plaintext_value_rows: u64,
+    pub encrypted_value_rows: u64,
+    pub encrypted_prefixes: EncryptedPrefixCounts,
+    pub expired_rows: u64,
+    pub usable_session_cookies: u64,
+    pub decryptor_backend: DecryptorBackend,
+    pub decryption_status: DecryptionStatus,
+}
+
+impl Default for BrowserCookieMaterialSummary {
+    fn default() -> Self {
+        Self {
+            profiles_discovered: 0,
+            candidate_cookie_rows: 0,
+            plaintext_value_rows: 0,
+            encrypted_value_rows: 0,
+            encrypted_prefixes: EncryptedPrefixCounts::default(),
+            expired_rows: 0,
+            usable_session_cookies: 0,
+            decryptor_backend: DecryptorBackend::Unavailable,
+            decryption_status: DecryptionStatus::NotNeeded,
+        }
+    }
+}
+
+impl BrowserCookieMaterialSummary {
+    pub fn with_backend(backend: DecryptorBackend) -> Self {
+        Self {
+            decryptor_backend: backend,
+            ..Self::default()
+        }
+    }
+
+    pub fn add_profiles_discovered(&mut self, count: usize) {
+        self.profiles_discovered += count as u64;
+    }
+
+    pub fn combine_profile(&mut self, other: BrowserCookieMaterialSummary) {
+        self.candidate_cookie_rows += other.candidate_cookie_rows;
+        self.plaintext_value_rows += other.plaintext_value_rows;
+        self.encrypted_value_rows += other.encrypted_value_rows;
+        self.encrypted_prefixes.combine(other.encrypted_prefixes);
+        self.expired_rows += other.expired_rows;
+        self.usable_session_cookies += other.usable_session_cookies;
+        self.decryption_status =
+            combine_decryption_status(self.decryption_status, other.decryption_status);
+    }
+
+    fn observe_rows(&mut self, rows: &[CookieRow]) {
+        for row in rows {
+            self.candidate_cookie_rows += 1;
+            if !row.value.is_empty() {
+                self.plaintext_value_rows += 1;
+            }
+            if !row.encrypted_value.is_empty() {
+                self.encrypted_value_rows += 1;
+                self.encrypted_prefixes
+                    .record(encrypted_prefix(&row.encrypted_value));
+            }
+            if row.is_expired() {
+                self.expired_rows += 1;
+            }
+        }
+    }
+
+    fn record_usable_session_cookies(&mut self, count: u64, decrypted: bool) {
+        self.usable_session_cookies += count;
+        if decrypted {
+            self.decryption_status =
+                combine_decryption_status(self.decryption_status, DecryptionStatus::Succeeded);
+        }
+    }
+
+    fn record_decryption_error(&mut self, error: DecryptError) {
+        let status = match error {
+            DecryptError::Unavailable => DecryptionStatus::Unavailable,
+            DecryptError::Locked => DecryptionStatus::Locked,
+            DecryptError::PromptRequired => DecryptionStatus::PromptRequired,
+            DecryptError::Failed => DecryptionStatus::Failed,
+        };
+        self.decryption_status = combine_decryption_status(self.decryption_status, status);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedPrefixCounts {
+    pub v10: u64,
+    pub v11: u64,
+    pub v20: u64,
+    pub v24: u64,
+    pub unknown: u64,
+}
+
+impl EncryptedPrefixCounts {
+    fn record(&mut self, prefix: EncryptedCookiePrefix) {
+        match prefix {
+            EncryptedCookiePrefix::V10 => self.v10 += 1,
+            EncryptedCookiePrefix::V11 => self.v11 += 1,
+            EncryptedCookiePrefix::V20 => self.v20 += 1,
+            EncryptedCookiePrefix::V24 => self.v24 += 1,
+            EncryptedCookiePrefix::Unknown => self.unknown += 1,
+        }
+    }
+
+    fn combine(&mut self, other: Self) {
+        self.v10 += other.v10;
+        self.v11 += other.v11;
+        self.v20 += other.v20;
+        self.v24 += other.v24;
+        self.unknown += other.unknown;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EncryptedCookiePrefix {
+    V10,
+    V11,
+    V20,
+    V24,
+    Unknown,
+}
+
+fn encrypted_prefix(value: &[u8]) -> EncryptedCookiePrefix {
+    if value.starts_with(b"v10") {
+        EncryptedCookiePrefix::V10
+    } else if value.starts_with(b"v11") {
+        EncryptedCookiePrefix::V11
+    } else if value.starts_with(b"v20") {
+        EncryptedCookiePrefix::V20
+    } else if value.starts_with(b"v24") {
+        EncryptedCookiePrefix::V24
+    } else {
+        EncryptedCookiePrefix::Unknown
+    }
+}
+
+fn combine_decryption_status(
+    current: DecryptionStatus,
+    next: DecryptionStatus,
+) -> DecryptionStatus {
+    use DecryptionStatus::{Failed, Locked, NotNeeded, PromptRequired, Succeeded, Unavailable};
+    match (current, next) {
+        (Failed, _) | (_, Failed) => Failed,
+        (Locked, _) | (_, Locked) => Locked,
+        (PromptRequired, _) | (_, PromptRequired) => PromptRequired,
+        (Unavailable, _) | (_, Unavailable) => Unavailable,
+        (Succeeded, _) | (_, Succeeded) => Succeeded,
+        (NotNeeded, NotNeeded) => NotNeeded,
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CookieDbFailure {
     Missing,
@@ -159,6 +318,7 @@ pub fn read_profile_cookies(
 ) -> CookieStoreProfileOutcome {
     let mut outcome = CookieStoreProfileOutcome {
         keyring_state: KeyringState::NotRequired,
+        material_summary: BrowserCookieMaterialSummary::with_backend(decryptor.backend()),
         ..CookieStoreProfileOutcome::default()
     };
     let Some(db_path) = find_chromium_cookie_db(profile.profile_path()) else {
@@ -212,86 +372,52 @@ pub fn read_profile_cookies(
     for query in queries {
         match query_cookie_rows(&connection, &columns, query) {
             Ok(rows) => {
+                outcome.material_summary.observe_rows(&rows);
                 let mut provider_count = 0;
+                let mut provider_used_keyring = false;
+                let mut provider_decrypted = false;
+                let mut provider_had_material_error = false;
                 for row in rows {
                     if row.is_expired() {
                         continue;
                     }
                     match row.session_material(query.provider(), decryptor) {
-                        Ok(Some(material)) => {
+                        Ok(Some((kind, material))) => {
                             provider_count += material.cookie_count() as u64;
+                            provider_used_keyring |= kind.requires_keyring();
+                            provider_decrypted |= kind.was_decrypted();
                             drop(material);
                         }
                         Ok(None) => {}
                         Err(error) => {
-                            let state = error.keyring_state();
-                            if outcome.keyring_state == KeyringState::NotRequired
-                                || outcome.keyring_state == KeyringState::Unknown
-                            {
-                                outcome.keyring_state = state;
-                            }
-                            match error {
-                                DecryptError::Unavailable => {
-                                    outcome.push_code(diagnostics::KEYRING_UNAVAILABLE);
-                                    outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::KEYRING_UNAVAILABLE,
-                                    );
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
-                                    );
-                                }
-                                DecryptError::Locked => {
-                                    outcome.push_code(diagnostics::KEYRING_LOCKED);
-                                    outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::KEYRING_LOCKED,
-                                    );
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
-                                    );
-                                }
-                                DecryptError::PromptRequired => {
-                                    outcome.push_code(diagnostics::KEYRING_PROMPT_REQUIRED);
-                                    outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::KEYRING_PROMPT_REQUIRED,
-                                    );
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::COOKIE_DECRYPTION_UNAVAILABLE,
-                                    );
-                                }
-                                DecryptError::Failed => {
-                                    outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
-                                    outcome.push_provider_code(
-                                        query.provider(),
-                                        diagnostics::COOKIE_DECRYPTION_FAILED,
-                                    );
-                                }
-                            }
+                            provider_had_material_error = true;
+                            outcome
+                                .material_summary
+                                .record_decryption_error(error.error);
+                            record_decrypt_error(&mut outcome, query.provider(), error);
                         }
                     }
                 }
+                if provider_had_material_error {
+                    provider_count = 0;
+                }
                 if provider_count > 0 {
-                    outcome.keyring_state = match outcome.keyring_state {
-                        KeyringState::NotRequired | KeyringState::Unknown => {
-                            if rows_required_decryption(&connection, &columns, query) {
-                                KeyringState::Unlocked
-                            } else {
-                                KeyringState::NotRequired
-                            }
-                        }
-                        state => state,
-                    };
+                    if provider_used_keyring
+                        || (!provider_decrypted
+                            && rows_required_keyring(&connection, &columns, query))
+                    {
+                        record_keyring_state(&mut outcome, KeyringState::Unlocked);
+                    }
+                    outcome
+                        .material_summary
+                        .record_usable_session_cookies(provider_count, provider_decrypted);
                     outcome.add_provider_count(query.provider(), provider_count);
                     outcome.push_code(diagnostics::COOKIE_FOUND);
                     outcome.push_provider_code(query.provider(), diagnostics::COOKIE_FOUND);
+                    if provider_decrypted {
+                        outcome.push_code(diagnostics::COOKIE_DECRYPTED);
+                        outcome.push_provider_code(query.provider(), diagnostics::COOKIE_DECRYPTED);
+                    }
                 } else if !outcome
                     .provider_diagnostic_codes
                     .get(query.provider())
@@ -321,6 +447,7 @@ pub fn read_profile_session_material(
 ) -> CookieStoreSessionOutcome {
     let mut outcome = CookieStoreProfileOutcome {
         keyring_state: KeyringState::NotRequired,
+        material_summary: BrowserCookieMaterialSummary::with_backend(decryptor.backend()),
         ..CookieStoreProfileOutcome::default()
     };
     let mut sessions = BTreeMap::new();
@@ -390,35 +517,44 @@ pub fn read_profile_session_material(
     for query in queries {
         match query_cookie_rows(&connection, &columns, query) {
             Ok(rows) => {
+                outcome.material_summary.observe_rows(&rows);
                 let mut cookies = Vec::new();
                 let mut decrypted_cookie = false;
+                let mut used_keyring = false;
+                let mut provider_had_material_error = false;
                 for row in rows {
                     if row.is_expired() {
                         continue;
                     }
                     match row.scoped_cookie(decryptor) {
-                        Ok(Some((was_decrypted, cookie))) => {
-                            decrypted_cookie |= was_decrypted;
+                        Ok(Some((kind, cookie))) => {
+                            decrypted_cookie |= kind.was_decrypted();
+                            used_keyring |= kind.requires_keyring();
                             cookies.push(cookie);
                         }
                         Ok(None) => {}
-                        Err(error) => record_decrypt_error(&mut outcome, query.provider(), error),
+                        Err(error) => {
+                            provider_had_material_error = true;
+                            outcome
+                                .material_summary
+                                .record_decryption_error(error.error);
+                            record_decrypt_error(&mut outcome, query.provider(), error);
+                        }
                     }
+                }
+                if provider_had_material_error {
+                    cookies.clear();
                 }
                 if !cookies.is_empty() {
                     let provider_count = cookies.len() as u64;
                     match SessionMaterial::try_new(query.provider(), cookies) {
                         Ok(material) => {
-                            outcome.keyring_state = match outcome.keyring_state {
-                                KeyringState::NotRequired | KeyringState::Unknown => {
-                                    if decrypted_cookie {
-                                        KeyringState::Unlocked
-                                    } else {
-                                        KeyringState::NotRequired
-                                    }
-                                }
-                                state => state,
-                            };
+                            if used_keyring {
+                                record_keyring_state(&mut outcome, KeyringState::Unlocked);
+                            }
+                            outcome
+                                .material_summary
+                                .record_usable_session_cookies(provider_count, decrypted_cookie);
                             outcome.add_provider_count(query.provider(), provider_count);
                             outcome.push_code(diagnostics::COOKIE_FOUND);
                             outcome.push_provider_code(query.provider(), diagnostics::COOKIE_FOUND);
@@ -432,6 +568,9 @@ pub fn read_profile_session_material(
                             sessions.insert(query.provider().to_string(), material);
                         }
                         Err(_) => {
+                            outcome
+                                .material_summary
+                                .record_decryption_error(DecryptError::Failed);
                             outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
                             outcome.push_provider_code(
                                 query.provider(),
@@ -662,7 +801,7 @@ fn query_cookie_rows(
     Ok(output)
 }
 
-fn rows_required_decryption(
+fn rows_required_keyring(
     connection: &Connection,
     columns: &BTreeSet<String>,
     query: &CookieQuery,
@@ -670,7 +809,7 @@ fn rows_required_decryption(
     query_cookie_rows(connection, columns, query)
         .map(|rows| {
             rows.into_iter()
-                .any(|row| !row.is_expired() && !row.encrypted_value.is_empty())
+                .any(|row| !row.is_expired() && row.material_kind().requires_keyring())
         })
         .unwrap_or(false)
 }
@@ -701,6 +840,39 @@ struct CookieRow {
     value: String,
     encrypted_value: Vec<u8>,
     expires_utc: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CookieMaterialKind {
+    Plaintext,
+    BasicEncrypted,
+    KeyringEncrypted,
+    UnknownEncrypted,
+    Empty,
+}
+
+impl CookieMaterialKind {
+    fn requires_keyring(self) -> bool {
+        matches!(self, Self::KeyringEncrypted)
+    }
+
+    fn was_decrypted(self) -> bool {
+        matches!(self, Self::BasicEncrypted | Self::KeyringEncrypted)
+    }
+
+    fn keyring_state_for_error(self, error: DecryptError) -> KeyringState {
+        match self {
+            Self::KeyringEncrypted => error.keyring_state(),
+            Self::UnknownEncrypted => KeyringState::Unknown,
+            Self::BasicEncrypted | Self::Plaintext | Self::Empty => KeyringState::NotRequired,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CookieRowDecryptError {
+    kind: CookieMaterialKind,
+    error: DecryptError,
 }
 
 impl CookieRow {
@@ -737,75 +909,117 @@ impl CookieRow {
         &self,
         provider: &str,
         decryptor: &dyn CookieDecryptor,
-    ) -> Result<Option<SessionMaterial>, DecryptError> {
-        let Some((_was_decrypted, cookie)) = self.scoped_cookie(decryptor)? else {
+    ) -> Result<Option<(CookieMaterialKind, SessionMaterial)>, CookieRowDecryptError> {
+        let Some((kind, cookie)) = self.scoped_cookie(decryptor)? else {
             return Ok(None);
         };
-        Ok(SessionMaterial::try_new(provider, vec![cookie]).ok())
+        Ok(SessionMaterial::try_new(provider, vec![cookie])
+            .ok()
+            .map(|material| (kind, material)))
     }
 
     fn scoped_cookie(
         &self,
         decryptor: &dyn CookieDecryptor,
-    ) -> Result<Option<(bool, ScopedCookie)>, DecryptError> {
-        if !self.encrypted_value.is_empty() {
-            let value = decryptor.decrypt(&self.encrypted_value)?;
-            return Ok(ScopedCookie::try_new_for_domain(
+    ) -> Result<Option<(CookieMaterialKind, ScopedCookie)>, CookieRowDecryptError> {
+        match self.material_kind() {
+            CookieMaterialKind::Plaintext => Ok(ScopedCookie::try_new_for_domain(
                 &self.host_key,
                 &self.path,
                 self.name.clone(),
-                value,
+                self.value.clone(),
             )
             .ok()
-            .map(|cookie| (true, cookie)));
+            .map(|cookie| (CookieMaterialKind::Plaintext, cookie))),
+            CookieMaterialKind::BasicEncrypted | CookieMaterialKind::KeyringEncrypted => {
+                let kind = self.material_kind();
+                let value = decryptor
+                    .decrypt(&self.encrypted_value)
+                    .map_err(|error| CookieRowDecryptError { kind, error })?;
+                Ok(ScopedCookie::try_new_for_domain(
+                    &self.host_key,
+                    &self.path,
+                    self.name.clone(),
+                    value,
+                )
+                .ok()
+                .map(|cookie| (kind, cookie)))
+            }
+            CookieMaterialKind::UnknownEncrypted => Err(CookieRowDecryptError {
+                kind: CookieMaterialKind::UnknownEncrypted,
+                error: DecryptError::Unavailable,
+            }),
+            CookieMaterialKind::Empty => Ok(None),
         }
-        if self.value.is_empty() {
-            return Ok(None);
+    }
+
+    fn material_kind(&self) -> CookieMaterialKind {
+        if self.encrypted_value.starts_with(b"v10") {
+            CookieMaterialKind::BasicEncrypted
+        } else if self.encrypted_value.starts_with(b"v11") {
+            CookieMaterialKind::KeyringEncrypted
+        } else if !self.encrypted_value.is_empty() {
+            CookieMaterialKind::UnknownEncrypted
+        } else if !self.value.is_empty() {
+            CookieMaterialKind::Plaintext
+        } else {
+            CookieMaterialKind::Empty
         }
-        Ok(ScopedCookie::try_new_for_domain(
-            &self.host_key,
-            &self.path,
-            self.name.clone(),
-            self.value.clone(),
-        )
-        .ok()
-        .map(|cookie| (false, cookie)))
     }
 }
 
 fn record_decrypt_error(
     outcome: &mut CookieStoreProfileOutcome,
     provider: &str,
-    error: DecryptError,
+    error: CookieRowDecryptError,
 ) {
-    let state = error.keyring_state();
-    if outcome.keyring_state == KeyringState::NotRequired
-        || outcome.keyring_state == KeyringState::Unknown
-    {
-        outcome.keyring_state = state;
-    }
-    match error {
+    record_keyring_state(outcome, error.kind.keyring_state_for_error(error.error));
+    match error.error {
         DecryptError::Unavailable => {
-            outcome.push_code(diagnostics::KEYRING_UNAVAILABLE);
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-            outcome.push_provider_code(provider, diagnostics::KEYRING_UNAVAILABLE);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            if error.kind.requires_keyring() {
+                outcome.push_code(diagnostics::KEYRING_UNAVAILABLE);
+                outcome.push_provider_code(provider, diagnostics::KEYRING_UNAVAILABLE);
+            }
         }
         DecryptError::Locked => {
-            outcome.push_code(diagnostics::KEYRING_LOCKED);
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-            outcome.push_provider_code(provider, diagnostics::KEYRING_LOCKED);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            if error.kind.requires_keyring() {
+                outcome.push_code(diagnostics::KEYRING_LOCKED);
+                outcome.push_provider_code(provider, diagnostics::KEYRING_LOCKED);
+            }
         }
         DecryptError::PromptRequired => {
-            outcome.push_code(diagnostics::KEYRING_PROMPT_REQUIRED);
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
-            outcome.push_provider_code(provider, diagnostics::KEYRING_PROMPT_REQUIRED);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
+            if error.kind.requires_keyring() {
+                outcome.push_code(diagnostics::KEYRING_PROMPT_REQUIRED);
+                outcome.push_provider_code(provider, diagnostics::KEYRING_PROMPT_REQUIRED);
+            }
         }
         DecryptError::Failed => {
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_FAILED);
+        }
+    }
+}
+
+fn record_keyring_state(outcome: &mut CookieStoreProfileOutcome, state: KeyringState) {
+    match state {
+        KeyringState::NotRequired => {}
+        KeyringState::Unknown => {
+            if outcome.keyring_state == KeyringState::NotRequired {
+                outcome.keyring_state = KeyringState::Unknown;
+            }
+        }
+        _ => {
+            if outcome.keyring_state == KeyringState::NotRequired
+                || outcome.keyring_state == KeyringState::Unknown
+            {
+                outcome.keyring_state = state;
+            }
         }
     }
 }

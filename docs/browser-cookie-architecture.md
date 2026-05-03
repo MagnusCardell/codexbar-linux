@@ -5,14 +5,18 @@
 Frozen for Task 04A and partially implemented by Task 04B/04D. Task 04B adds
 daemon-only Chromium-family synthetic/fake-root discovery, private SQLite cookie
 DB temp copies, synthetic cookie-row reads, fake decryptor states, in-memory
-session material, and schema-valid `TestBrowserImport` results. Task 04D.0 adds
-a daemon-only Codex web adapter skeleton with fake HTTP fixtures, static
-policy/URL allowlists, response-size/redirect/timeout handling, and
-normalization into the existing snapshot provider shape. Task 04D.1 adds a
-daemon-only, gated real HTTP transport for opt-in Codex web reconnaissance
-against the single static dashboard URL. It still does not implement live
-browser-profile scanning by default, default live provider fetch, real keyring
-access, real provider scraping, or production web scraping.
+session material, and schema-valid `TestBrowserImport` results. Task 04B.2 adds
+safe Chromium cookie material summaries, plaintext row support, fail-closed
+encrypted row classification, explicit fake/test decryptor separation from the
+production/plain backend, and a noninteractive Secret Service probe abstraction.
+Task 04D.0 adds a daemon-only Codex web adapter skeleton with fake HTTP
+fixtures, static policy/URL allowlists, response-size/redirect/timeout
+handling, and normalization into the existing snapshot provider shape. Task
+04D.1 adds a daemon-only, gated real HTTP transport for opt-in Codex web
+reconnaissance against the single static dashboard URL. It still does not
+implement live browser-profile scanning by default, default live provider
+fetch, real Secret Service secret extraction, real provider scraping, or
+production web scraping.
 
 ## Thesis
 
@@ -248,6 +252,25 @@ web support:
 - live responses may be classified, and fixture-shaped parser success remains
   the only asserted normalizer.
 
+Task 04B.2 keeps the browser-cookie layer narrower than production Secret
+Service support:
+
+- rows with a non-empty Chromium `value` and empty `encrypted_value` become
+  provider-scoped in-memory session material after domain/path/name/value
+  validation;
+- encrypted rows with known `v10`, `v11`, `v20`, or `v24` prefixes are counted
+  in safe diagnostics, but only fake test decryptors can turn synthetic
+  encrypted rows into material;
+- the production/env backend is `plain`, so plaintext rows can be used and
+  encrypted rows return `browser_cookie_decryption_unavailable`;
+- `SecretServiceProbe` is noninteractive and only maps unavailable, locked, or
+  prompt-required states. It does not extract, display, persist, or log the
+  Chromium OSCrypt secret;
+- if any provider-scoped cookie row fails decryption or material validation,
+  the provider's collected cookies are discarded for that profile. This avoids
+  sending a partial Cookie header when the daemon cannot prove the failed row is
+  irrelevant.
+
 ## Diagnostics Model
 
 Diagnostics are schema-backed, redaction-safe, and stable enough for support.
@@ -460,6 +483,11 @@ Current Rust crates and likely future APIs:
 - `secrecy` or `zeroize` only as defense-in-depth, not as a redaction
   substitute.
 
+Task 04B.2 does not add a Secret Service crate or native package dependency.
+The probe abstraction is an internal daemon status mapper only. Real
+noninteractive Secret Service extraction remains future work and must receive
+a dependency, packaging, and redaction review before landing.
+
 Likely Debian/Ubuntu implications:
 
 - `pkg-config`, `libsqlite3-dev`, and runtime `libsqlite3-0` for system SQLite;
@@ -482,6 +510,7 @@ Unix mode controls for `0700` private directories and `0600` copied files.
 Task 04A through Task 04D.1 do not:
 
 - implement real keyring access;
+- extract real Secret Service secrets;
 - enable real user browser profile scanning by default;
 - enable default provider HTTP fetches;
 - implement web scraping;

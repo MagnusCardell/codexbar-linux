@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 
 use codexbar_linuxd::app::{App, AppRuntime};
 use codexbar_linuxd::browser::cookie_store::copy_cookie_db_to_private_temp;
-use codexbar_linuxd::browser::keyring::FakeDecryptorMode;
+use codexbar_linuxd::browser::keyring::{
+    BrowserDecryptorMode, DecryptionStatus, DecryptorBackend, FakeDecryptorMode,
+    SecretServiceProbeStatus,
+};
 use codexbar_linuxd::browser::profile::BrowserDiscoveryRoots;
 use codexbar_linuxd::browser::{self, BrowserSessionRequest};
 use codexbar_linuxd::model::{
@@ -104,6 +107,23 @@ fn default_runtime_does_not_scan_real_or_fake_home() {
     assert!(!tmp.path().join(".config").join("chromium").exists());
     assert!(!tmp.path().join(".config").join("google-chrome").exists());
     assert!(!tmp.path().join(".config").join("BraveSoftware").exists());
+}
+
+#[test]
+fn path_bearing_runtime_debug_output_is_redacted() {
+    let (tmp, paths) = common::temp_paths();
+    let roots = BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf());
+    let runtime = AppRuntime::with_browser_roots_for_tests(roots.clone());
+    let roots_debug = format!("{roots:?}");
+    let paths_debug = format!("{paths:?}");
+    let runtime_debug = format!("{runtime:?}");
+    let tmp_path = tmp.path().display().to_string();
+
+    for debug in [roots_debug, paths_debug, runtime_debug] {
+        assert!(!debug.contains(&tmp_path), "{debug}");
+        assert!(!debug.contains(".config"), "{debug}");
+        assert!(debug.contains("[redacted]"), "{debug}");
+    }
 }
 
 #[test]
@@ -212,6 +232,87 @@ fn test_browser_import_does_not_write_snapshot_cache() {
 }
 
 #[test]
+fn plaintext_cookie_material_does_not_require_keyring() {
+    let (tmp, paths) = common::temp_paths();
+    create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "plaintext-default/schema.sql",
+    );
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+
+    assert_eq!(result.providers[0].status, BrowserProviderStatus::Success);
+    assert_eq!(result.profiles[0].keyring_state, KeyringState::NotRequired);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_found".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decrypted".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .iter()
+        .any(|code| code.starts_with("browser_keyring_")));
+}
+
+#[test]
+fn v10_basic_cookie_material_uses_fake_decryptor_without_keyring() {
+    let (tmp, paths) = common::temp_paths();
+    create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "basic-v10/schema.sql",
+    );
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+    let result_json = serde_json::to_string(&result).expect("result json");
+
+    assert_eq!(result.providers[0].status, BrowserProviderStatus::Success);
+    assert_eq!(result.profiles[0].keyring_state, KeyringState::NotRequired);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_found".to_string()));
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decrypted".to_string()));
+    assert!(result.providers[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decrypted".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .iter()
+        .any(|code| code.starts_with("browser_keyring_")));
+    assert_public_browser_json_safe(tmp.path(), &result_json);
+}
+
+#[test]
+fn v10_basic_cookie_decryptor_unavailable_does_not_report_keyring_unavailable() {
+    let (tmp, paths) = common::temp_paths();
+    create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "basic-v10/schema.sql",
+    );
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Unavailable);
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+    let result_json = serde_json::to_string(&result).expect("result json");
+
+    assert_eq!(
+        result.providers[0].status,
+        BrowserProviderStatus::MissingDependency
+    );
+    assert_eq!(result.profiles[0].keyring_state, KeyringState::NotRequired);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decryption_unavailable".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_keyring_unavailable".to_string()));
+    assert_public_browser_json_safe(tmp.path(), &result_json);
+}
+
+#[test]
 #[cfg(unix)]
 fn cookie_db_temp_copy_has_private_permissions_and_cleans_up() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -307,7 +408,7 @@ fn fake_decryptor_success_and_failures_map_to_safe_diagnostics() {
             FakeDecryptorMode::Success,
             BrowserProviderStatus::Success,
             KeyringState::Unlocked,
-            "browser_cookie_found",
+            "browser_cookie_decrypted",
         ),
         (
             FakeDecryptorMode::Failure,
@@ -359,6 +460,42 @@ fn fake_decryptor_success_and_failures_map_to_safe_diagnostics() {
         let result_json = serde_json::to_string(&result).expect("result json");
         assert_public_browser_json_safe(tmp.path(), &result_json);
     }
+}
+
+#[test]
+fn unknown_encrypted_cookie_material_is_a_safe_non_keyring_failure() {
+    let (tmp, paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open unknown-material db");
+    connection
+        .execute(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, 'codex.example.invalid', 'quota_marker', '', X'666978747572652d756e6b6e6f776e', '/', 20000000000000000, 1, 1, 1)",
+            [],
+        )
+        .expect("insert unknown encrypted row");
+    drop(connection);
+
+    let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+    let result_json = serde_json::to_string(&result).expect("result json");
+
+    assert_eq!(
+        result.providers[0].status,
+        BrowserProviderStatus::MissingDependency
+    );
+    assert_eq!(result.profiles[0].keyring_state, KeyringState::Unknown);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decryption_unavailable".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .iter()
+        .any(|code| code.starts_with("browser_keyring_")));
+    assert_public_browser_json_safe(tmp.path(), &result_json);
 }
 
 #[test]
@@ -485,15 +622,218 @@ fn live_codex_session_collection_reads_chatgpt_domain_only() {
         providers: vec!["codex".to_string()],
         settings: Default::default(),
         roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
-        decryptor_mode: FakeDecryptorMode::Success,
+        decryptor_mode: BrowserDecryptorMode::fake(FakeDecryptorMode::Success),
     });
     let material = collection.sessions.get("codex").expect("codex material");
 
     assert_eq!(material.cookie_count(), 1);
+    assert_eq!(collection.material_summary.profiles_discovered, 1);
+    assert_eq!(collection.material_summary.candidate_cookie_rows, 1);
+    assert_eq!(collection.material_summary.plaintext_value_rows, 1);
+    assert_eq!(collection.material_summary.encrypted_value_rows, 0);
+    assert_eq!(collection.material_summary.usable_session_cookies, 1);
+    assert_eq!(
+        collection.material_summary.decryptor_backend,
+        DecryptorBackend::Fake
+    );
+    assert_eq!(
+        collection.material_summary.decryption_status,
+        DecryptionStatus::NotNeeded
+    );
     assert!(collection
         .provider_diagnostic_codes
         .get("codex")
         .is_some_and(|codes| codes.contains(&"browser_cookie_found".to_string())));
+}
+
+#[test]
+fn live_codex_session_collection_constructs_material_from_v10_basic_cookie() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open v10 live-scope fixture db");
+    connection
+        .execute(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'chatgpt_session', '', X'763130666978747572652d636861746770742d6261736963', '/', 20000000000000000, 1, 1, 1)",
+            [],
+        )
+        .expect("insert v10 live-scope cookie");
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::fake(FakeDecryptorMode::Success),
+    });
+    let material = collection.sessions.get("codex").expect("codex material");
+    let material_debug = format!("{material:?}");
+
+    assert_eq!(material.cookie_count(), 1);
+    assert_eq!(collection.material_summary.encrypted_value_rows, 1);
+    assert_eq!(collection.material_summary.encrypted_prefixes.v10, 1);
+    assert_eq!(collection.material_summary.usable_session_cookies, 1);
+    assert_eq!(
+        collection.material_summary.decryption_status,
+        DecryptionStatus::Succeeded
+    );
+    assert!(collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .is_some_and(|codes| codes.contains(&"browser_cookie_found".to_string())
+            && codes.contains(&"browser_cookie_decrypted".to_string())));
+    assert!(!material_debug.contains("chatgpt_session"));
+    assert!(!material_debug.contains("fixture-decrypted-value"));
+}
+
+#[test]
+fn default_plain_backend_uses_plaintext_but_fails_closed_for_encrypted_rows() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open mixed live-scope fixture db");
+    connection
+        .execute(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'plain_live', 'fixture-chatgpt-live', X'', '/', 20000000000000000, 1, 1, 1)",
+            [],
+        )
+        .expect("insert plaintext live-scope cookie");
+    connection
+        .execute(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'encrypted_live', '', X'763131666978747572652d636861746770742d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
+            [],
+        )
+        .expect("insert encrypted live-scope cookie");
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    });
+    let codes = collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .expect("codex diagnostics");
+    let summary_json =
+        serde_json::to_string(&collection.material_summary).expect("material summary json");
+
+    assert!(!collection.sessions.contains_key("codex"));
+    assert!(codes.contains(&"browser_cookie_decryption_unavailable".to_string()));
+    assert!(codes.contains(&"browser_keyring_unavailable".to_string()));
+    assert_eq!(collection.material_summary.profiles_discovered, 1);
+    assert_eq!(collection.material_summary.candidate_cookie_rows, 2);
+    assert_eq!(collection.material_summary.plaintext_value_rows, 1);
+    assert_eq!(collection.material_summary.encrypted_value_rows, 1);
+    assert_eq!(collection.material_summary.encrypted_prefixes.v11, 1);
+    assert_eq!(collection.material_summary.usable_session_cookies, 0);
+    assert_eq!(
+        collection.material_summary.decryptor_backend,
+        DecryptorBackend::Plain
+    );
+    assert_eq!(
+        collection.material_summary.decryption_status,
+        DecryptionStatus::Unavailable
+    );
+    assert_public_browser_json_safe(tmp.path(), &summary_json);
+}
+
+#[test]
+fn secret_service_probe_statuses_map_without_prompting_or_extracting_secrets() {
+    for (probe_status, expected_keyring, expected_code) in [
+        (
+            SecretServiceProbeStatus::Unavailable,
+            KeyringState::Unavailable,
+            "browser_keyring_unavailable",
+        ),
+        (
+            SecretServiceProbeStatus::Locked,
+            KeyringState::Locked,
+            "browser_keyring_locked",
+        ),
+        (
+            SecretServiceProbeStatus::PromptRequired,
+            KeyringState::Locked,
+            "browser_keyring_prompt_required",
+        ),
+    ] {
+        let (tmp, paths) = common::temp_paths();
+        let db = create_network_cookie_db(
+            tmp.path(),
+            ".config/google-chrome/Default",
+            "locked-or-wal/schema.sql",
+        );
+        let connection = Connection::open(&db).expect("open keyring probe fixture db");
+        connection
+            .execute(
+                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'encrypted_live', '', X'763131666978747572652d636861746770742d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
+                [],
+            )
+            .expect("insert keyring probe cookie");
+        connection
+            .execute(
+                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, 'codex.example.invalid', 'quota_marker', '', X'763131666978747572652d636f6465782d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
+                [],
+            )
+            .expect("insert synthetic keyring probe cookie");
+        drop(connection);
+
+        let collection = browser::collect_session_material(BrowserSessionRequest {
+            providers: vec!["codex".to_string()],
+            settings: Default::default(),
+            roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+            decryptor_mode: BrowserDecryptorMode::SecretServiceProbe(probe_status),
+        });
+        let app = App::new_with_runtime(
+            paths,
+            AppRuntime::with_browser_roots_for_tests(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_browser_decryptor_backend(BrowserDecryptorMode::SecretServiceProbe(probe_status)),
+        )
+        .expect("probe app");
+        let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+        let codes = collection
+            .provider_diagnostic_codes
+            .get("codex")
+            .expect("codex diagnostics");
+        let summary_json =
+            serde_json::to_string(&collection.material_summary).expect("summary json");
+
+        assert!(!collection.sessions.contains_key("codex"));
+        assert!(
+            codes.contains(&expected_code.to_string()),
+            "{probe_status:?}"
+        );
+        assert_eq!(result.profiles[0].keyring_state, expected_keyring);
+        assert!(codes.contains(&"browser_cookie_decryption_unavailable".to_string()));
+        assert_eq!(
+            collection.material_summary.decryptor_backend,
+            DecryptorBackend::SecretService
+        );
+        assert_eq!(
+            collection.material_summary.decryption_status,
+            match probe_status {
+                SecretServiceProbeStatus::Unavailable => DecryptionStatus::Unavailable,
+                SecretServiceProbeStatus::Locked => DecryptionStatus::Locked,
+                SecretServiceProbeStatus::PromptRequired => DecryptionStatus::PromptRequired,
+            }
+        );
+        assert!(
+            collection
+                .diagnostic_codes
+                .contains(&"browser_import_finished".to_string()),
+            "probe collection should complete without interactive prompting"
+        );
+        assert_public_browser_json_safe(tmp.path(), &summary_json);
+    }
 }
 
 #[test]

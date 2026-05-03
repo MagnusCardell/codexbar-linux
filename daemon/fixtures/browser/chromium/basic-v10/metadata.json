@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "basic-v10",
+  "browserFamily": "chromium",
+  "profileShape": "Network/Cookies",
+  "expected": "parse",
+  "description": "Synthetic v10/basic encrypted-value rows consumed only by the fake decryptor."
+}

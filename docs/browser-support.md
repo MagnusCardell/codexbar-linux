@@ -2,12 +2,15 @@
 
 ## Status
 
-Task 04A planning document updated after Task 04B and Task 04B.1
+Task 04A planning document updated after Task 04B, Task 04B.1, and Task 04B.2
 implementation. Task 04B implements daemon-only Chromium-family discovery and
 cookie DB reads for synthetic/fake roots and throwaway fixtures. Task 04B.1
-adds opt-in live throwaway Chromium-family verification. Task 04D.1 adds
-Codex web live reconnaissance against a marked throwaway fake home only. These
-tasks do not enable real user profile scanning by default, real keyring access,
+adds opt-in live throwaway Chromium-family verification. Task 04B.2 adds safe
+cookie material summaries, plaintext Chromium row support, fail-closed
+encrypted row classification, fake/test decryptor separation, and a
+noninteractive Secret Service probe abstraction. Task 04D.1 adds Codex web live
+reconnaissance against a marked throwaway fake home only. These tasks do not
+enable real user profile scanning by default, real Secret Service extraction,
 default provider web fetches, or Firefox import.
 
 ## Implementation Order
@@ -42,6 +45,11 @@ default provider web fetches, or Firefox import.
   `chatgpt.com` cookie material from the throwaway profile in memory only and
   may make one bounded static GET to the Codex dashboard URL. It must not use
   real default browser profiles.
+- In Task 04B.2, `AppRuntime::from_env()` uses the plain backend by default.
+  Plaintext rows may become in-memory material; encrypted rows produce
+  redacted dependency diagnostics until a real noninteractive Secret Service
+  decryptor exists. Fake decryptor success is available only through explicit
+  test constructors.
 - Task 04B fixtures live under `daemon/fixtures/browser/chromium/` as text
   metadata/SQL definitions. Tests create throwaway SQLite DBs from those files;
   committed fixtures do not include real or binary browser cookie databases.
@@ -78,6 +86,50 @@ Brave if available. Snap Chromium is detected separately and uses a
 throwaway-shaped fake home under the snap-visible common area so the daemon can
 see the generated profile files; normal smoke output still reports only shape
 labels, not absolute paths.
+
+## Task 04B.2 Cookie Material Observations
+
+Synthetic and ignored-live diagnostics now summarize Chromium cookie material
+with counts and classes only:
+
+- discovered profile count;
+- candidate cookie row count;
+- plaintext-value row count;
+- encrypted-value row count;
+- encrypted prefix counts for `v10`, `v11`, `v20`, `v24`, and unknown;
+- expired row count;
+- usable in-memory session cookie count;
+- decryptor backend class: `fake`, `plain`, `secret_service`, or
+  `unavailable`;
+- decryption status: `not_needed`, `succeeded`, `failed`, `unavailable`,
+  `locked`, or `prompt_required`.
+
+The summary never prints cookie names, values, encrypted bytes, exact domains,
+profile paths, SQL rows, Cookie headers, Authorization headers, account
+identity, or raw provider payloads.
+
+Current behavior:
+
+- Chromium rows with non-empty `value` and empty `encrypted_value` are usable
+  after provider domain/path validation. This is the path that covers any
+  browser profile where `--password-store=basic` yields plaintext rows.
+- Synthetic `v10` rows are supported by the fake decryptor in tests only. The
+  production/plain backend does not guess a `v10` decryption algorithm.
+- Synthetic `v11` rows model the keyring-backed path. The fake decryptor can
+  decrypt them in tests; the production/plain backend reports
+  `browser_keyring_unavailable` plus
+  `browser_cookie_decryption_unavailable`.
+- Unknown encrypted prefixes fail closed with
+  `browser_cookie_decryption_unavailable` and no keyring-specific claim.
+- If a provider-scoped encrypted row fails while another provider-scoped
+  plaintext row exists, the daemon discards the partial material and web fetch
+  is not attempted.
+
+The earlier local Chrome throwaway smoke used `--password-store=basic`, but the
+provider-live throwaway profile still needs a fresh ignored live run to record
+whether real signed-in Codex rows are plaintext or encrypted and which prefix
+class appears. Do not infer that basic/plain is sufficient until that safe
+summary says so.
 
 ## Google Chrome
 
@@ -127,7 +179,9 @@ Risks/open questions:
 
 - Exact encrypted cookie format and key derivation must be verified on Ubuntu
   24.04 and 26.04.
-- Secret Service prompt behavior must be noninteractive for background refresh.
+- Secret Service extraction is not implemented. Prompt behavior must remain
+  noninteractive for background refresh and currently maps to
+  `browser_keyring_prompt_required`.
 - Chrome channel roots and command-line override roots need bounded support.
 
 ## Brave

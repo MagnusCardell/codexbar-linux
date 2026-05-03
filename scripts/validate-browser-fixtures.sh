@@ -15,10 +15,25 @@ fixture_root = Path(sys.argv[1])
 
 required = {
     "plaintext-default": "parse",
+    "basic-v10": "parse",
     "encrypted-fake": "parse",
     "corrupt-db": "corrupt",
     "locked-or-wal": "parse",
     "unsupported-schema": "unsupported_schema",
+}
+allowed_files = {
+    "plaintext-default": {"metadata.json", "schema.sql"},
+    "basic-v10": {"metadata.json", "schema.sql"},
+    "encrypted-fake": {"metadata.json", "schema.sql"},
+    "corrupt-db": {"metadata.json", "corrupt.txt"},
+    "locked-or-wal": {"metadata.json", "schema.sql"},
+    "unsupported-schema": {"metadata.json", "schema.sql"},
+}
+browser_store_names = {
+    "cookies",
+    "cookies.sqlite",
+    "login data",
+    "network",
 }
 
 if not fixture_root.is_dir():
@@ -60,10 +75,30 @@ def check_text(path: Path, text: str) -> None:
             raise SystemExit(f"Real provider domain {domain} in {path}")
 
 
+def check_fixture_entry(directory: Path, path: Path, allowed: set[str]) -> None:
+    relative_name = path.name
+    lower_name = relative_name.lower()
+    if path.is_dir():
+        raise SystemExit(f"Unexpected subdirectory in browser fixture: {path}")
+    if relative_name not in allowed:
+        raise SystemExit(f"Unexpected browser fixture file: {path}")
+    if lower_name in browser_store_names or lower_name.endswith(("-wal", "-shm")):
+        raise SystemExit(f"Browser fixture must not include browser DB/profile file: {path}")
+    data = path.read_bytes()
+    if data.startswith(b"SQLite format 3\x00"):
+        raise SystemExit(f"Browser fixture must not include binary SQLite DB: {path}")
+    if b"\x00" in data:
+        raise SystemExit(f"Browser fixture must be text only: {path}")
+    check_text(path, data.decode("utf-8", errors="replace"))
+
+
 for name, expected in required.items():
     directory = fixture_root / name
     if not directory.is_dir():
         raise SystemExit(f"Missing browser fixture directory: {directory}")
+    allowed = allowed_files[name]
+    for path in directory.iterdir():
+        check_fixture_entry(directory, path, allowed)
     metadata_path = directory / "metadata.json"
     if not metadata_path.is_file():
         raise SystemExit(f"Missing metadata: {metadata_path}")

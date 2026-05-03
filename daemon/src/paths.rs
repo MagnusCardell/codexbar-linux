@@ -1,9 +1,10 @@
 use std::env;
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::APP_ID;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppPaths {
     pub config_dir: PathBuf,
     pub config_file: PathBuf,
@@ -11,6 +12,22 @@ pub struct AppPaths {
     pub cache_file: PathBuf,
     pub upstream_config_file_hint: Option<String>,
     pub upstream_cli_path: Option<PathBuf>,
+}
+
+impl fmt::Debug for AppPaths {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppPaths")
+            .field("config_dir", &"[redacted]")
+            .field("config_file", &"[redacted]")
+            .field("cache_dir", &"[redacted]")
+            .field("cache_file", &"[redacted]")
+            .field("upstream_config_file_hint", &self.upstream_config_file_hint)
+            .field(
+                "upstream_cli_path",
+                &self.upstream_cli_path.as_ref().map(|_| "[redacted]"),
+            )
+            .finish()
+    }
 }
 
 impl AppPaths {

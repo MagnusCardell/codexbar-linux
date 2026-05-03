@@ -13,8 +13,10 @@ Expected fixture directories:
 
 - `plaintext-default/`: Chromium-style `Network/Cookies` schema with plaintext
   synthetic rows.
+- `basic-v10/`: Chromium-style schema with synthetic `v10` basic encrypted
+  bytes for fake-decryptor classification.
 - `encrypted-fake/`: same schema with synthetic encrypted-value bytes for the
-  fake decryptor.
+  fake decryptor's `v11`/keyring path.
 - `corrupt-db/`: marker metadata for tests that write invalid database bytes.
 - `locked-or-wal/`: schema used by tests that exercise WAL companion copy
   behavior.

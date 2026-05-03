@@ -4,10 +4,19 @@ use std::path::{Path, PathBuf};
 
 use crate::model::BrowserFamily;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct BrowserDiscoveryRoots {
     home: PathBuf,
     xdg_config_home: PathBuf,
+}
+
+impl fmt::Debug for BrowserDiscoveryRoots {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BrowserDiscoveryRoots")
+            .field("home", &"[redacted]")
+            .field("xdg_config_home", &"[redacted]")
+            .finish()
+    }
 }
 
 impl BrowserDiscoveryRoots {

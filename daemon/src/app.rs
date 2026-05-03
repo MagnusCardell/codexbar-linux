@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::browser::keyring::FakeDecryptorMode;
+use crate::browser::keyring::{BrowserDecryptorMode, FakeDecryptorMode};
 use crate::browser::profile::BrowserDiscoveryRoots;
 use crate::browser::{self, BrowserImportRequest, BrowserSessionRequest};
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
@@ -26,7 +27,6 @@ use crate::redact;
 use crate::web::client::{CodexWebFixture, FakeWebClient, ReqwestStaticGetClient};
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
-#[derive(Debug)]
 pub struct App {
     paths: AppPaths,
     runtime: AppRuntime,
@@ -37,14 +37,45 @@ pub struct App {
     state: Mutex<AppState>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+impl fmt::Debug for App {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("App")
+            .field("paths", &"[redacted]")
+            .field("runtime", &self.runtime)
+            .field("clock", &self.clock)
+            .field("cache", &"[redacted]")
+            .field("settings_store", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct AppRuntime {
     allow_fixture_source: bool,
     browser_roots: Option<BrowserDiscoveryRoots>,
-    browser_decryptor_mode: FakeDecryptorMode,
+    browser_decryptor_mode: BrowserDecryptorMode,
     codex_web_fixture: Option<CodexWebFixture>,
     fake_web_session_available: bool,
     codex_web_live_transport: bool,
+}
+
+impl fmt::Debug for AppRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppRuntime")
+            .field("allow_fixture_source", &self.allow_fixture_source)
+            .field(
+                "browser_roots",
+                &self.browser_roots.as_ref().map(|_| "[redacted]"),
+            )
+            .field("browser_decryptor_mode", &self.browser_decryptor_mode)
+            .field("codex_web_fixture", &self.codex_web_fixture)
+            .field(
+                "fake_web_session_available",
+                &self.fake_web_session_available,
+            )
+            .field("codex_web_live_transport", &self.codex_web_live_transport)
+            .finish()
+    }
 }
 
 impl AppRuntime {
@@ -52,7 +83,7 @@ impl AppRuntime {
         Self {
             allow_fixture_source: false,
             browser_roots: None,
-            browser_decryptor_mode: FakeDecryptorMode::Success,
+            browser_decryptor_mode: BrowserDecryptorMode::Plain,
             codex_web_fixture: None,
             fake_web_session_available: false,
             codex_web_live_transport: false,
@@ -68,7 +99,7 @@ impl AppRuntime {
         Ok(Self {
             allow_fixture_source: env_allows_fixture_source(),
             browser_roots,
-            browser_decryptor_mode: FakeDecryptorMode::Success,
+            browser_decryptor_mode: BrowserDecryptorMode::Plain,
             codex_web_fixture: None,
             fake_web_session_available: false,
             codex_web_live_transport,
@@ -79,7 +110,7 @@ impl AppRuntime {
         Self {
             allow_fixture_source: true,
             browser_roots: None,
-            browser_decryptor_mode: FakeDecryptorMode::Success,
+            browser_decryptor_mode: BrowserDecryptorMode::Plain,
             codex_web_fixture: None,
             fake_web_session_available: false,
             codex_web_live_transport: false,
@@ -100,6 +131,11 @@ impl AppRuntime {
     }
 
     pub fn with_browser_decryptor_mode(mut self, mode: FakeDecryptorMode) -> Self {
+        self.browser_decryptor_mode = BrowserDecryptorMode::fake(mode);
+        self
+    }
+
+    pub fn with_browser_decryptor_backend(mut self, mode: BrowserDecryptorMode) -> Self {
         self.browser_decryptor_mode = mode;
         self
     }
@@ -129,7 +165,7 @@ impl AppRuntime {
         self.browser_roots.clone()
     }
 
-    fn browser_decryptor_mode(&self) -> FakeDecryptorMode {
+    fn browser_decryptor_mode(&self) -> BrowserDecryptorMode {
         self.browser_decryptor_mode
     }
 
@@ -453,7 +489,7 @@ impl App {
                         providers: provider_targets.clone(),
                         settings: settings.clone(),
                         roots: self.runtime.browser_roots(),
-                        decryptor_mode: FakeDecryptorMode::Unavailable,
+                        decryptor_mode: self.runtime.browser_decryptor_mode(),
                     });
                     sessions = collection.sessions;
                     session_diagnostic_codes = collection.provider_diagnostic_codes;

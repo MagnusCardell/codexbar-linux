@@ -116,6 +116,42 @@ Task 04B runtime contract:
 - Local Chrome verification observed legacy `Default/Cookies` with no WAL/SHM;
   `Default/Network/Cookies` was not observed in that throwaway run.
 
+## Task 04B.2 Result
+
+Implemented Chromium cookie material classification and safer session material
+construction without changing D-Bus XML, JSON schemas, Shell code, or default
+provider refresh behavior:
+
+- Browser cookie material summaries report only safe counts/classes:
+  discovered profiles, candidate rows, plaintext rows, encrypted rows,
+  encrypted prefix counts, expired rows, usable in-memory cookies, decryptor
+  backend class, and decryption status.
+- Plaintext Chromium rows where `value` is populated and `encrypted_value` is
+  empty are usable after provider domain/path validation and remain memory-only.
+- Synthetic `v10` and `v11` encrypted rows are covered by fake decryptor tests.
+  The production/env backend is `plain`, so encrypted rows fail closed with
+  decryption/keyring diagnostics instead of fake-decrypting real browser data.
+- Unknown encrypted prefixes map to
+  `browser_cookie_decryption_unavailable` without claiming a keyring backend.
+- A noninteractive Secret Service probe abstraction maps unavailable, locked,
+  and prompt-required states. Real Secret Service secret extraction is deferred.
+- If a provider-scoped encrypted row fails while other provider-scoped
+  plaintext rows are present, the daemon discards the partial material and the
+  Codex web fetch is not attempted.
+- Live Codex recon summary now includes the safe cookie material summary in
+  addition to normalized provider/refresh classification. It still prints no
+  names, values, domains, headers, profile paths, SQL rows, or provider
+  payloads.
+- Browser fixture validation now rejects unexpected fixture sidecars,
+  subdirectories, binary SQLite DB files, WAL/SHM companions, and browser-shaped
+  profile/database names.
+
+Observed live provider DB shape remains unknown for Task 04B.2 until the ignored
+Codex throwaway recon is rerun against a signed-in throwaway profile. The
+summary is designed to record whether `--password-store=basic` produced
+plaintext rows or encrypted rows, and which encrypted prefix/backend state is
+blocking any provider web fetch.
+
 ## Checks To Run
 
 ```bash
