@@ -92,8 +92,10 @@ hosts, private/local hosts, same-host unknown paths, auth/login paths,
 userinfo-bearing URLs, fragments, token-like queries, or a second redirect hop.
 Same-host auth/login redirects map to `cookie_rejected` rather than parser
 work. Public diagnostics and live-recon summaries include only
-`redirectTargetClass`, `redirectFollowed`, `redirectHopCount`,
-`finalHttpStatusCode`, and `finalHttpStatusClass`. They still do not include
+`redirectTargetClass`, `redirectPathFamily`, `redirectPathDepth`,
+`redirectQueryClass`, `redirectCanFollow`, `redirectFollowed`,
+`redirectHopCount`, `finalHttpStatusCode`, and `finalHttpStatusClass`. They
+still do not include
 raw `Location` values, raw response headers, query strings, fragments, bodies,
 cookies, Cookie headers, profile paths, or tokens.
 
@@ -107,6 +109,36 @@ The 2026-05-03 live recon rerun was attempted with
 `CODEXBAR_WEB_HOME` was empty in this workspace. The ignored smoke failed
 before browser import with "throwaway fake home must exist", so no live HTTP
 request, redirect, final status, response body, or parser outcome was observed.
+
+## Task 04D.1E Status
+
+Complete as a same-host redirect path-classification refinement. The daemon
+still starts from only the static Codex dashboard URL and still follows at most
+one redirect. The policy now classifies same-host Codex redirect targets into
+redacted path families, path-depth classes, and query classes, and diagnostics
+include `redirectCanFollow` derived from the exact policy gate used before any
+follow-up request.
+
+The follow set remains bounded to known safe Codex usage/settings route
+families on `https://chatgpt.com` with no userinfo, no fragment, and no query
+or an empty query. Same-host query-present redirects are classified but not
+followed. Same-host auth/login targets are not followed and still map to
+`cookie_rejected`; auth-callback, unknown same-host paths, query-present or
+token-like query shapes, `openai.com`, attacker, private/local, and second-hop
+redirects fail closed.
+
+This refinement does not output raw `Location`, path, query, fragment, URL,
+body, headers, cookies, or profile paths. It does not change parsers, does not
+promote live bodies or fixtures, does not enable default live provider fetch,
+and does not change Shell, D-Bus XML, JSON schemas, localhost, or TCP surfaces.
+
+The 2026-05-03 Task 04D.1E live recon rerun was attempted with
+`CODEXBAR_CODEX_WEB_LIVE=1` and
+`CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but the throwaway
+fake home did not exist in this execution environment. The ignored smoke failed
+before browser import with "throwaway fake home must exist", so no live HTTP
+request, redirect target, path family, final status, response body, or parser
+outcome was observed.
 
 ## Goal
 
@@ -170,6 +202,10 @@ Suggested future layout:
   blocks second-hop redirects, blocks same-host unknown/login/token-like targets
   from follow, maps login/auth redirects to cookie rejection, and emits only
   redacted redirect target classes.
+- Task 04D.1E emits redacted redirect path family, path depth, query class, and
+  `redirectCanFollow`; follows only known safe same-host Codex usage/settings
+  route families; and keeps raw redirect locations, paths, queries, fragments,
+  URLs, bodies, headers, cookies, and profile paths out of public output.
 - Task 04D.1 live reconnaissance remains ignored by default and is selectable
   with `-- --ignored codex_web_live`.
 

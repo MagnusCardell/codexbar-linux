@@ -35,6 +35,15 @@ pub fn validate_public_json_text(text: &str) -> Result<(), RedactionFinding> {
         ("browser_profile_path", "bravesoftware"),
         ("raw_payload", "\"rawpayload\""),
         ("raw_response", "\"rawresponse\""),
+        ("raw_url", "\"rawurl\""),
+        ("raw_path", "\"rawpath\""),
+        ("raw_query", "\"rawquery\""),
+        ("raw_fragment", "\"rawfragment\""),
+        ("raw_body", "\"rawbody\""),
+        ("raw_location", "\"rawlocation\""),
+        ("redirect_url", "\"redirecturl\""),
+        ("request_url", "\"requesturl\""),
+        ("final_url", "\"finalurl\""),
         ("raw_profile_path", "\"rawprofilepath\""),
         ("raw_cookie", "\"rawcookie\""),
         ("raw_header", "\"rawheader\""),
@@ -169,9 +178,10 @@ fn validate_public_key(key: &str) -> Result<(), RedactionFinding> {
         "cookiename" | "cookienames" | "hostkey" | "domain" | "encryptedvalue" => {
             Some("browser_cookie_key")
         }
-        "raw" | "rawpayload" | "rawresponse" | "rawprofilepath" | "rawcookie" | "rawheader" => {
-            Some("raw_payload")
-        }
+        "raw" | "rawpayload" | "rawresponse" | "rawurl" | "rawpath" | "rawquery"
+        | "rawfragment" | "rawbody" | "rawlocation" | "rawprofilepath" | "rawcookie"
+        | "rawheader" => Some("raw_payload"),
+        "location" | "redirecturl" | "requesturl" | "finalurl" => Some("raw_url_key"),
         "accesstoken" | "refreshtoken" | "sessiontoken" | "sessionkey" | "sessionid" | "sid"
         | "apikey" | "password" | "secret" => Some("token_key"),
         "requestheaders" | "responseheaders" => Some("secret_key"),
@@ -214,6 +224,15 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
         ("raw_profile_path", "rawprofilepath"),
         ("raw_cookie", "rawcookie"),
         ("raw_header", "rawheader"),
+        ("raw_url", "rawurl"),
+        ("raw_path", "rawpath"),
+        ("raw_query", "rawquery"),
+        ("raw_fragment", "rawfragment"),
+        ("raw_body", "rawbody"),
+        ("raw_location", "rawlocation"),
+        ("redirect_url", "redirecturl"),
+        ("request_url", "requesturl"),
+        ("final_url", "finalurl"),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
         ("auth_json_path", "auth.json"),

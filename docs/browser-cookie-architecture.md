@@ -32,7 +32,10 @@ profile for the Codex dashboard GET, reports only
 rate-limit, authentication-rejection, and server-error responses with safe
 scalar metadata only. Task 04D.1D permits at most one same-host safe redirect
 follow for the static Codex dashboard URL and reports only redacted redirect
-target class, follow state, hop count, and final status metadata.
+target class, follow state, hop count, and final status metadata. Task 04D.1E
+adds redacted same-host redirect path-family, path-depth, query-class, and
+`redirectCanFollow` metadata while keeping raw redirect paths and queries out of
+public output.
 
 ## Thesis
 
@@ -133,7 +136,12 @@ profile class `browser_like`; raw request headers are not logged, cached,
 diagnosed, or emitted over D-Bus. Redirect handling remains daemon-only and
 bounded: the first request is always the static dashboard URL, and Task 04D.1D
 may issue one follow-up request only to a classified-safe same-host
-`https://chatgpt.com` Codex usage target.
+`https://chatgpt.com` Codex usage target. Task 04D.1E narrows that follow gate
+to known safe Codex usage/settings path families with no query except an empty
+query and reports only redacted path-family metadata. The 2026-05-03 Task
+04D.1E live recon rerun failed before browser import because the configured
+throwaway fake home did not exist, so no live HTTP redirect, final status,
+response body, or parser outcome was observed.
 
 ## Browser Support Sequence
 
@@ -295,11 +303,15 @@ Rules:
 - Do not accept arbitrary URLs from D-Bus, settings, provider responses, or
   diagnostics.
 - Block redirects to unexpected hosts.
-- For the Task 04D.1D Codex dashboard recon path, follow at most one redirect
+- For the Task 04D.1E Codex dashboard recon path, follow at most one redirect
   only when the first static dashboard request returns a safe same-host
-  `https://chatgpt.com` Codex usage target with no userinfo or fragment and no
-  token-like query. Do not follow `openai.com`, attacker, private/local,
-  same-host unknown, auth/login, userinfo, fragment, token-like query, or
+  `https://chatgpt.com` Codex usage/settings target with no userinfo or
+  fragment and no query or an empty query. Query-present redirects are
+  classified but not followed. Public diagnostics may report
+  only redacted path family, path depth class, query class, `redirectCanFollow`,
+  follow state, hop count, and final status metadata. Do not follow
+  `openai.com`, attacker, private/local, same-host unknown, auth/login,
+  auth-callback, userinfo, fragment, query-present, token-like query, or
   second-hop redirect targets.
 - Bound response bodies.
 - Classify status, redirect, content-type, timeout, and body-size outcomes
@@ -322,8 +334,10 @@ web support:
 - `openai.com` redirects and cookies are not used unless a future task verifies
   that they are required and explicitly expands the allowlist;
 - one safe same-host redirect hop may be followed for the static dashboard
-  request; auth/login redirects map to `cookie_rejected` and second-hop
-  redirects map to `provider_redirect_blocked`;
+  request when the target is classified as a known safe Codex usage/settings
+  path family; auth/login redirects map to `cookie_rejected`, auth-callback and
+  query-present redirects are blocked, and second-hop redirects map to
+  `provider_redirect_blocked`;
 - Codex cookie names are not yet verified, so the temporary exception for
   all `chatgpt.com` cookies is restricted to a marked throwaway fake home and
   opt-in reconnaissance;
@@ -409,6 +423,10 @@ Allowed diagnostic `details` keys are small redacted scalars only, such as:
 - `redirectPresent`;
 - `redirectHostClass`;
 - `redirectTargetClass`;
+- `redirectPathFamily`;
+- `redirectPathDepth`;
+- `redirectQueryClass`;
+- `redirectCanFollow`;
 - `redirectFollowed`;
 - `redirectHopCount`;
 - `finalHttpStatusCode`;

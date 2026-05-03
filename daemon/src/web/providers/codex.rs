@@ -878,6 +878,22 @@ fn response_metadata_details(
             "redirectTargetClass",
             Value::from(redirect_trace.target_summary.target_class_str()),
         ),
+        (
+            "redirectPathFamily",
+            Value::from(redirect_trace.target_summary.path_family_str()),
+        ),
+        (
+            "redirectPathDepth",
+            Value::from(redirect_trace.target_summary.path_depth_str()),
+        ),
+        (
+            "redirectQueryClass",
+            Value::from(redirect_trace.target_summary.query_class_str()),
+        ),
+        (
+            "redirectCanFollow",
+            Value::Bool(redirect_trace.target_summary.can_follow()),
+        ),
         ("redirectFollowed", Value::Bool(redirect_trace.followed)),
         ("redirectHopCount", Value::from(redirect_trace.hop_count)),
         (

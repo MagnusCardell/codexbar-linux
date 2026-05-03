@@ -5,8 +5,10 @@
 Task 04D.1 adds an opt-in daemon-only reconnaissance path for the Codex web
 adapter. Task 04D.1C refines Codex web request parity and non-2xx response
 classification. Task 04D.1D adds one safe same-host redirect hop for the static
-Codex dashboard URL. This is not default production `linux_web` support and it
-must not be run against a real default browser profile.
+Codex dashboard URL. Task 04D.1E adds redacted same-host Codex redirect
+path-family classification and derives `redirectCanFollow` from that policy.
+This is not default production `linux_web` support and it must not be run
+against a real default browser profile.
 
 ## What It Does
 
@@ -17,7 +19,7 @@ When every live gate is present, the ignored test may:
 - build an internal Cookie header for the static Codex dashboard URL;
 - make one bounded async GET to `https://chatgpt.com/codex/settings/usage`;
 - make at most one follow-up GET when that first response redirects to a safe
-  same-host Codex usage target on `https://chatgpt.com`;
+  same-host Codex usage/settings target on `https://chatgpt.com`;
 - send static browser-like navigation headers for that dashboard GET and report
   only the safe profile name `requestHeaderProfile="browser_like"`;
 - classify status, redirect, timeout, response-size, content-type, and parser
@@ -117,6 +119,14 @@ Allowed summary fields are:
 - `redirectTargetClass`: one of `none`, `same_host_canonical`,
   `same_host_usage_path`, `same_host_login_path`, `same_host_other`,
   `allowed_host_other`, `blocked_host`, or `invalid`;
+- `redirectPathFamily`: one of `none`, `codex_usage`, `codex_settings`,
+  `codex_other`, `auth_login`, `auth_callback`, `root`, `static_asset`, `api`,
+  `unknown`, or `invalid`;
+- `redirectPathDepth`: one of `zero`, `one`, `two`, `three`, `many`, or
+  `unknown`;
+- `redirectQueryClass`: one of `none`, `safe_empty`, `present`,
+  `token_like`, or `unknown`;
+- `redirectCanFollow`: boolean;
 - `redirectFollowed`: boolean;
 - `redirectHopCount`: `0` or `1`;
 - `finalHttpStatusCode`: numeric HTTP status from the one allowed follow-up
@@ -201,6 +211,14 @@ Safe HTTP response summary and diagnostic fields are limited to scalar metadata:
 - `redirectTargetClass`: `none`, `same_host_canonical`,
   `same_host_usage_path`, `same_host_login_path`, `same_host_other`,
   `allowed_host_other`, `blocked_host`, or `invalid`;
+- `redirectPathFamily`: `none`, `codex_usage`, `codex_settings`,
+  `codex_other`, `auth_login`, `auth_callback`, `root`, `static_asset`, `api`,
+  `unknown`, or `invalid`;
+- `redirectPathDepth`: `zero`, `one`, `two`, `three`, `many`, or `unknown`;
+- `redirectQueryClass`: `none`, `safe_empty`, `present`, `token_like`, or
+  `unknown`;
+- `redirectCanFollow`: boolean derived from the same policy gate used before
+  issuing the one allowed follow-up request;
 - `redirectFollowed`: boolean;
 - `redirectHopCount`: `0` or `1`;
 - `finalHttpStatusCode`: exact numeric HTTP status for the one allowed follow-up
@@ -218,12 +236,19 @@ These fields intentionally do not include raw request headers, raw response
 headers, `Location`, final URLs, query strings, fragments, response bodies, or
 cookie material.
 
-The only redirect follow permitted in Task 04D.1D starts from the static Codex
+The only redirect follow permitted in Task 04D.1E starts from the static Codex
 dashboard URL and follows one same-host `https://chatgpt.com` target whose path
-is the same dashboard path or its trailing-slash form. Same-host auth/login
-paths are not followed and map to `provider_cookie_rejected`. `openai.com`,
-attacker, private/local, userinfo-bearing, fragment-bearing, token-like query,
-same-host unknown-path, and second-hop redirects fail closed.
+is classified as a known safe Codex usage/settings family. The safe set is the
+static dashboard usage route, its trailing-slash form, and the bounded Codex
+usage/settings family routes needed to classify same-host provider movement.
+The target must have no userinfo or fragment and must have no query or an empty
+query. Query-present redirects are classified with `redirectQueryClass` but are
+not followed. Public output reports only the redacted family, depth, query
+class, and follow booleans; it never reports the raw `Location`, path, query,
+fragment, or URL. Same-host auth/login paths are not followed and map to
+`provider_cookie_rejected`. Auth callback, `openai.com`, attacker,
+private/local, userinfo-bearing, fragment-bearing, query-present, token-like
+query, same-host unknown-path, and second-hop redirects fail closed.
 
 `cookieMaterial.decryptionFailureClass` is safe class metadata, not secret
 material. It may be `none`, `keyring_needed`, `unsupported_format`,
@@ -296,6 +321,13 @@ redacted diagnostics may be retained.
   before browser import with "throwaway fake home must exist", so no HTTP
   request, redirect target, final status, response body, or parser outcome was
   observed.
+- The Task 04D.1E live recon rerun was attempted on 2026-05-03 with
+  `CODEXBAR_CODEX_WEB_LIVE=1` and
+  `CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but the throwaway
+  fake home did not exist in this execution environment. The ignored smoke
+  failed before browser import with "throwaway fake home must exist", so no
+  HTTP request, redirect target, `redirectPathFamily`, `redirectCanFollow`,
+  final status, response body, or parser outcome was observed.
 - Task 04B.3 live recon against the signed-in throwaway profile reached 19
   candidate `v10` rows and the plain decryptor, but produced
   `usableSessionCookies=0`, `cookiePresence="unavailable"`, and

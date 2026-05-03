@@ -42,32 +42,113 @@ impl RedirectTargetClass {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RedirectPathFamily {
+    None,
+    CodexUsage,
+    CodexSettings,
+    CodexOther,
+    AuthLogin,
+    AuthCallback,
+    Root,
+    StaticAsset,
+    Api,
+    Unknown,
+    Invalid,
+}
+
+impl RedirectPathFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::CodexUsage => "codex_usage",
+            Self::CodexSettings => "codex_settings",
+            Self::CodexOther => "codex_other",
+            Self::AuthLogin => "auth_login",
+            Self::AuthCallback => "auth_callback",
+            Self::Root => "root",
+            Self::StaticAsset => "static_asset",
+            Self::Api => "api",
+            Self::Unknown => "unknown",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RedirectPathDepth {
+    Zero,
+    One,
+    Two,
+    Three,
+    Many,
+    Unknown,
+}
+
+impl RedirectPathDepth {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Zero => "zero",
+            Self::One => "one",
+            Self::Two => "two",
+            Self::Three => "three",
+            Self::Many => "many",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RedirectQueryClass {
+    None,
+    SafeEmpty,
+    TokenLike,
+    Present,
+    Unknown,
+}
+
+impl RedirectQueryClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SafeEmpty => "safe_empty",
+            Self::TokenLike => "token_like",
+            Self::Present => "present",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    fn follow_safe(self) -> bool {
+        matches!(self, Self::None | Self::SafeEmpty)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RedirectTargetSummary {
     target_class: RedirectTargetClass,
-    scheme_class: &'static str,
-    host_class: &'static str,
-    query_class: &'static str,
-    fragment_class: &'static str,
+    path_family: RedirectPathFamily,
+    path_depth: RedirectPathDepth,
+    query_class: RedirectQueryClass,
+    can_follow: bool,
 }
 
 impl RedirectTargetSummary {
     const fn none() -> Self {
         Self {
             target_class: RedirectTargetClass::None,
-            scheme_class: "none",
-            host_class: "none",
-            query_class: "none",
-            fragment_class: "none",
+            path_family: RedirectPathFamily::None,
+            path_depth: RedirectPathDepth::Unknown,
+            query_class: RedirectQueryClass::None,
+            can_follow: false,
         }
     }
 
     const fn invalid() -> Self {
         Self {
             target_class: RedirectTargetClass::Invalid,
-            scheme_class: "invalid",
-            host_class: "invalid",
-            query_class: "invalid",
-            fragment_class: "invalid",
+            path_family: RedirectPathFamily::Invalid,
+            path_depth: RedirectPathDepth::Unknown,
+            query_class: RedirectQueryClass::Unknown,
+            can_follow: false,
         }
     }
 
@@ -79,14 +160,24 @@ impl RedirectTargetSummary {
         self.target_class.as_str()
     }
 
+    pub(crate) fn path_family_str(&self) -> &'static str {
+        self.path_family.as_str()
+    }
+
+    pub(crate) fn path_depth_str(&self) -> &'static str {
+        self.path_depth.as_str()
+    }
+
+    pub(crate) fn query_class_str(&self) -> &'static str {
+        self.query_class.as_str()
+    }
+
+    pub(crate) fn can_follow(&self) -> bool {
+        self.can_follow
+    }
+
     fn followable(&self) -> bool {
-        matches!(
-            self.target_class,
-            RedirectTargetClass::SameHostCanonical | RedirectTargetClass::SameHostUsagePath
-        ) && self.scheme_class == "https"
-            && self.host_class == "allowed"
-            && matches!(self.query_class, "none" | "empty" | "safe")
-            && self.fragment_class == "none"
+        self.can_follow
     }
 }
 
@@ -235,17 +326,8 @@ impl CodexWebPolicy {
             return RedirectTargetSummary::invalid();
         };
 
-        let scheme_class = if parsed.scheme() == "https" {
-            "https"
-        } else {
-            "blocked"
-        };
-        let fragment_class = if parsed.fragment().is_some() {
-            "present"
-        } else {
-            "none"
-        };
-        let (query_class, query_allowed) = classify_redirect_query(parsed.query());
+        let fragment_present = parsed.fragment().is_some();
+        let query_class = classify_redirect_query(parsed.query());
         let host = parsed.host_str().map(str::to_ascii_lowercase);
         let host_allowed = parsed.port().is_none()
             && host
@@ -254,38 +336,60 @@ impl CodexWebPolicy {
             && host
                 .as_deref()
                 .is_some_and(|host| self.redirect_hosts.contains(&host));
-        let host_class = if host_allowed { "allowed" } else { "blocked" };
         let path = parsed.path();
-        let target_class = if parsed.scheme() != "https"
+        let path_depth = classify_redirect_path_depth(path);
+        let invalid_shape = parsed.scheme() != "https"
             || !parsed.username().is_empty()
             || parsed.password().is_some()
             || parsed.port().is_some()
-            || fragment_class != "none"
-        {
+            || fragment_present;
+        let path_family = if invalid_shape {
+            RedirectPathFamily::Invalid
+        } else if host_allowed && host.as_deref() == Some("chatgpt.com") {
+            self.classify_redirect_path_family(path)
+        } else {
+            RedirectPathFamily::Unknown
+        };
+        let target_class = if invalid_shape {
             RedirectTargetClass::Invalid
         } else if !host_allowed {
             RedirectTargetClass::BlockedHost
         } else if host.as_deref() != Some("chatgpt.com") {
             RedirectTargetClass::AllowedHostOther
-        } else if self.is_login_path(path) {
-            RedirectTargetClass::SameHostLoginPath
-        } else if !query_allowed {
+        } else if query_class == RedirectQueryClass::TokenLike
+            || path_family == RedirectPathFamily::Invalid
+        {
             RedirectTargetClass::Invalid
-        } else if path == self.dashboard_path || self.is_dashboard_path_with_slash(path) {
-            RedirectTargetClass::SameHostCanonical
-        } else if self.is_canonical_usage_path(path) {
+        } else if matches!(
+            path_family,
+            RedirectPathFamily::AuthLogin | RedirectPathFamily::AuthCallback
+        ) {
+            RedirectTargetClass::SameHostLoginPath
+        } else if path_family == RedirectPathFamily::CodexUsage {
             RedirectTargetClass::SameHostUsagePath
-        } else if host.as_deref() == Some("chatgpt.com") {
-            RedirectTargetClass::SameHostOther
+        } else if path_family == RedirectPathFamily::CodexSettings {
+            RedirectTargetClass::SameHostCanonical
         } else {
-            RedirectTargetClass::BlockedHost
+            RedirectTargetClass::SameHostOther
         };
+        let can_follow = !invalid_shape
+            && host_allowed
+            && host.as_deref() == Some("chatgpt.com")
+            && matches!(
+                target_class,
+                RedirectTargetClass::SameHostCanonical | RedirectTargetClass::SameHostUsagePath
+            )
+            && matches!(
+                path_family,
+                RedirectPathFamily::CodexUsage | RedirectPathFamily::CodexSettings
+            )
+            && query_class.follow_safe();
         RedirectTargetSummary {
             target_class,
-            scheme_class,
-            host_class,
+            path_family,
+            path_depth,
             query_class,
-            fragment_class,
+            can_follow,
         }
     }
 
@@ -300,16 +404,37 @@ impl CodexWebPolicy {
             && path.ends_with('/')
     }
 
-    fn is_canonical_usage_path(&self, _path: &str) -> bool {
-        false
-    }
-
-    fn is_login_path(&self, path: &str) -> bool {
+    fn classify_redirect_path_family(&self, path: &str) -> RedirectPathFamily {
         let lower = path.to_ascii_lowercase();
-        lower.contains("/auth/")
-            || lower.contains("/login")
-            || lower.contains("/log-in")
-            || lower.ends_with("/auth")
+        if lower == "/" {
+            return RedirectPathFamily::Root;
+        }
+        if path_has_auth_callback_segment(&lower) {
+            return RedirectPathFamily::AuthCallback;
+        }
+        if path_has_auth_login_segment(&lower) {
+            return RedirectPathFamily::AuthLogin;
+        }
+        if path_is_api_family(&lower) {
+            return RedirectPathFamily::Api;
+        }
+        if path_is_static_asset_family(&lower) {
+            return RedirectPathFamily::StaticAsset;
+        }
+        if path == self.dashboard_path
+            || self.is_dashboard_path_with_slash(path)
+            || lower == "/codex/usage"
+            || lower == "/codex/usage/"
+        {
+            return RedirectPathFamily::CodexUsage;
+        }
+        if lower == "/codex/settings" || lower == "/codex/settings/" {
+            return RedirectPathFamily::CodexSettings;
+        }
+        if lower == "/codex" || lower == "/codex/" || lower.starts_with("/codex/") {
+            return RedirectPathFamily::CodexOther;
+        }
+        RedirectPathFamily::Unknown
     }
 }
 
@@ -358,19 +483,86 @@ impl ParsedHttpsUrl {
     }
 }
 
-fn classify_redirect_query(query: Option<&str>) -> (&'static str, bool) {
+fn classify_redirect_path_depth(path: &str) -> RedirectPathDepth {
+    match path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .count()
+    {
+        0 => RedirectPathDepth::Zero,
+        1 => RedirectPathDepth::One,
+        2 => RedirectPathDepth::Two,
+        3 => RedirectPathDepth::Three,
+        4.. => RedirectPathDepth::Many,
+    }
+}
+
+fn path_has_auth_callback_segment(path: &str) -> bool {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .any(|segment| {
+            segment.contains("callback")
+                || segment.contains("oauth")
+                || segment.contains("oidc")
+                || segment.contains("saml")
+        })
+}
+
+fn path_has_auth_login_segment(path: &str) -> bool {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .any(|segment| {
+            matches!(
+                segment,
+                "auth" | "login" | "signin" | "sign-in" | "log-in" | "sso"
+            ) || segment.ends_with("-login")
+                || segment.ends_with("_login")
+                || segment.ends_with("-signin")
+                || segment.ends_with("_signin")
+        })
+}
+
+fn path_is_api_family(path: &str) -> bool {
+    matches!(path, "/api" | "/backend-api" | "/public-api")
+        || path.starts_with("/api/")
+        || path.starts_with("/backend-api/")
+        || path.starts_with("/public-api/")
+}
+
+fn path_is_static_asset_family(path: &str) -> bool {
+    matches!(
+        path,
+        "/favicon.ico" | "/manifest.json" | "/robots.txt" | "/sitemap.xml"
+    ) || path.starts_with("/_next/")
+        || path.starts_with("/assets/")
+        || path.starts_with("/static/")
+        || path.starts_with("/cdn-cgi/")
+        || path.ends_with(".css")
+        || path.ends_with(".js")
+        || path.ends_with(".map")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+        || path.ends_with(".webp")
+        || path.ends_with(".woff")
+        || path.ends_with(".woff2")
+}
+
+fn classify_redirect_query(query: Option<&str>) -> RedirectQueryClass {
     let Some(query) = query else {
-        return ("none", true);
+        return RedirectQueryClass::None;
     };
     if query.is_empty() {
-        return ("empty", true);
+        return RedirectQueryClass::SafeEmpty;
     }
     if query.len() > 128 || query_is_token_like(query) {
-        return ("token_like", false);
+        return RedirectQueryClass::TokenLike;
     }
     let pairs = url::form_urlencoded::parse(query.as_bytes()).collect::<Vec<_>>();
     if pairs.is_empty() || pairs.len() > 4 {
-        return ("unsafe", false);
+        return RedirectQueryClass::Present;
     }
     for (key, value) in pairs {
         if key.is_empty()
@@ -381,10 +573,10 @@ fn classify_redirect_query(query: Option<&str>) -> (&'static str, bool) {
             || query_is_token_like(&key)
             || query_is_token_like(&value)
         {
-            return ("unsafe", false);
+            return RedirectQueryClass::TokenLike;
         }
     }
-    ("safe", true)
+    RedirectQueryClass::Present
 }
 
 fn query_component_is_safe(value: &str) -> bool {

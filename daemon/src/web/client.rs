@@ -539,8 +539,19 @@ fn redacted_url_shape(url: &str) -> String {
         return "[redacted-url]".to_string();
     };
     let host = url.host_str().unwrap_or("unknown");
-    let path = url.path();
-    format!("{}://{}{}", url.scheme(), host, path)
+    let path_class = match url
+        .path()
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .count()
+    {
+        0 => "path_depth_zero",
+        1 => "path_depth_one",
+        2 => "path_depth_two",
+        3 => "path_depth_three",
+        _ => "path_depth_many",
+    };
+    format!("{}://{}/[{}]", url.scheme(), host, path_class)
 }
 
 fn content_type_class(content_type: Option<&str>) -> &'static str {
