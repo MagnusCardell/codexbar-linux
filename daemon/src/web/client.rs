@@ -395,6 +395,11 @@ impl ReqwestStaticGetClient {
         headers
     }
 
+    #[doc(hidden)]
+    pub fn resolve_redirect_url_for_tests(base: &str, location: &str) -> Option<String> {
+        resolve_redirect_url(base, location)
+    }
+
     fn validate_request(request: &WebRequest) -> Result<(), WebClientError> {
         let policy = CodexWebPolicy::new();
         let result = if request.policy_validated_redirect() {
@@ -510,8 +515,36 @@ fn classify_reqwest_error(error: reqwest::Error) -> WebClientError {
 }
 
 fn resolve_redirect_url(base: &str, location: &str) -> Option<String> {
+    if redirect_location_has_explicit_port(location) {
+        return None;
+    }
     let base = url::Url::parse(base).ok()?;
     base.join(location).ok().map(|url| url.to_string())
+}
+
+fn redirect_location_has_explicit_port(location: &str) -> bool {
+    if let Some((_, rest)) = location.split_once("://") {
+        return authority_has_explicit_port(rest);
+    }
+    if let Some(rest) = location.strip_prefix("//") {
+        return authority_has_explicit_port(rest);
+    }
+    false
+}
+
+fn authority_has_explicit_port(rest: &str) -> bool {
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, authority)| authority);
+    if let Some(ipv6_rest) = authority.strip_prefix('[') {
+        let Some(end) = ipv6_rest.find(']') else {
+            return false;
+        };
+        return ipv6_rest[end + 1..].starts_with(':');
+    }
+    authority.contains(':')
 }
 
 async fn read_limited_body(

@@ -329,7 +329,8 @@ impl CodexWebPolicy {
         let fragment_present = parsed.fragment().is_some();
         let query_class = classify_redirect_query(parsed.query());
         let host = parsed.host_str().map(str::to_ascii_lowercase);
-        let host_allowed = parsed.port().is_none()
+        let explicit_port = url_has_explicit_authority_port(url);
+        let host_allowed = !explicit_port
             && host
                 .as_deref()
                 .is_some_and(|host| ensure_not_local(host).is_ok())
@@ -341,7 +342,7 @@ impl CodexWebPolicy {
         let invalid_shape = parsed.scheme() != "https"
             || !parsed.username().is_empty()
             || parsed.password().is_some()
-            || parsed.port().is_some()
+            || explicit_port
             || fragment_present;
         let path_family = if invalid_shape {
             RedirectPathFamily::Invalid
@@ -423,6 +424,7 @@ impl CodexWebPolicy {
         }
         if path == self.dashboard_path
             || self.is_dashboard_path_with_slash(path)
+            || path == "/codex/cloud/settings/usage"
             || lower == "/codex/usage"
             || lower == "/codex/usage/"
         {
@@ -577,6 +579,28 @@ fn classify_redirect_query(query: Option<&str>) -> RedirectQueryClass {
         }
     }
     RedirectQueryClass::Present
+}
+
+fn url_has_explicit_authority_port(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    authority_has_explicit_port(rest)
+}
+
+fn authority_has_explicit_port(rest: &str) -> bool {
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, authority)| authority);
+    if let Some(ipv6_rest) = authority.strip_prefix('[') {
+        let Some(end) = ipv6_rest.find(']') else {
+            return false;
+        };
+        return ipv6_rest[end + 1..].starts_with(':');
+    }
+    authority.contains(':')
 }
 
 fn query_component_is_safe(value: &str) -> bool {

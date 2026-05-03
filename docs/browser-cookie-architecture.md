@@ -35,7 +35,8 @@ follow for the static Codex dashboard URL and reports only redacted redirect
 target class, follow state, hop count, and final status metadata. Task 04D.1E
 adds redacted same-host redirect path-family, path-depth, query-class, and
 `redirectCanFollow` metadata while keeping raw redirect paths and queries out of
-public output.
+public output. Task 04D.1F adds the exact same-host Codex cloud usage/settings
+route `/codex/cloud/settings/usage` to that existing one-hop policy.
 
 ## Thesis
 
@@ -138,10 +139,16 @@ bounded: the first request is always the static dashboard URL, and Task 04D.1D
 may issue one follow-up request only to a classified-safe same-host
 `https://chatgpt.com` Codex usage target. Task 04D.1E narrows that follow gate
 to known safe Codex usage/settings path families with no query except an empty
-query and reports only redacted path-family metadata. The 2026-05-03 Task
-04D.1E live recon rerun failed before browser import because the configured
-throwaway fake home did not exist, so no live HTTP redirect, final status,
-response body, or parser outcome was observed.
+query and reports only redacted path-family metadata. Task 04D.1F additionally
+allows exactly `/codex/cloud/settings/usage` on `chatgpt.com` as
+`same_host_usage_path`/`codex_usage`; `/codex/cloud/other`, port-bearing,
+fragment-bearing, userinfo-bearing, query-present, and token-like query targets
+are not followed. No query or fragment was observed for the added route,
+and no raw response body was captured or committed. The 2026-05-03 Task 04D.1E
+live recon rerun failed before
+browser import because the configured throwaway fake home did not exist, so no
+live HTTP redirect, final status, response body, or parser outcome was
+observed.
 
 ## Browser Support Sequence
 
@@ -303,15 +310,18 @@ Rules:
 - Do not accept arbitrary URLs from D-Bus, settings, provider responses, or
   diagnostics.
 - Block redirects to unexpected hosts.
-- For the Task 04D.1E Codex dashboard recon path, follow at most one redirect
+- For the Task 04D.1F Codex dashboard recon path, follow at most one redirect
   only when the first static dashboard request returns a safe same-host
-  `https://chatgpt.com` Codex usage/settings target with no userinfo or
-  fragment and no query or an empty query. Query-present redirects are
-  classified but not followed. Public diagnostics may report
+  `https://chatgpt.com` Codex usage/settings target with no userinfo, port, or
+  fragment and no query or an empty query. The narrow cloud allowance is exactly
+  `/codex/cloud/settings/usage` on `chatgpt.com`; `/codex/cloud/other` and
+  token-like query variants are blocked. No query or fragment was observed for
+  the added route. Query-present redirects are classified but not followed.
+  Public diagnostics may report
   only redacted path family, path depth class, query class, `redirectCanFollow`,
   follow state, hop count, and final status metadata. Do not follow
   `openai.com`, attacker, private/local, same-host unknown, auth/login,
-  auth-callback, userinfo, fragment, query-present, token-like query, or
+  auth-callback, userinfo, port, fragment, query-present, token-like query, or
   second-hop redirect targets.
 - Bound response bodies.
 - Classify status, redirect, content-type, timeout, and body-size outcomes
@@ -335,9 +345,10 @@ web support:
   that they are required and explicitly expands the allowlist;
 - one safe same-host redirect hop may be followed for the static dashboard
   request when the target is classified as a known safe Codex usage/settings
-  path family; auth/login redirects map to `cookie_rejected`, auth-callback and
-  query-present redirects are blocked, and second-hop redirects map to
-  `provider_redirect_blocked`;
+  path family, including exactly `/codex/cloud/settings/usage`; auth/login
+  redirects map to `cookie_rejected`, auth-callback, `/codex/cloud/other`,
+  port-bearing, and query-present redirects are blocked, and second-hop
+  redirects map to `provider_redirect_blocked`;
 - Codex cookie names are not yet verified, so the temporary exception for
   all `chatgpt.com` cookies is restricted to a marked throwaway fake home and
   opt-in reconnaissance;

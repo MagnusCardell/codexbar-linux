@@ -96,7 +96,16 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
         .validate_redirect_url("https://chatgpt.com/codex/settings/usage?")
         .is_ok());
     assert!(policy
+        .validate_redirect_url("https://chatgpt.com/codex/cloud/settings/usage")
+        .is_ok());
+    assert!(policy
         .validate_redirect_url("https://chatgpt.com/codex/settings/usage?utm_campaign=limits")
+        .is_err());
+    assert!(policy
+        .validate_redirect_url("https://chatgpt.com/codex/cloud/settings/usage?")
+        .is_ok());
+    assert!(policy
+        .validate_redirect_url("https://chatgpt.com/codex/cloud/settings/usage?token=fixture")
         .is_err());
     assert_eq!(
         policy.classify_redirect_target(Some("https://chatgpt.com/codex/settings/usage"), false,),
@@ -114,6 +123,31 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
         RedirectTargetClass::SameHostUsagePath
     );
     assert_eq!(
+        policy.classify_redirect_target(
+            Some("https://chatgpt.com/codex/cloud/settings/usage"),
+            false,
+        ),
+        RedirectTargetClass::SameHostUsagePath
+    );
+    assert_eq!(
+        policy.classify_redirect_target(
+            Some("https://chatgpt.com/codex/cloud/settings/usage?token=fixture"),
+            false,
+        ),
+        RedirectTargetClass::Invalid
+    );
+    assert_eq!(
+        policy.classify_redirect_target(Some("https://chatgpt.com/codex/cloud/other"), false),
+        RedirectTargetClass::SameHostOther
+    );
+    assert_eq!(
+        policy.classify_redirect_target(
+            Some("https://chatgpt.com:443/codex/cloud/settings/usage"),
+            false,
+        ),
+        RedirectTargetClass::Invalid
+    );
+    assert_eq!(
         policy.classify_redirect_target(Some("https://chatgpt.com/auth/login"), false),
         RedirectTargetClass::SameHostLoginPath
     );
@@ -123,6 +157,7 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
     );
     for rejected in [
         "https://openai.com/codex/settings/usage",
+        "https://openai.com/codex/cloud/settings/usage",
         "https://codex-test.example.invalid/callback",
         "https://chatgpt.com/callback",
         "https://chatgpt.com/callback?token=fixture",
@@ -131,6 +166,16 @@ fn codex_policy_blocks_wrong_redirect_hosts_and_tokenized_redirects() {
         "http://chatgpt.com/callback",
         "https://chatgpt.com/codex/settings/usage?token=fixture",
         "https://chatgpt.com/codex/settings/usage#fragment",
+        "http://chatgpt.com/codex/cloud/settings/usage",
+        "https://user@chatgpt.com/codex/cloud/settings/usage",
+        "https://chatgpt.com:443/codex/cloud/settings/usage",
+        "https://chatgpt.com:444/codex/cloud/settings/usage",
+        "https://chatgpt.com:443/codex/cloud/settings/usage?",
+        "https://chatgpt.com/codex/cloud/settings/usage/",
+        "https://chatgpt.com/codex/cloud/settings/usage?token=fixture",
+        "https://chatgpt.com/codex/cloud/settings/usage#fragment",
+        "https://chatgpt.com/codex/cloud/settings/usage#",
+        "https://chatgpt.com/codex/cloud/other",
         "https://chatgpt.com/auth/login",
         "https://127.0.0.1/callback",
         "https://10.0.0.1/callback",
@@ -211,6 +256,48 @@ fn reqwest_live_client_rejects_non_static_hosts_before_network() {
         ReqwestStaticGetClient::validate_request_for_tests(&direct_redirect_target).unwrap_err(),
         WebClientError::TransportUnavailable
     );
+
+    let direct_cloud_redirect_target =
+        WebRequest::new("https://chatgpt.com/codex/cloud/settings/usage");
+    assert_eq!(
+        ReqwestStaticGetClient::validate_request_for_tests(&direct_cloud_redirect_target)
+            .unwrap_err(),
+        WebClientError::TransportUnavailable
+    );
+}
+
+#[test]
+fn redirect_resolution_rejects_explicit_ports_before_policy_normalization() {
+    let base = CodexWebPolicy::new().dashboard_url();
+
+    assert_eq!(
+        ReqwestStaticGetClient::resolve_redirect_url_for_tests(base, "/codex/cloud/settings/usage")
+            .as_deref(),
+        Some("https://chatgpt.com/codex/cloud/settings/usage")
+    );
+    assert_eq!(
+        ReqwestStaticGetClient::resolve_redirect_url_for_tests(
+            base,
+            "//chatgpt.com/codex/cloud/settings/usage"
+        )
+        .as_deref(),
+        Some("https://chatgpt.com/codex/cloud/settings/usage")
+    );
+    assert!(ReqwestStaticGetClient::resolve_redirect_url_for_tests(
+        base,
+        "https://chatgpt.com:443/codex/cloud/settings/usage",
+    )
+    .is_none());
+    assert!(ReqwestStaticGetClient::resolve_redirect_url_for_tests(
+        base,
+        "https://chatgpt.com:444/codex/cloud/settings/usage",
+    )
+    .is_none());
+    assert!(ReqwestStaticGetClient::resolve_redirect_url_for_tests(
+        base,
+        "//chatgpt.com:443/codex/cloud/settings/usage",
+    )
+    .is_none());
 }
 
 #[test]
@@ -856,6 +943,212 @@ fn trailing_slash_redirect_is_followed_once() {
 }
 
 #[test]
+fn codex_cloud_usage_redirect_is_followed_once_with_safe_final_status_metadata() {
+    let cloud_usage = "https://chatgpt.com/codex/cloud/settings/usage";
+    let client = FakeWebClient::responding_sequence(vec![
+        WebResponse::new(307, CodexWebPolicy::new().dashboard_url(), "").with_redirect(cloud_usage),
+        html_response_at(cloud_usage, "dashboard_success.html"),
+    ]);
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_FINISHED);
+
+    assert_eq!(client.request_count(), 2);
+    assert_eq!(client.requests()[1].url, cloud_usage);
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(307_u64))
+    );
+    assert_eq!(
+        event.details.get("httpStatusClass"),
+        Some(&serde_json::Value::from("redirect"))
+    );
+    assert_eq!(
+        event.details.get("redirectPresent"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHostClass"),
+        Some(&serde_json::Value::from("allowed"))
+    );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_usage_path"))
+    );
+    assert_eq!(
+        event.details.get("redirectPathFamily"),
+        Some(&serde_json::Value::from("codex_usage"))
+    );
+    assert_eq!(
+        event.details.get("redirectPathDepth"),
+        Some(&serde_json::Value::from("many"))
+    );
+    assert_eq!(
+        event.details.get("redirectQueryClass"),
+        Some(&serde_json::Value::from("none"))
+    );
+    assert_eq!(
+        event.details.get("redirectCanFollow"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(1_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::from(200_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusClass"),
+        Some(&serde_json::Value::from("success"))
+    );
+    assert!(!payload.contains("/codex/cloud/settings/usage"));
+    assert!(!payload.contains("Location"));
+    assert!(!payload.contains("Cookie:"));
+    assert!(!payload.contains("Set-Cookie"));
+    assert!(!payload.contains("Authorization"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn codex_cloud_usage_redirect_with_present_query_is_not_followed_and_redacts_query() {
+    let cloud_usage = "https://chatgpt.com/codex/cloud/settings/usage?utm_campaign=limits";
+    let client = FakeWebClient::responding(
+        WebResponse::new(302, CodexWebPolicy::new().dashboard_url(), "").with_redirect(cloud_usage),
+    );
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::REDIRECT_BLOCKED);
+
+    assert_eq!(client.request_count(), 1);
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_usage_path"))
+    );
+    assert_eq!(
+        event.details.get("redirectPathFamily"),
+        Some(&serde_json::Value::from("codex_usage"))
+    );
+    assert_eq!(
+        event.details.get("redirectPathDepth"),
+        Some(&serde_json::Value::from("many"))
+    );
+    assert_eq!(
+        event.details.get("redirectQueryClass"),
+        Some(&serde_json::Value::from("present"))
+    );
+    assert_eq!(
+        event.details.get("redirectCanFollow"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(0_u64))
+    );
+    assert_eq!(
+        event.details.get("redirectBlocked"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert!(!payload.contains("/codex/cloud/settings/usage"));
+    assert!(!payload.contains("utm_campaign"));
+    assert!(!payload.contains("limits"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
+fn codex_cloud_usage_redirect_parser_failure_after_final_200_is_redacted_parse_error() {
+    let cloud_usage = "https://chatgpt.com/codex/cloud/settings/usage";
+    let body_marker = "codexbar-cloud-final-body-marker Location: https://chatgpt.com/codex/cloud/settings/usage?token=fixture-secret Set-Cookie: fixture_session=fixture-value /home/example/.config/google-chrome/Default/Network/Cookies";
+    let client = FakeWebClient::responding_sequence(vec![
+        WebResponse::new(307, CodexWebPolicy::new().dashboard_url(), "").with_redirect(cloud_usage),
+        WebResponse::new(200, cloud_usage, body_marker).with_content_type("text/html"),
+    ]);
+    let refresh = block_on_web(web::refresh_with_client(
+        web_request(Some(session())),
+        &client,
+    ))
+    .expect("web refresh");
+    let payload =
+        serde_json::to_string(&(&refresh.snapshot, &refresh.diagnostics)).expect("refresh json");
+    let provider = &refresh.snapshot.providers[0];
+    let event = find_diagnostic(&refresh.diagnostics, diagnostics::FETCH_PARSE_ERROR);
+
+    assert_eq!(client.request_count(), 2);
+    assert_eq!(provider.state, ProviderState::ParseError);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_PARSE_ERROR.to_string()));
+    assert_allowed_response_detail_keys(event);
+    assert_eq!(
+        event.details.get("httpStatusCode"),
+        Some(&serde_json::Value::from(307_u64))
+    );
+    assert_eq!(
+        event.details.get("redirectTargetClass"),
+        Some(&serde_json::Value::from("same_host_usage_path"))
+    );
+    assert_eq!(
+        event.details.get("redirectPathFamily"),
+        Some(&serde_json::Value::from("codex_usage"))
+    );
+    assert_eq!(
+        event.details.get("redirectCanFollow"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectFollowed"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        event.details.get("redirectHopCount"),
+        Some(&serde_json::Value::from(1_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusCode"),
+        Some(&serde_json::Value::from(200_u64))
+    );
+    assert_eq!(
+        event.details.get("finalHttpStatusClass"),
+        Some(&serde_json::Value::from("success"))
+    );
+    assert!(!payload.contains(body_marker));
+    assert!(!payload.contains("/codex/cloud/settings/usage"));
+    assert!(!payload.contains("token="));
+    assert!(!payload.contains("Location"));
+    assert!(!payload.contains("Set-Cookie"));
+    assert!(!payload.contains("fixture_session"));
+    assert!(!payload.contains("fixture-value"));
+    assert!(!payload.contains("/home/example"));
+    assert!(!payload.contains("Network/Cookies"));
+    assert_payloads_are_schema_valid_and_public(&refresh.snapshot, &refresh.diagnostics);
+}
+
+#[test]
 fn codex_usage_redirect_with_present_query_is_not_followed_and_redacts_query() {
     let usage = "https://chatgpt.com/codex/usage?utm_campaign=limits";
     let client = FakeWebClient::responding(
@@ -1118,6 +1411,24 @@ fn same_host_redirect_path_families_are_classified_without_following_unsafe_rout
             ProviderState::ProviderUnavailable,
         ),
         (
+            "https://chatgpt.com/codex/cloud/other",
+            "same_host_other",
+            "codex_other",
+            "three",
+            "none",
+            diagnostics::REDIRECT_BLOCKED,
+            ProviderState::ProviderUnavailable,
+        ),
+        (
+            "https://chatgpt.com/codex/cloud/settings/usage/",
+            "same_host_other",
+            "codex_other",
+            "many",
+            "none",
+            diagnostics::REDIRECT_BLOCKED,
+            ProviderState::ProviderUnavailable,
+        ),
+        (
             "https://chatgpt.com/opaque",
             "same_host_other",
             "unknown",
@@ -1131,6 +1442,15 @@ fn same_host_redirect_path_families_are_classified_without_following_unsafe_rout
             "invalid",
             "codex_usage",
             "three",
+            "token_like",
+            diagnostics::REDIRECT_BLOCKED,
+            ProviderState::ProviderUnavailable,
+        ),
+        (
+            "https://chatgpt.com/codex/cloud/settings/usage?token=fixture-secret",
+            "invalid",
+            "codex_usage",
+            "many",
             "token_like",
             diagnostics::REDIRECT_BLOCKED,
             ProviderState::ProviderUnavailable,
@@ -1260,6 +1580,19 @@ fn unsafe_same_host_redirect_shapes_are_rejected_without_location_exposure() {
         ),
         (
             "https://chatgpt.com/codex/settings/usage?token=fixture-secret",
+            "token=",
+        ),
+        ("https://chatgpt.com:443/codex/cloud/settings/usage", ":443"),
+        (
+            "https://chatgpt.com/codex/cloud/settings/usage#",
+            "/codex/cloud/settings/usage",
+        ),
+        (
+            "https://chatgpt.com/codex/cloud/settings/usage#fragment",
+            "fragment",
+        ),
+        (
+            "https://chatgpt.com/codex/cloud/settings/usage?token=fixture-secret",
             "token=",
         ),
     ] {
@@ -1472,6 +1805,21 @@ fn web_request_and_response_debug_redact_url_secrets_and_bodies() {
     assert!(!response_debug.contains("token="));
     assert!(!response_debug.contains("fixture-secret"));
     assert!(!response_debug.contains("raw-body-marker"));
+
+    let cloud_response_debug = format!(
+        "{:?}",
+        WebResponse::new(
+            302,
+            "https://chatgpt.com/codex/cloud/settings/usage",
+            "cloud-body-marker",
+        )
+        .with_redirect("https://chatgpt.com/codex/cloud/settings/usage?token=fixture-secret")
+    );
+    assert!(cloud_response_debug.contains("chatgpt.com/[path_depth"));
+    assert!(!cloud_response_debug.contains("/codex/cloud/settings/usage"));
+    assert!(!cloud_response_debug.contains("token="));
+    assert!(!cloud_response_debug.contains("fixture-secret"));
+    assert!(!cloud_response_debug.contains("cloud-body-marker"));
 }
 
 #[test]
@@ -1601,7 +1949,7 @@ fn live_recon_summary_includes_redirect_family_classes_without_raw_target() {
             CodexWebPolicy::new().dashboard_url(),
             "redirect body marker",
         )
-        .with_redirect("https://chatgpt.com/codex/settings/usage?token=fixture-secret"),
+        .with_redirect("https://chatgpt.com/codex/cloud/settings/usage?token=fixture-secret"),
     );
     let provider = &refresh.snapshot.providers[0];
     let result = recon_refresh_result(RefreshStatus::Error, false, []);
@@ -1623,16 +1971,16 @@ fn live_recon_summary_includes_redirect_family_classes_without_raw_target() {
     assert_eq!(summary.http_response.redirect_host_class, "invalid");
     assert_eq!(summary.http_response.redirect_target_class, "invalid");
     assert_eq!(summary.http_response.redirect_path_family, "codex_usage");
-    assert_eq!(summary.http_response.redirect_path_depth, "three");
+    assert_eq!(summary.http_response.redirect_path_depth, "many");
     assert_eq!(summary.http_response.redirect_query_class, "token_like");
     assert!(!summary.http_response.redirect_can_follow);
     assert!(!summary.http_response.redirect_followed);
     assert_eq!(summary.http_response.redirect_hop_count, 0);
     assert!(summary_json.contains(r#""redirectPathFamily":"codex_usage""#));
-    assert!(summary_json.contains(r#""redirectPathDepth":"three""#));
+    assert!(summary_json.contains(r#""redirectPathDepth":"many""#));
     assert!(summary_json.contains(r#""redirectQueryClass":"token_like""#));
     assert!(summary_json.contains(r#""redirectCanFollow":false"#));
-    assert!(!summary_json.contains("/codex/settings/usage"));
+    assert!(!summary_json.contains("/codex/cloud/settings/usage"));
     assert!(!summary_json.contains("token="));
     assert!(!summary_json.contains("fixture-secret"));
     assert!(!summary_json.contains("redirect body marker"));

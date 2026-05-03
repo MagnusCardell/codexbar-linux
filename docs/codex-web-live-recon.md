@@ -7,6 +7,8 @@ adapter. Task 04D.1C refines Codex web request parity and non-2xx response
 classification. Task 04D.1D adds one safe same-host redirect hop for the static
 Codex dashboard URL. Task 04D.1E adds redacted same-host Codex redirect
 path-family classification and derives `redirectCanFollow` from that policy.
+Task 04D.1F adds the exact same-host Codex cloud usage/settings redirect route
+to that existing one-hop policy.
 This is not default production `linux_web` support and it must not be run
 against a real default browser profile.
 
@@ -19,7 +21,8 @@ When every live gate is present, the ignored test may:
 - build an internal Cookie header for the static Codex dashboard URL;
 - make one bounded async GET to `https://chatgpt.com/codex/settings/usage`;
 - make at most one follow-up GET when that first response redirects to a safe
-  same-host Codex usage/settings target on `https://chatgpt.com`;
+  same-host Codex usage/settings target on `https://chatgpt.com`, including
+  the exact `/codex/cloud/settings/usage` route;
 - send static browser-like navigation headers for that dashboard GET and report
   only the safe profile name `requestHeaderProfile="browser_like"`;
 - classify status, redirect, timeout, response-size, content-type, and parser
@@ -236,19 +239,26 @@ These fields intentionally do not include raw request headers, raw response
 headers, `Location`, final URLs, query strings, fragments, response bodies, or
 cookie material.
 
-The only redirect follow permitted in Task 04D.1E starts from the static Codex
+The only redirect follow permitted in Task 04D.1F starts from the static Codex
 dashboard URL and follows one same-host `https://chatgpt.com` target whose path
-is classified as a known safe Codex usage/settings family. The safe set is the
-static dashboard usage route, its trailing-slash form, and the bounded Codex
-usage/settings family routes needed to classify same-host provider movement.
-The target must have no userinfo or fragment and must have no query or an empty
-query. Query-present redirects are classified with `redirectQueryClass` but are
-not followed. Public output reports only the redacted family, depth, query
-class, and follow booleans; it never reports the raw `Location`, path, query,
-fragment, or URL. Same-host auth/login paths are not followed and map to
-`provider_cookie_rejected`. Auth callback, `openai.com`, attacker,
-private/local, userinfo-bearing, fragment-bearing, query-present, token-like
-query, same-host unknown-path, and second-hop redirects fail closed.
+is classified as a known safe Codex usage/settings family. The existing safe
+set remains the static dashboard usage route, its trailing-slash form, and the
+bounded Codex usage/settings family routes needed to classify same-host provider
+movement. Task 04D.1F adds only the exact cloud usage/settings route
+`/codex/cloud/settings/usage` to that set. The cloud allowance is still
+reported only as `redirectTargetClass="same_host_usage_path"` and
+`redirectPathFamily="codex_usage"`. No query or fragment was observed for this
+route. The target must have no userinfo, no port, and no fragment, and must
+have no query or an empty query.
+Query-present redirects are classified with `redirectQueryClass` but are not
+followed; token-like query redirects are invalid. Public output reports only the
+redacted family, depth, query class, and follow booleans; it never reports the
+raw `Location`, path, query, fragment, or URL. Same-host auth/login paths are
+not followed and map to `provider_cookie_rejected`. Auth callback,
+`openai.com`, attacker, private/local, userinfo-bearing, port-bearing,
+fragment-bearing, query-present, token-like query, `/codex/cloud/other`,
+same-host unknown-path, and second-hop redirects fail closed.
+No raw response body was captured or committed for this route.
 
 `cookieMaterial.decryptionFailureClass` is safe class metadata, not secret
 material. It may be `none`, `keyring_needed`, `unsupported_format`,
@@ -328,6 +338,15 @@ redacted diagnostics may be retained.
   failed before browser import with "throwaway fake home must exist", so no
   HTTP request, redirect target, `redirectPathFamily`, `redirectCanFollow`,
   final status, response body, or parser outcome was observed.
+- The Task 04D.1F live recon rerun was attempted on 2026-05-03 with
+  `CODEXBAR_CODEX_WEB_LIVE=1` and
+  `CODEXBAR_BROWSER_IMPORT_FAKE_HOME="$CODEXBAR_WEB_HOME"`, but the throwaway
+  fake home did not exist in this execution environment. The ignored smoke
+  failed before browser import with "throwaway fake home must exist", so no
+  HTTP request, redirect target, `redirectPathFamily`, `redirectCanFollow`,
+  final status, response body, or parser outcome was observed. The code change
+  was validated with synthetic redirect-policy and fake web-client tests only;
+  no new live Codex cloud redirect observation was captured or committed.
 - Task 04B.3 live recon against the signed-in throwaway profile reached 19
   candidate `v10` rows and the plain decryptor, but produced
   `usableSessionCookies=0`, `cookiePresence="unavailable"`, and

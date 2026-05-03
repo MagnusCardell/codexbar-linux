@@ -140,6 +140,31 @@ before browser import with "throwaway fake home must exist", so no live HTTP
 request, redirect target, path family, final status, response body, or parser
 outcome was observed.
 
+## Task 04D.1F Status
+
+Complete as a narrow Codex cloud usage redirect allowance. The daemon still
+starts from only the static Codex dashboard URL and still follows at most one
+redirect. The policy now classifies exactly
+`/codex/cloud/settings/usage` on `chatgpt.com` as
+`same_host_usage_path`/`codex_usage` when the target has the same host, uses
+HTTPS, has no userinfo, no port, no fragment, and no query except an empty
+query. The observed route shape is the static dashboard route redirecting to
+the exact cloud usage route; no query or fragment was observed.
+
+The allowance does not generalize the `/codex/cloud/` family:
+`/codex/cloud/other`, token-like query variants, query-present variants,
+userinfo-bearing URLs, port-bearing URLs, fragments, `openai.com`, attacker,
+private/local, unknown same-host, and second-hop redirects still fail closed.
+Public output remains limited to redacted redirect classes, path family/depth,
+query class, follow booleans, hop count, and final status metadata. It does not
+include raw `Location`, path, query, fragment, URL, body, headers, cookies, or
+profile paths.
+
+This refinement does not change parsers, does not promote live bodies or
+fixtures, does not capture or commit raw response bodies, does not enable
+default live provider fetch, and does not change Shell, D-Bus XML, JSON
+schemas, localhost, or TCP surfaces.
+
 ## Goal
 
 Implement the first daemon-only Linux web provider adapter using in-memory
@@ -206,6 +231,10 @@ Suggested future layout:
   `redirectCanFollow`; follows only known safe same-host Codex usage/settings
   route families; and keeps raw redirect locations, paths, queries, fragments,
   URLs, bodies, headers, cookies, and profile paths out of public output.
+- Task 04D.1F classifies exactly the Codex cloud usage redirect as
+  `same_host_usage_path`, follows it at most once through the existing redirect
+  policy, blocks `/codex/cloud/other`, token-like query variants, userinfo,
+  ports, and fragments, and keeps raw redirect locations out of public output.
 - Task 04D.1 live reconnaissance remains ignored by default and is selectable
   with `-- --ignored codex_web_live`.
 
