@@ -172,12 +172,22 @@ impl ScopedCookie {
         }
         if let Some(cookie_path) = &self.path {
             let request_path = request_path.unwrap_or("/");
-            if !request_path.starts_with(cookie_path) {
+            if !path_matches(cookie_path, request_path) {
                 return false;
             }
         }
         true
     }
+}
+
+fn path_matches(cookie_path: &str, request_path: &str) -> bool {
+    if request_path == cookie_path {
+        return true;
+    }
+    let Some(rest) = request_path.strip_prefix(cookie_path) else {
+        return false;
+    };
+    cookie_path.ends_with('/') || rest.starts_with('/')
 }
 
 impl fmt::Debug for ScopedCookie {
@@ -246,7 +256,7 @@ fn validate_cookie_name(name: &str) -> Result<(), SessionMaterialError> {
 }
 
 fn validate_cookie_value(value: &str) -> Result<(), SessionMaterialError> {
-    if value.is_empty() || value.len() > MAX_COOKIE_VALUE_LEN {
+    if value.len() > MAX_COOKIE_VALUE_LEN {
         return Err(SessionMaterialError::InvalidCookieValue);
     }
     if value.bytes().any(|byte| {
@@ -373,6 +383,48 @@ mod tests {
         assert!(material
             .cookie_header_value_for_url("https://chatgpt.com/other")
             .is_none());
+    }
+
+    #[test]
+    fn cookie_header_uses_segment_aware_path_matching() {
+        let material = SessionMaterial::new(
+            "codex",
+            vec![ScopedCookie::try_new_for_domain(
+                ".chatgpt.com",
+                "/codex/setting",
+                "chatgpt_safe",
+                "fixture-value-1",
+            )
+            .expect("chatgpt cookie")],
+        );
+
+        assert!(material
+            .cookie_header_value_for_url("https://chatgpt.com/codex/setting")
+            .is_some());
+        assert!(material
+            .cookie_header_value_for_url("https://chatgpt.com/codex/setting/details")
+            .is_some());
+        assert!(material
+            .cookie_header_value_for_url("https://chatgpt.com/codex/settings/usage")
+            .is_none());
+    }
+
+    #[test]
+    fn cookie_header_allows_empty_cookie_values() {
+        let material = SessionMaterial::new(
+            "codex",
+            vec![
+                ScopedCookie::try_new_for_domain(".chatgpt.com", "/", "empty_value", "")
+                    .expect("empty value cookie"),
+            ],
+        );
+
+        assert_eq!(
+            material
+                .cookie_header_value_for_url("https://chatgpt.com/codex/settings/usage")
+                .as_deref(),
+            Some("empty_value=")
+        );
     }
 
     #[test]

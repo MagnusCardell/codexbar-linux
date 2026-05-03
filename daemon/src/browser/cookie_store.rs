@@ -9,9 +9,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 use crate::browser::diagnostics;
-use crate::browser::keyring::{CookieDecryptor, DecryptError, DecryptionStatus, DecryptorBackend};
+use crate::browser::keyring::{
+    CookieDecryptContext, CookieDecryptor, DecryptError, DecryptionStatus, DecryptorBackend,
+};
 use crate::browser::profile::{path_is_under, BrowserProfileDescriptor};
-use crate::browser::session_material::{ScopedCookie, SessionMaterial};
+use crate::browser::session_material::{ScopedCookie, SessionMaterial, SessionMaterialError};
 use crate::model::KeyringState;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -147,6 +149,7 @@ pub struct BrowserCookieMaterialSummary {
     pub usable_session_cookies: u64,
     pub decryptor_backend: DecryptorBackend,
     pub decryption_status: DecryptionStatus,
+    pub decryption_failure_class: DecryptionFailureClass,
 }
 
 impl Default for BrowserCookieMaterialSummary {
@@ -161,6 +164,7 @@ impl Default for BrowserCookieMaterialSummary {
             usable_session_cookies: 0,
             decryptor_backend: DecryptorBackend::Unavailable,
             decryption_status: DecryptionStatus::NotNeeded,
+            decryption_failure_class: DecryptionFailureClass::None,
         }
     }
 }
@@ -186,6 +190,10 @@ impl BrowserCookieMaterialSummary {
         self.usable_session_cookies += other.usable_session_cookies;
         self.decryption_status =
             combine_decryption_status(self.decryption_status, other.decryption_status);
+        self.decryption_failure_class = combine_decryption_failure_class(
+            self.decryption_failure_class,
+            other.decryption_failure_class,
+        );
     }
 
     fn observe_rows(&mut self, rows: &[CookieRow]) {
@@ -213,15 +221,42 @@ impl BrowserCookieMaterialSummary {
         }
     }
 
-    fn record_decryption_error(&mut self, error: DecryptError) {
-        let status = match error {
-            DecryptError::Unavailable => DecryptionStatus::Unavailable,
+    fn record_decryption_error(&mut self, error: CookieRowDecryptError) {
+        let status = match error.error {
+            DecryptError::Unavailable | DecryptError::UnsupportedFormat => {
+                DecryptionStatus::Unavailable
+            }
             DecryptError::Locked => DecryptionStatus::Locked,
             DecryptError::PromptRequired => DecryptionStatus::PromptRequired,
-            DecryptError::Failed => DecryptionStatus::Failed,
+            DecryptError::Failed
+            | DecryptError::MalformedCiphertext
+            | DecryptError::WrongKey
+            | DecryptError::InvalidMaterial
+            | DecryptError::HeaderTooLarge
+            | DecryptError::TooManyCookies => DecryptionStatus::Failed,
         };
         self.decryption_status = combine_decryption_status(self.decryption_status, status);
+        self.decryption_failure_class = combine_decryption_failure_class(
+            self.decryption_failure_class,
+            DecryptionFailureClass::from_row_error(error),
+        );
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecryptionFailureClass {
+    #[default]
+    None,
+    KeyringNeeded,
+    UnsupportedFormat,
+    MalformedCiphertext,
+    WrongKey,
+    InvalidMaterial,
+    HeaderTooLarge,
+    TooManyCookies,
+    Unavailable,
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
@@ -289,6 +324,28 @@ fn combine_decryption_status(
         (Unavailable, _) | (_, Unavailable) => Unavailable,
         (Succeeded, _) | (_, Succeeded) => Succeeded,
         (NotNeeded, NotNeeded) => NotNeeded,
+    }
+}
+
+fn combine_decryption_failure_class(
+    current: DecryptionFailureClass,
+    next: DecryptionFailureClass,
+) -> DecryptionFailureClass {
+    use DecryptionFailureClass::{
+        Failed, HeaderTooLarge, InvalidMaterial, KeyringNeeded, MalformedCiphertext, None,
+        TooManyCookies, Unavailable, UnsupportedFormat, WrongKey,
+    };
+    match (current, next) {
+        (WrongKey, _) | (_, WrongKey) => WrongKey,
+        (MalformedCiphertext, _) | (_, MalformedCiphertext) => MalformedCiphertext,
+        (UnsupportedFormat, _) | (_, UnsupportedFormat) => UnsupportedFormat,
+        (KeyringNeeded, _) | (_, KeyringNeeded) => KeyringNeeded,
+        (HeaderTooLarge, _) | (_, HeaderTooLarge) => HeaderTooLarge,
+        (TooManyCookies, _) | (_, TooManyCookies) => TooManyCookies,
+        (InvalidMaterial, _) | (_, InvalidMaterial) => InvalidMaterial,
+        (Unavailable, _) | (_, Unavailable) => Unavailable,
+        (Failed, _) | (_, Failed) => Failed,
+        (None, None) => None,
     }
 }
 
@@ -368,9 +425,10 @@ pub fn read_profile_cookies(
             return outcome;
         }
     };
+    let encrypted_value_has_host_hash = encrypted_values_include_host_hash(&connection);
 
     for query in queries {
-        match query_cookie_rows(&connection, &columns, query) {
+        match query_cookie_rows(&connection, &columns, query, encrypted_value_has_host_hash) {
             Ok(rows) => {
                 outcome.material_summary.observe_rows(&rows);
                 let mut provider_count = 0;
@@ -391,9 +449,7 @@ pub fn read_profile_cookies(
                         Ok(None) => {}
                         Err(error) => {
                             provider_had_material_error = true;
-                            outcome
-                                .material_summary
-                                .record_decryption_error(error.error);
+                            outcome.material_summary.record_decryption_error(error);
                             record_decrypt_error(&mut outcome, query.provider(), error);
                         }
                     }
@@ -404,7 +460,12 @@ pub fn read_profile_cookies(
                 if provider_count > 0 {
                     if provider_used_keyring
                         || (!provider_decrypted
-                            && rows_required_keyring(&connection, &columns, query))
+                            && rows_required_keyring(
+                                &connection,
+                                &columns,
+                                query,
+                                encrypted_value_has_host_hash,
+                            ))
                     {
                         record_keyring_state(&mut outcome, KeyringState::Unlocked);
                     }
@@ -513,9 +574,10 @@ pub fn read_profile_session_material(
             };
         }
     };
+    let encrypted_value_has_host_hash = encrypted_values_include_host_hash(&connection);
 
     for query in queries {
-        match query_cookie_rows(&connection, &columns, query) {
+        match query_cookie_rows(&connection, &columns, query, encrypted_value_has_host_hash) {
             Ok(rows) => {
                 outcome.material_summary.observe_rows(&rows);
                 let mut cookies = Vec::new();
@@ -535,9 +597,7 @@ pub fn read_profile_session_material(
                         Ok(None) => {}
                         Err(error) => {
                             provider_had_material_error = true;
-                            outcome
-                                .material_summary
-                                .record_decryption_error(error.error);
+                            outcome.material_summary.record_decryption_error(error);
                             record_decrypt_error(&mut outcome, query.provider(), error);
                         }
                     }
@@ -567,15 +627,17 @@ pub fn read_profile_session_material(
                             }
                             sessions.insert(query.provider().to_string(), material);
                         }
-                        Err(_) => {
-                            outcome
-                                .material_summary
-                                .record_decryption_error(DecryptError::Failed);
-                            outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
-                            outcome.push_provider_code(
-                                query.provider(),
-                                diagnostics::COOKIE_DECRYPTION_FAILED,
-                            );
+                        Err(error) => {
+                            let error = CookieRowDecryptError {
+                                kind: if decrypted_cookie {
+                                    CookieMaterialKind::BasicEncrypted
+                                } else {
+                                    CookieMaterialKind::Plaintext
+                                },
+                                error: decrypt_error_from_session_material(error),
+                            };
+                            outcome.material_summary.record_decryption_error(error);
+                            record_decrypt_error(&mut outcome, query.provider(), error);
                         }
                     }
                 } else if !outcome
@@ -768,10 +830,22 @@ fn required_columns_present(columns: &BTreeSet<String>) -> bool {
     .all(|column| columns.contains(column))
 }
 
+fn encrypted_values_include_host_hash(connection: &Connection) -> bool {
+    let Ok(version) =
+        connection.query_row("SELECT value FROM meta WHERE key = 'version'", [], |row| {
+            row.get::<_, String>(0)
+        })
+    else {
+        return false;
+    };
+    version.parse::<u32>().is_ok_and(|version| version >= 24)
+}
+
 fn query_cookie_rows(
     connection: &Connection,
     columns: &BTreeSet<String>,
     query: &CookieQuery,
+    encrypted_value_has_host_hash: bool,
 ) -> Result<Vec<CookieRow>, CookieDbFailure> {
     let host_keys = query.host_keys();
     if host_keys.is_empty() {
@@ -792,7 +866,9 @@ fn query_cookie_rows(
     let params = host_keys.iter().chain(query.names.iter());
     let mut statement = connection.prepare(&sql).map_err(classify_sqlite_error)?;
     let rows = statement
-        .query_map(params_from_iter(params), CookieRow::from_row)
+        .query_map(params_from_iter(params), |row| {
+            CookieRow::from_row(row, encrypted_value_has_host_hash)
+        })
         .map_err(classify_sqlite_error)?;
     let mut output = Vec::new();
     for row in rows {
@@ -805,8 +881,9 @@ fn rows_required_keyring(
     connection: &Connection,
     columns: &BTreeSet<String>,
     query: &CookieQuery,
+    encrypted_value_has_host_hash: bool,
 ) -> bool {
-    query_cookie_rows(connection, columns, query)
+    query_cookie_rows(connection, columns, query, encrypted_value_has_host_hash)
         .map(|rows| {
             rows.into_iter()
                 .any(|row| !row.is_expired() && row.material_kind().requires_keyring())
@@ -840,6 +917,7 @@ struct CookieRow {
     value: String,
     encrypted_value: Vec<u8>,
     expires_utc: i64,
+    encrypted_value_has_host_hash: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -849,6 +927,30 @@ enum CookieMaterialKind {
     KeyringEncrypted,
     UnknownEncrypted,
     Empty,
+}
+
+impl DecryptionFailureClass {
+    fn from_row_error(error: CookieRowDecryptError) -> Self {
+        match error.error {
+            DecryptError::Unavailable => {
+                if error.kind.requires_keyring() {
+                    Self::KeyringNeeded
+                } else if error.kind == CookieMaterialKind::UnknownEncrypted {
+                    Self::UnsupportedFormat
+                } else {
+                    Self::Unavailable
+                }
+            }
+            DecryptError::Locked | DecryptError::PromptRequired => Self::KeyringNeeded,
+            DecryptError::UnsupportedFormat => Self::UnsupportedFormat,
+            DecryptError::MalformedCiphertext => Self::MalformedCiphertext,
+            DecryptError::WrongKey => Self::WrongKey,
+            DecryptError::InvalidMaterial => Self::InvalidMaterial,
+            DecryptError::HeaderTooLarge => Self::HeaderTooLarge,
+            DecryptError::TooManyCookies => Self::TooManyCookies,
+            DecryptError::Failed => Self::Failed,
+        }
+    }
 }
 
 impl CookieMaterialKind {
@@ -876,7 +978,10 @@ struct CookieRowDecryptError {
 }
 
 impl CookieRow {
-    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+    fn from_row(
+        row: &rusqlite::Row<'_>,
+        encrypted_value_has_host_hash: bool,
+    ) -> rusqlite::Result<Self> {
         let host_key: String = row.get(0)?;
         let name: String = row.get(1)?;
         let path: String = row.get(2)?;
@@ -895,6 +1000,7 @@ impl CookieRow {
             value,
             encrypted_value,
             expires_utc,
+            encrypted_value_has_host_hash,
         })
     }
 
@@ -913,9 +1019,12 @@ impl CookieRow {
         let Some((kind, cookie)) = self.scoped_cookie(decryptor)? else {
             return Ok(None);
         };
-        Ok(SessionMaterial::try_new(provider, vec![cookie])
-            .ok()
-            .map(|material| (kind, material)))
+        SessionMaterial::try_new(provider, vec![cookie])
+            .map(|material| Some((kind, material)))
+            .map_err(|error| CookieRowDecryptError {
+                kind,
+                error: decrypt_error_from_session_material(error),
+            })
     }
 
     fn scoped_cookie(
@@ -923,27 +1032,21 @@ impl CookieRow {
         decryptor: &dyn CookieDecryptor,
     ) -> Result<Option<(CookieMaterialKind, ScopedCookie)>, CookieRowDecryptError> {
         match self.material_kind() {
-            CookieMaterialKind::Plaintext => Ok(ScopedCookie::try_new_for_domain(
-                &self.host_key,
-                &self.path,
-                self.name.clone(),
-                self.value.clone(),
-            )
-            .ok()
-            .map(|cookie| (CookieMaterialKind::Plaintext, cookie))),
+            CookieMaterialKind::Plaintext => self
+                .scoped_cookie_from_value(self.value.clone(), CookieMaterialKind::Plaintext)
+                .map(Some),
             CookieMaterialKind::BasicEncrypted | CookieMaterialKind::KeyringEncrypted => {
                 let kind = self.material_kind();
                 let value = decryptor
-                    .decrypt(&self.encrypted_value)
+                    .decrypt(
+                        &self.encrypted_value,
+                        CookieDecryptContext {
+                            host_key: &self.host_key,
+                            db_version: self.encrypted_value_has_host_hash.then_some(24),
+                        },
+                    )
                     .map_err(|error| CookieRowDecryptError { kind, error })?;
-                Ok(ScopedCookie::try_new_for_domain(
-                    &self.host_key,
-                    &self.path,
-                    self.name.clone(),
-                    value,
-                )
-                .ok()
-                .map(|cookie| (kind, cookie)))
+                self.scoped_cookie_from_value(value, kind).map(Some)
             }
             CookieMaterialKind::UnknownEncrypted => Err(CookieRowDecryptError {
                 kind: CookieMaterialKind::UnknownEncrypted,
@@ -951,6 +1054,19 @@ impl CookieRow {
             }),
             CookieMaterialKind::Empty => Ok(None),
         }
+    }
+
+    fn scoped_cookie_from_value(
+        &self,
+        value: String,
+        kind: CookieMaterialKind,
+    ) -> Result<(CookieMaterialKind, ScopedCookie), CookieRowDecryptError> {
+        ScopedCookie::try_new_for_domain(&self.host_key, &self.path, self.name.clone(), value)
+            .map(|cookie| (kind, cookie))
+            .map_err(|error| CookieRowDecryptError {
+                kind,
+                error: decrypt_error_from_session_material(error),
+            })
     }
 
     fn material_kind(&self) -> CookieMaterialKind {
@@ -968,6 +1084,18 @@ impl CookieRow {
     }
 }
 
+fn decrypt_error_from_session_material(error: SessionMaterialError) -> DecryptError {
+    match error {
+        SessionMaterialError::TooManyCookies => DecryptError::TooManyCookies,
+        SessionMaterialError::HeaderTooLarge => DecryptError::HeaderTooLarge,
+        SessionMaterialError::InvalidProvider
+        | SessionMaterialError::InvalidCookieName
+        | SessionMaterialError::InvalidCookieValue
+        | SessionMaterialError::InvalidCookieDomain
+        | SessionMaterialError::InvalidCookiePath => DecryptError::InvalidMaterial,
+    }
+}
+
 fn record_decrypt_error(
     outcome: &mut CookieStoreProfileOutcome,
     provider: &str,
@@ -975,7 +1103,7 @@ fn record_decrypt_error(
 ) {
     record_keyring_state(outcome, error.kind.keyring_state_for_error(error.error));
     match error.error {
-        DecryptError::Unavailable => {
+        DecryptError::Unavailable | DecryptError::UnsupportedFormat => {
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_UNAVAILABLE);
             if error.kind.requires_keyring() {
@@ -999,7 +1127,12 @@ fn record_decrypt_error(
                 outcome.push_provider_code(provider, diagnostics::KEYRING_PROMPT_REQUIRED);
             }
         }
-        DecryptError::Failed => {
+        DecryptError::Failed
+        | DecryptError::MalformedCiphertext
+        | DecryptError::WrongKey
+        | DecryptError::InvalidMaterial
+        | DecryptError::HeaderTooLarge
+        | DecryptError::TooManyCookies => {
             outcome.push_code(diagnostics::COOKIE_DECRYPTION_FAILED);
             outcome.push_provider_code(provider, diagnostics::COOKIE_DECRYPTION_FAILED);
         }

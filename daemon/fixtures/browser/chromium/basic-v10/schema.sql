@@ -23,9 +23,3 @@ CREATE TABLE cookies(
   source_type INTEGER NOT NULL DEFAULT 0,
   has_cross_site_ancestor INTEGER NOT NULL DEFAULT 0
 );
-
-INSERT INTO cookies(
-  creation_utc, host_key, name, value, encrypted_value, path, expires_utc,
-  is_secure, is_httponly, last_access_utc
-) VALUES
-  (1, 'codex.example.invalid', 'quota_marker', '', X'763130666978747572652d62617369632d616c706861', '/', 20000000000000000, 1, 1, 1);

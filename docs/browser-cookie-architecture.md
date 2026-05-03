@@ -9,6 +9,9 @@ session material, and schema-valid `TestBrowserImport` results. Task 04B.2 adds
 safe Chromium cookie material summaries, plaintext row support, fail-closed
 encrypted row classification, explicit fake/test decryptor separation from the
 production/plain backend, and a noninteractive Secret Service probe abstraction.
+Task 04B.3 adds Chromium Linux basic/plain `v10` decryption for the verified
+OSCrypt basic password-store path, using pure RustCrypto primitives inside the
+daemon and keeping Secret Service/KWallet/newer formats out of scope.
 Task 04D.0 adds a daemon-only Codex web adapter skeleton with fake HTTP
 fixtures, static policy/URL allowlists, response-size/redirect/timeout
 handling, and normalization into the existing snapshot provider shape. Task
@@ -199,6 +202,32 @@ Chromium-family decryption must use a reviewed Secret Service path or a small
 reviewed crate. Firefox cookie values are read from the Firefox cookie store
 only after profile behavior is verified with synthetic or throwaway profiles.
 
+Task 04B.3 supports exactly one encrypted Chromium path without prompting:
+Linux OSCrypt `v10` values written by the basic/plain password-store backend.
+For that path, the daemon derives Chromium's legacy basic key locally from the
+hardcoded basic OSCrypt source, decrypts AES-128-CBC with PKCS#7 padding, and
+for cookie DB version 24 and later verifies Chromium's SHA-256 `host_key`
+prefix before stripping it from the decrypted cookie value. The implementation
+does not persist the key, decrypted bytes, encrypted bytes, cookie names,
+cookie values, profile paths, or Cookie headers. The crypto dependencies are
+exactly pinned pure Rust RustCrypto crates (`aes`, `cbc`, `pbkdf2`, `sha1`,
+and `sha2`) to avoid OpenSSL/native keychain dependencies for this basic path.
+
+Unsupported encrypted formats remain fail-closed:
+
+- `v11` is treated as the keyring-backed path and reports keyring-needed
+  diagnostics unless a fake test decryptor is explicitly injected;
+- `v20`, encrypted-value-prefix `v24`, and unknown prefixes report unsupported
+  or unavailable decryption without attempting Secret Service, KWallet, or
+  app-bound decryption;
+- malformed ciphertext, bad padding, wrong host hash, invalid UTF-8, or invalid
+  cookie material produce redaction-safe failure classes and discard partial
+  provider material.
+- empty cookie values are valid Cookie-header material (`name=`), but
+  control characters, semicolons, quotes, backslashes, invalid domains, invalid
+  paths, excessive values, excessive cookie counts, and oversized Cookie
+  headers fail closed with redaction-safe classes.
+
 Scheduled/background refresh must not trigger surprise keyring prompts.
 Interactive keyring unlock is out of scope until a later UX and schema task
 explicitly accepts it.
@@ -258,11 +287,12 @@ Service support:
 - rows with a non-empty Chromium `value` and empty `encrypted_value` become
   provider-scoped in-memory session material after domain/path/name/value
   validation;
-- encrypted rows with known `v10`, `v11`, `v20`, or `v24` prefixes are counted
-  in safe diagnostics, but only fake test decryptors can turn synthetic
-  encrypted rows into material;
-- the production/env backend is `plain`, so plaintext rows can be used and
-  encrypted rows return `browser_cookie_decryption_unavailable`;
+- encrypted rows with known `v10`, `v11`, `v20`, or encrypted-value-prefix
+  `v24` are counted in safe diagnostics;
+- after Task 04B.3, the production/env backend is still `plain`, but it can
+  decrypt verified Linux basic/plain `v10` rows; unsupported encrypted rows
+  return `browser_cookie_decryption_unavailable` or
+  `browser_cookie_decryption_failed` according to the failure class;
 - `SecretServiceProbe` is noninteractive and only maps unavailable, locked, or
   prompt-required states. It does not extract, display, persist, or log the
   Chromium OSCrypt secret;
@@ -473,20 +503,23 @@ own the SQLite runtime.
 Current Rust crates and likely future APIs:
 
 - `rusqlite` for cookie DB reads;
+- `aes`, `cbc`, `pbkdf2`, `sha1`, and `sha2` for the verified Chromium Linux
+  basic/plain `v10` decryptor, pinned exactly and implemented without
+  OpenSSL/native keychain dependencies;
 - `reqwest` for the Task 04D.1 daemon-only static Codex GET transport, with
   default features disabled and Rustls-oriented TLS selected;
 - `url` for resolving and sanitizing redirect targets instead of ad hoc
   string joining;
 - existing `zbus` or a small reviewed Secret Service crate for keyring access;
-- narrowly scoped RustCrypto crates only after Chromium behavior is verified;
 - an internal cookie/session material type or a small cookie crate;
 - `secrecy` or `zeroize` only as defense-in-depth, not as a redaction
   substitute.
 
-Task 04B.2 does not add a Secret Service crate or native package dependency.
-The probe abstraction is an internal daemon status mapper only. Real
-noninteractive Secret Service extraction remains future work and must receive
-a dependency, packaging, and redaction review before landing.
+Task 04B.3 adds no Secret Service crate, KWallet crate, OpenSSL dependency, or
+native keychain package dependency. The probe abstraction is an internal daemon
+status mapper only. Real noninteractive Secret Service extraction remains
+future work and must receive a dependency, packaging, and redaction review
+before landing.
 
 Likely Debian/Ubuntu implications:
 

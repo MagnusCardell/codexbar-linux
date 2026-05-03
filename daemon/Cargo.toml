@@ -14,8 +14,13 @@ name = "codexbar-linuxd"
 path = "src/main.rs"
 
 [dependencies]
+aes = "=0.8.4"
+cbc = "=0.1.2"
+pbkdf2 = "=0.12.2"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+sha1 = "=0.10.6"
+sha2 = "=0.10.9"
 rusqlite = "=0.32.1"
 reqwest = { version = "=0.13.3", default-features = false, features = ["blocking", "rustls"] }
 time = { version = "=0.3.37", features = ["formatting"] }

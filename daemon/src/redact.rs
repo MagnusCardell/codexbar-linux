@@ -222,6 +222,31 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
             return Err(RedactionFinding { code });
         }
     }
+    let compact: String = lower
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '=' | ':' | '"'))
+        .collect();
+    for (code, needle) in [
+        ("access_token", "accesstoken="),
+        ("access_token", "accesstoken:"),
+        ("access_token", "\"accesstoken\""),
+        ("refresh_token", "refreshtoken="),
+        ("refresh_token", "refreshtoken:"),
+        ("refresh_token", "\"refreshtoken\""),
+        ("session_token", "sessiontoken="),
+        ("session_token", "sessiontoken:"),
+        ("session_token", "\"sessiontoken\""),
+        ("session_key", "sessionkey="),
+        ("session_key", "sessionkey:"),
+        ("session_key", "\"sessionkey\""),
+        ("api_key", "apikey="),
+        ("api_key", "apikey:"),
+        ("api_key", "\"apikey\""),
+    ] {
+        if compact.contains(needle) {
+            return Err(RedactionFinding { code });
+        }
+    }
     if contains_raw_email(value) {
         return Err(RedactionFinding { code: "raw_email" });
     }

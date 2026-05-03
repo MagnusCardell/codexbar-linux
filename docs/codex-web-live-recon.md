@@ -105,7 +105,8 @@ Allowed summary fields are:
 - `cookieMaterial`: safe browser-cookie material summary with only:
   `profilesDiscovered`, `candidateCookieRows`, `plaintextValueRows`,
   `encryptedValueRows`, `encryptedPrefixes`, `expiredRows`,
-  `usableSessionCookies`, `decryptorBackend`, and `decryptionStatus`;
+  `usableSessionCookies`, `decryptorBackend`, `decryptionStatus`, and
+  `decryptionFailureClass`;
 - `cookiePresence`: one of `none`, `found`, `decrypted`, `unavailable`, or
   `unknown`;
 - `webFetch`: one of `not_attempted`, `attempted`, `finished`, `blocked`,
@@ -151,6 +152,19 @@ The live test may produce these safe outcomes:
 The implementation records stable diagnostic codes for these classes, not raw
 provider response data.
 
+`cookieMaterial.decryptionFailureClass` is safe class metadata, not secret
+material. It may be `none`, `keyring_needed`, `unsupported_format`,
+`malformed_ciphertext`, `wrong_key`, `invalid_material`, `header_too_large`,
+`too_many_cookies`, `unavailable`, or `failed`. For Task 04B.3, `none` with
+`decryptorBackend="plain"` and `decryptionStatus="succeeded"` can indicate that
+Chromium Linux basic/plain `v10` cookie material decrypted successfully.
+`keyring_needed` still means Secret Service/KWallet/newer keyring-backed work
+is outside this task. `unsupported_format`, `malformed_ciphertext`,
+`wrong_key`, `invalid_material`, `header_too_large`, and `too_many_cookies` are
+redaction-safe failure classes and must not be expanded with raw encrypted
+bytes, cookie names, host keys, profile paths, Cookie headers, or decrypted
+values.
+
 ## Next Decision
 
 Use the summary classification to choose the next task:
@@ -163,6 +177,9 @@ Use the summary classification to choose the next task:
 | `browser_cookie_missing` | Investigate browser import and cookie-domain selection. |
 | `browser_cookie_missing` with `cookieMaterial.plaintextValueRows > 0` and `usableSessionCookies=0` | Inspect validation/filtering policy with synthetic fixtures; do not print raw row data. |
 | `browser_keyring_unavailable` with encrypted prefix counts | Secret Service or unsupported encrypted-prefix work is the blocker; do not work on the Codex parser yet. |
+| `unknown_safe_failure` with `decryptionFailureClass="unsupported_format"` | Do not broaden decryption in this task. Split Secret Service/KWallet/newer-prefix work into a reviewed follow-up. |
+| `unknown_safe_failure` with `decryptionFailureClass="malformed_ciphertext"` or `"wrong_key"` | Treat the cookie material as unusable; inspect browser version/profile setup with safe counts only. |
+| `unknown_safe_failure` with `decryptionFailureClass="invalid_material"`, `"header_too_large"`, or `"too_many_cookies"` | Browser cookie decryption is past the prefix/key step, but domain-wide cookie material cannot safely form a header. Verify required cookie names or header material policy with synthetic fixtures before parser work. |
 | `redirect_blocked` | Review the redirect host/path policy with safe host/path-class evidence only. |
 | `timeout`, `non_200`, or `response_too_large` | Follow up on transport/classification behavior before parser work. |
 | `browser_keyring_unavailable` or `browser_profile_not_found` | Fix the throwaway browser setup or decryption prerequisite before retrying live recon. |
@@ -186,12 +203,22 @@ redacted diagnostics may be retained.
 
 ## Known Limits
 
+- Task 04B.3 live recon against the signed-in throwaway profile reached 19
+  candidate `v10` rows and the plain decryptor, but produced
+  `usableSessionCookies=0`, `cookiePresence="unavailable"`, and
+  `webFetch="not_attempted"` because the domain-wide `chatgpt.com` cookie set
+  included material that failed safe Cookie-header validation. A local
+  aggregate-only check, with no cookie names/values/encrypted bytes printed,
+  showed all 19 rows decrypt to UTF-8 and 2 rows fail value-character
+  validation. The next blocker is Codex cookie-name/header-material policy, not
+  v10 prefix support, HTTP transport, or parser work.
 - The live parser is not a real ChatGPT page parser. The only asserted
   normalizer is the synthetic fixture parser.
-- The current live decryptor path does not unlock real encrypted Chromium
-  cookies. The production/env backend is `plain`: plaintext rows can produce
-  in-memory session material, while encrypted rows usually classify as missing
-  dependency until a reviewed noninteractive Secret Service decryptor exists.
+- The current live decryptor path supports only plaintext rows and the verified
+  Chromium Linux basic/plain `v10` encrypted-value path. Secret Service,
+  KWallet, app-bound encryption, `v20`, encrypted-value-prefix `v24`, and
+  unknown encrypted formats still classify as unavailable or failed without
+  unlocking keyrings or persisting material.
 - A noninteractive Secret Service probe abstraction exists only to classify
   unavailable, locked, and prompt-required states. It does not extract or
   persist the Chromium secret.

@@ -61,6 +61,8 @@ real_provider_domains = [
 
 
 def check_text(path: Path, text: str) -> None:
+    if re.search(r"X'(?=[0-9A-Fa-f]{2})[0-9A-Fa-f]+'", text):
+        raise SystemExit(f"Browser fixture must not include raw encrypted blob bytes: {path}")
     for match in raw_email.finditer(text):
         value = match.group(0)
         if value.endswith("@example.invalid"):
@@ -90,6 +92,22 @@ def check_fixture_entry(directory: Path, path: Path, allowed: set[str]) -> None:
     if b"\x00" in data:
         raise SystemExit(f"Browser fixture must be text only: {path}")
     check_text(path, data.decode("utf-8", errors="replace"))
+
+
+allowed_top_level = set(required) | {"README.md"}
+for path in sorted(fixture_root.iterdir()):
+    lower_name = path.name.lower()
+    if path.name not in allowed_top_level:
+        if lower_name in browser_store_names or lower_name.endswith(("-wal", "-shm")):
+            raise SystemExit(f"Browser fixture must not include browser DB/profile file: {path}")
+        raise SystemExit(f"Unexpected top-level browser fixture entry: {path}")
+    if path.name == "README.md":
+        data = path.read_bytes()
+        if data.startswith(b"SQLite format 3\x00") or b"\x00" in data:
+            raise SystemExit(f"Browser fixture README must be text only: {path}")
+        check_text(path, data.decode("utf-8", errors="replace"))
+    elif not path.is_dir():
+        raise SystemExit(f"Browser fixture entry must be a directory: {path}")
 
 
 for name, expected in required.items():

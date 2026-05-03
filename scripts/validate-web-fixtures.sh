@@ -31,15 +31,16 @@ missing = sorted(required - present)
 if missing:
     raise SystemExit(f"Missing web fixtures: {', '.join(missing)}")
 
-unexpected = sorted(
+unexpected = sorted(path.name for path in fixture_root.iterdir() if path.name not in required)
+if unexpected:
+    raise SystemExit(f"Unexpected web fixture entries: {', '.join(unexpected)}")
+not_files = sorted(
     path.name
     for path in fixture_root.iterdir()
-    if path.is_file()
-    and path.name not in required
-    and not path.name.endswith((".md", ".html", ".json", ".marker"))
+    if path.name in required and not path.is_file()
 )
-if unexpected:
-    raise SystemExit(f"Unexpected web fixture sidecars: {', '.join(unexpected)}")
+if not_files:
+    raise SystemExit(f"Web fixture entries must be files: {', '.join(not_files)}")
 
 raw_email = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 domain_like = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.I)

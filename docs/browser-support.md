@@ -8,10 +8,12 @@ cookie DB reads for synthetic/fake roots and throwaway fixtures. Task 04B.1
 adds opt-in live throwaway Chromium-family verification. Task 04B.2 adds safe
 cookie material summaries, plaintext Chromium row support, fail-closed
 encrypted row classification, fake/test decryptor separation, and a
-noninteractive Secret Service probe abstraction. Task 04D.1 adds Codex web live
+noninteractive Secret Service probe abstraction. Task 04B.3 adds daemon-only
+Chromium Linux basic/plain `v10` decryption for the verified OSCrypt basic
+password-store path. Task 04D.1 adds Codex web live
 reconnaissance against a marked throwaway fake home only. These tasks do not
-enable real user profile scanning by default, real Secret Service extraction,
-default provider web fetches, or Firefox import.
+enable real user profile scanning by default, real Secret Service or KWallet
+extraction, default provider web fetches, or Firefox import.
 
 ## Implementation Order
 
@@ -45,14 +47,18 @@ default provider web fetches, or Firefox import.
   `chatgpt.com` cookie material from the throwaway profile in memory only and
   may make one bounded static GET to the Codex dashboard URL. It must not use
   real default browser profiles.
-- In Task 04B.2, `AppRuntime::from_env()` uses the plain backend by default.
-  Plaintext rows may become in-memory material; encrypted rows produce
-  redacted dependency diagnostics until a real noninteractive Secret Service
-  decryptor exists. Fake decryptor success is available only through explicit
-  test constructors.
+- In Task 04B.3, `AppRuntime::from_env()` uses the plain backend by default.
+  Plaintext rows may become in-memory material. Chromium Linux basic/plain
+  `v10` rows may also become in-memory material when they match the verified
+  basic OSCrypt format. Other encrypted formats still fail closed with
+  redacted dependency diagnostics. Fake decryptor success is available only
+  through explicit test constructors.
 - Task 04B fixtures live under `daemon/fixtures/browser/chromium/` as text
   metadata/SQL definitions. Tests create throwaway SQLite DBs from those files;
-  committed fixtures do not include real or binary browser cookie databases.
+  committed fixtures do not include real or binary browser cookie databases,
+  raw encrypted blob values, WAL/SHM companions, or profile directories. Tests
+  generate synthetic encrypted rows at runtime when decryptor coverage needs
+  encrypted material.
 
 ## Task 04B.1 Live Throwaway Observations
 
@@ -108,28 +114,55 @@ The summary never prints cookie names, values, encrypted bytes, exact domains,
 profile paths, SQL rows, Cookie headers, Authorization headers, account
 identity, or raw provider payloads.
 
-Current behavior:
+Current behavior after Task 04B.3:
 
 - Chromium rows with non-empty `value` and empty `encrypted_value` are usable
   after provider domain/path validation. This is the path that covers any
   browser profile where `--password-store=basic` yields plaintext rows.
-- Synthetic `v10` rows are supported by the fake decryptor in tests only. The
-  production/plain backend does not guess a `v10` decryption algorithm.
+- Chromium Linux basic/plain `v10` rows are supported by the production/plain
+  backend only for the verified OSCrypt basic path:
+  - prefix: `v10` encrypted cookie value;
+  - key source: Chromium's hardcoded Linux basic password-store OSCrypt source,
+    derived locally without Secret Service, KWallet, or prompting;
+  - derivation/cipher/padding: PBKDF2-HMAC-SHA1 to AES-128-CBC using
+    Chromium's fixed IV and PKCS#7 padding;
+  - integrity check: for cookie DB version 24 and later, the decrypted value
+    must start with Chromium's SHA-256 hash of the row `host_key`; the hash is
+    verified and stripped before header-safe cookie validation;
+  - no MAC/tag is present in this legacy format, so malformed padding,
+    malformed host-hash length, invalid UTF-8, wrong host hash, and invalid
+    cookie material all fail closed.
 - Synthetic `v11` rows model the keyring-backed path. The fake decryptor can
   decrypt them in tests; the production/plain backend reports
   `browser_keyring_unavailable` plus
   `browser_cookie_decryption_unavailable`.
-- Unknown encrypted prefixes fail closed with
+- `v20`, `v24`, and unknown encrypted prefixes fail closed with
   `browser_cookie_decryption_unavailable` and no keyring-specific claim.
 - If a provider-scoped encrypted row fails while another provider-scoped
   plaintext row exists, the daemon discards the partial material and web fetch
   is not attempted.
+- Safe live summaries now include `decryptionFailureClass` so an ignored recon
+  run can distinguish `keyring_needed`, `unsupported_format`,
+  `malformed_ciphertext`, `wrong_key`, `invalid_material`,
+  `header_too_large`, `too_many_cookies`, `unavailable`, and generic `failed`
+  without printing cookie material.
 
-The earlier local Chrome throwaway smoke used `--password-store=basic`, but the
-provider-live throwaway profile still needs a fresh ignored live run to record
-whether real signed-in Codex rows are plaintext or encrypted and which prefix
-class appears. Do not infer that basic/plain is sufficient until that safe
-summary says so.
+The Task 04B.3 local Chrome throwaway smoke used `--password-store=basic` and
+reproduced the pre-fix failure mode: the seeded cookie was present but the
+plain backend could not decrypt the encrypted `v10` row. Task 04B.3 is scoped
+to that verified basic/plain path plus Chromium source behavior. Do not infer
+that Secret Service, KWallet, app-bound encryption, or newer encrypted prefixes
+are supported from this result.
+
+The signed-in Task 04B.3 Codex throwaway recon moved the blocker forward but
+did not produce usable Codex session material: all 19 provider-domain encrypted
+rows were `v10`, 0 were plaintext, 2 were expired, and the plain decryptor
+reached UTF-8 output, but the domain-wide cookie set included material that
+failed safe Cookie-header validation. The safe summary reported
+`decryptionFailureClass=invalid_material`, `usableSessionCookies=0`, and
+`webFetch=not_attempted`. The next task should verify required Codex cookie
+names or header material policy with synthetic fixtures; it should not broaden
+provider parsing from live response bodies.
 
 ## Google Chrome
 
@@ -177,11 +210,14 @@ Task 04B/04C decision:
 
 Risks/open questions:
 
-- Exact encrypted cookie format and key derivation must be verified on Ubuntu
-  24.04 and 26.04.
-- Secret Service extraction is not implemented. Prompt behavior must remain
-  noninteractive for background refresh and currently maps to
+- The Task 04B.3 `v10` basic/plain path is verified against Chromium's Linux
+  OSCrypt source and synthetic fixtures, then checked by ignored throwaway
+  live recon. Ubuntu 26.04 release validation still needs to confirm current
+  browser behavior.
+- Secret Service and KWallet extraction are not implemented. Prompt behavior
+  must remain noninteractive for background refresh and currently maps to
   `browser_keyring_prompt_required`.
+- `v20` and `v24` encrypted-value prefixes are unsupported and fail closed.
 - Chrome channel roots and command-line override roots need bounded support.
 
 ## Brave

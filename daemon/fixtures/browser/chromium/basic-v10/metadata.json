@@ -4,5 +4,5 @@
   "browserFamily": "chromium",
   "profileShape": "Network/Cookies",
   "expected": "parse",
-  "description": "Synthetic v10/basic encrypted-value rows consumed only by the fake decryptor."
+  "description": "Chromium v10 basic/plain schema; tests generate synthetic encrypted rows at runtime."
 }

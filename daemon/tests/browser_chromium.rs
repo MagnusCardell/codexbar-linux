@@ -6,8 +6,12 @@ use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+use aes::Aes128;
 use codexbar_linuxd::app::{App, AppRuntime};
-use codexbar_linuxd::browser::cookie_store::copy_cookie_db_to_private_temp;
+use codexbar_linuxd::browser::cookie_store::{
+    copy_cookie_db_to_private_temp, DecryptionFailureClass,
+};
 use codexbar_linuxd::browser::keyring::{
     BrowserDecryptorMode, DecryptionStatus, DecryptorBackend, FakeDecryptorMode,
     SecretServiceProbeStatus,
@@ -17,7 +21,17 @@ use codexbar_linuxd::browser::{self, BrowserSessionRequest};
 use codexbar_linuxd::model::{
     BrowserFamily, BrowserImportResult, BrowserImportStatus, BrowserProviderStatus, KeyringState,
 };
-use rusqlite::Connection;
+use pbkdf2::pbkdf2_hmac;
+use rusqlite::{params, Connection};
+use sha1::Sha1;
+use sha2::{Digest, Sha256};
+
+const CHROMIUM_V10_PREFIX: &[u8] = b"v10";
+const CHROMIUM_BASIC_PASSWORD: &[u8] = b"peanuts";
+const CHROMIUM_BASIC_SALT: &[u8] = b"saltysalt";
+const CHROMIUM_BASIC_ITERATIONS: u32 = 1;
+const CHROMIUM_AES_BLOCK_LEN: usize = 16;
+const CHROMIUM_BASIC_IV: [u8; CHROMIUM_AES_BLOCK_LEN] = [b' '; CHROMIUM_AES_BLOCK_LEN];
 
 #[test]
 fn chromium_family_fake_roots_return_safe_profiles_and_counts() {
@@ -287,6 +301,40 @@ fn v10_basic_cookie_material_uses_fake_decryptor_without_keyring() {
 }
 
 #[test]
+fn v10_basic_cookie_material_uses_plain_backend_without_keyring() {
+    let (tmp, paths) = common::temp_paths();
+    create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "basic-v10/schema.sql",
+    );
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::with_browser_roots_for_tests(BrowserDiscoveryRoots::synthetic_home(
+            tmp.path().to_path_buf(),
+        ))
+        .with_browser_decryptor_backend(BrowserDecryptorMode::Plain),
+    )
+    .expect("browser app");
+    let result = test_import(&app, r#"{"schemaVersion":1,"providers":["codex"]}"#);
+    let result_json = serde_json::to_string(&result).expect("result json");
+
+    assert_eq!(result.providers[0].status, BrowserProviderStatus::Success);
+    assert_eq!(result.profiles[0].keyring_state, KeyringState::NotRequired);
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_found".to_string()));
+    assert!(result.profiles[0]
+        .diagnostic_codes
+        .contains(&"browser_cookie_decrypted".to_string()));
+    assert!(!result.profiles[0]
+        .diagnostic_codes
+        .iter()
+        .any(|code| code.starts_with("browser_keyring_")));
+    assert_public_browser_json_safe(tmp.path(), &result_json);
+}
+
+#[test]
 fn v10_basic_cookie_decryptor_unavailable_does_not_report_keyring_unavailable() {
     let (tmp, paths) = common::temp_paths();
     create_network_cookie_db(
@@ -471,12 +519,13 @@ fn unknown_encrypted_cookie_material_is_a_safe_non_keyring_failure() {
         "locked-or-wal/schema.sql",
     );
     let connection = Connection::open(&db).expect("open unknown-material db");
-    connection
-        .execute(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, 'codex.example.invalid', 'quota_marker', '', X'666978747572652d756e6b6e6f776e', '/', 20000000000000000, 1, 1, 1)",
-            [],
-        )
-        .expect("insert unknown encrypted row");
+    insert_cookie_row(
+        &connection,
+        "codex.example.invalid",
+        "quota_marker",
+        "",
+        b"fixture-unknown",
+    );
     drop(connection);
 
     let app = browser_app(paths, tmp.path(), FakeDecryptorMode::Success);
@@ -655,12 +704,13 @@ fn live_codex_session_collection_constructs_material_from_v10_basic_cookie() {
         "locked-or-wal/schema.sql",
     );
     let connection = Connection::open(&db).expect("open v10 live-scope fixture db");
-    connection
-        .execute(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'chatgpt_session', '', X'763130666978747572652d636861746770742d6261736963', '/', 20000000000000000, 1, 1, 1)",
-            [],
-        )
-        .expect("insert v10 live-scope cookie");
+    insert_cookie_row(
+        &connection,
+        ".chatgpt.com",
+        "chatgpt_session",
+        "",
+        b"v10fixture-chatgpt-basic",
+    );
     drop(connection);
 
     let collection = browser::collect_session_material(BrowserSessionRequest {
@@ -690,6 +740,182 @@ fn live_codex_session_collection_constructs_material_from_v10_basic_cookie() {
 }
 
 #[test]
+fn live_codex_session_collection_constructs_material_from_plain_v10_basic_cookie() {
+    let (tmp, _paths) = common::temp_paths();
+    let db = create_network_cookie_db(
+        tmp.path(),
+        ".config/google-chrome/Default",
+        "locked-or-wal/schema.sql",
+    );
+    let connection = Connection::open(&db).expect("open v10 live-scope fixture db");
+    insert_cookie_row(
+        &connection,
+        ".chatgpt.com",
+        "chatgpt_session",
+        "",
+        &encrypt_v10_basic(".chatgpt.com", b"fixture-chatgpt-basic"),
+    );
+    drop(connection);
+
+    let collection = browser::collect_session_material(BrowserSessionRequest {
+        providers: vec!["codex".to_string()],
+        settings: Default::default(),
+        roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+        decryptor_mode: BrowserDecryptorMode::Plain,
+    });
+    let material = collection.sessions.get("codex").expect("codex material");
+    let material_debug = format!("{material:?}");
+    let summary_json = serde_json::to_string(&collection.material_summary).expect("summary json");
+
+    assert_eq!(material.cookie_count(), 1);
+    assert_eq!(collection.material_summary.encrypted_value_rows, 1);
+    assert_eq!(collection.material_summary.encrypted_prefixes.v10, 1);
+    assert_eq!(collection.material_summary.usable_session_cookies, 1);
+    assert_eq!(
+        collection.material_summary.decryptor_backend,
+        DecryptorBackend::Plain
+    );
+    assert_eq!(
+        collection.material_summary.decryption_status,
+        DecryptionStatus::Succeeded
+    );
+    assert_eq!(
+        collection.material_summary.decryption_failure_class,
+        DecryptionFailureClass::None
+    );
+    assert!(collection
+        .provider_diagnostic_codes
+        .get("codex")
+        .is_some_and(|codes| codes.contains(&"browser_cookie_found".to_string())
+            && codes.contains(&"browser_cookie_decrypted".to_string())));
+    assert!(!material_debug.contains("chatgpt_session"));
+    assert!(!material_debug.contains("fixture-chatgpt-basic"));
+    assert!(!summary_json.contains("fixture-chatgpt-basic"));
+    assert!(!summary_json.contains("chatgpt_session"));
+    assert_public_browser_json_safe(tmp.path(), &summary_json);
+}
+
+#[test]
+fn malformed_v10_and_wrong_host_hash_fail_closed_with_safe_classes() {
+    for (encrypted_value, expected_class) in [
+        (
+            b"v10short".to_vec(),
+            DecryptionFailureClass::MalformedCiphertext,
+        ),
+        (
+            encrypt_v10_basic("codex.example.invalid", b"fixture-wrong-host"),
+            DecryptionFailureClass::WrongKey,
+        ),
+    ] {
+        let (tmp, _paths) = common::temp_paths();
+        let db = create_network_cookie_db(
+            tmp.path(),
+            ".config/google-chrome/Default",
+            "locked-or-wal/schema.sql",
+        );
+        let connection = Connection::open(&db).expect("open malformed v10 fixture db");
+        insert_cookie_row(
+            &connection,
+            ".chatgpt.com",
+            "plain_live",
+            "fixture-chatgpt-live",
+            b"",
+        );
+        insert_cookie_row(
+            &connection,
+            ".chatgpt.com",
+            "bad_v10_live",
+            "",
+            &encrypted_value,
+        );
+        drop(connection);
+
+        let collection = browser::collect_session_material(BrowserSessionRequest {
+            providers: vec!["codex".to_string()],
+            settings: Default::default(),
+            roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+            decryptor_mode: BrowserDecryptorMode::Plain,
+        });
+        let codes = collection
+            .provider_diagnostic_codes
+            .get("codex")
+            .expect("codex diagnostics");
+        let summary_json =
+            serde_json::to_string(&collection.material_summary).expect("summary json");
+
+        assert!(!collection.sessions.contains_key("codex"));
+        assert!(codes.contains(&"browser_cookie_decryption_failed".to_string()));
+        assert_eq!(collection.material_summary.usable_session_cookies, 0);
+        assert_eq!(
+            collection.material_summary.decryption_status,
+            DecryptionStatus::Failed
+        );
+        assert_eq!(
+            collection.material_summary.decryption_failure_class,
+            expected_class
+        );
+        assert!(!summary_json.contains("plain_live"));
+        assert!(!summary_json.contains("bad_v10_live"));
+        assert!(!summary_json.contains("fixture-chatgpt-live"));
+        assert_public_browser_json_safe(tmp.path(), &summary_json);
+    }
+}
+
+#[test]
+fn unsupported_encrypted_prefixes_classify_without_keyring_or_raw_material() {
+    for (encrypted_value, prefix_counter) in [
+        (b"v20fixture-v20".as_slice(), "v20"),
+        (b"v24fixture-v24".as_slice(), "v24"),
+    ] {
+        let (tmp, _paths) = common::temp_paths();
+        let db = create_network_cookie_db(
+            tmp.path(),
+            ".config/google-chrome/Default",
+            "locked-or-wal/schema.sql",
+        );
+        let connection = Connection::open(&db).expect("open unsupported prefix fixture db");
+        insert_cookie_row(
+            &connection,
+            ".chatgpt.com",
+            "unsupported_live",
+            "",
+            encrypted_value,
+        );
+        drop(connection);
+
+        let collection = browser::collect_session_material(BrowserSessionRequest {
+            providers: vec!["codex".to_string()],
+            settings: Default::default(),
+            roots: BrowserDiscoveryRoots::synthetic_home(tmp.path().to_path_buf()).canonicalized(),
+            decryptor_mode: BrowserDecryptorMode::Plain,
+        });
+        let codes = collection
+            .provider_diagnostic_codes
+            .get("codex")
+            .expect("codex diagnostics");
+        let summary_json =
+            serde_json::to_string(&collection.material_summary).expect("summary json");
+
+        assert!(!collection.sessions.contains_key("codex"));
+        assert!(codes.contains(&"browser_cookie_decryption_unavailable".to_string()));
+        assert!(!codes
+            .iter()
+            .any(|code| code.starts_with("browser_keyring_")));
+        assert_eq!(
+            collection.material_summary.decryption_failure_class,
+            DecryptionFailureClass::UnsupportedFormat
+        );
+        match prefix_counter {
+            "v20" => assert_eq!(collection.material_summary.encrypted_prefixes.v20, 1),
+            "v24" => assert_eq!(collection.material_summary.encrypted_prefixes.v24, 1),
+            _ => unreachable!(),
+        }
+        assert!(!summary_json.contains("unsupported_live"));
+        assert_public_browser_json_safe(tmp.path(), &summary_json);
+    }
+}
+
+#[test]
 fn default_plain_backend_uses_plaintext_but_fails_closed_for_encrypted_rows() {
     let (tmp, _paths) = common::temp_paths();
     let db = create_network_cookie_db(
@@ -698,18 +924,20 @@ fn default_plain_backend_uses_plaintext_but_fails_closed_for_encrypted_rows() {
         "locked-or-wal/schema.sql",
     );
     let connection = Connection::open(&db).expect("open mixed live-scope fixture db");
-    connection
-        .execute(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'plain_live', 'fixture-chatgpt-live', X'', '/', 20000000000000000, 1, 1, 1)",
-            [],
-        )
-        .expect("insert plaintext live-scope cookie");
-    connection
-        .execute(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'encrypted_live', '', X'763131666978747572652d636861746770742d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
-            [],
-        )
-        .expect("insert encrypted live-scope cookie");
+    insert_cookie_row(
+        &connection,
+        ".chatgpt.com",
+        "plain_live",
+        "fixture-chatgpt-live",
+        b"",
+    );
+    insert_cookie_row(
+        &connection,
+        ".chatgpt.com",
+        "encrypted_live",
+        "",
+        b"v11fixture-chatgpt-keyring",
+    );
     drop(connection);
 
     let collection = browser::collect_session_material(BrowserSessionRequest {
@@ -771,18 +999,20 @@ fn secret_service_probe_statuses_map_without_prompting_or_extracting_secrets() {
             "locked-or-wal/schema.sql",
         );
         let connection = Connection::open(&db).expect("open keyring probe fixture db");
-        connection
-            .execute(
-                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', 'encrypted_live', '', X'763131666978747572652d636861746770742d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
-                [],
-            )
-            .expect("insert keyring probe cookie");
-        connection
-            .execute(
-                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, 'codex.example.invalid', 'quota_marker', '', X'763131666978747572652d636f6465782d6b657972696e67', '/', 20000000000000000, 1, 1, 1)",
-                [],
-            )
-            .expect("insert synthetic keyring probe cookie");
+        insert_cookie_row(
+            &connection,
+            ".chatgpt.com",
+            "encrypted_live",
+            "",
+            b"v11fixture-chatgpt-keyring",
+        );
+        insert_cookie_row(
+            &connection,
+            "codex.example.invalid",
+            "quota_marker",
+            "",
+            b"v11fixture-codex-keyring",
+        );
         drop(connection);
 
         let collection = browser::collect_session_material(BrowserSessionRequest {
@@ -953,7 +1183,76 @@ fn create_network_cookie_db(home: &Path, profile_relative: &str, fixture: &str) 
     connection
         .execute_batch(&fixture_sql(fixture))
         .expect("execute fixture sql");
+    match fixture {
+        "basic-v10/schema.sql" => insert_cookie_row(
+            &connection,
+            "codex.example.invalid",
+            "quota_marker",
+            "",
+            &encrypt_v10_basic("codex.example.invalid", b"fixture-basic-alpha"),
+        ),
+        "encrypted-fake/schema.sql" => {
+            insert_cookie_row(
+                &connection,
+                "codex.example.invalid",
+                "quota_marker",
+                "",
+                b"v11fixture-encrypted-alpha",
+            );
+            insert_cookie_row(
+                &connection,
+                "other.example.invalid",
+                "quota_marker",
+                "",
+                b"v11fixture-encrypted-distractor",
+            );
+        }
+        _ => {}
+    }
     db
+}
+
+fn insert_cookie_row(
+    connection: &Connection,
+    host_key: &str,
+    name: &str,
+    value: &str,
+    encrypted_value: &[u8],
+) {
+    connection
+        .execute(
+            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, ?1, ?2, ?3, ?4, '/', 20000000000000000, 1, 1, 1)",
+            params![host_key, name, value, encrypted_value],
+        )
+        .expect("insert synthetic cookie row");
+}
+
+fn encrypt_v10_basic(host_key: &str, value: &[u8]) -> Vec<u8> {
+    type Aes128CbcEncryptor = cbc::Encryptor<Aes128>;
+
+    let mut key = [0_u8; CHROMIUM_AES_BLOCK_LEN];
+    pbkdf2_hmac::<Sha1>(
+        CHROMIUM_BASIC_PASSWORD,
+        CHROMIUM_BASIC_SALT,
+        CHROMIUM_BASIC_ITERATIONS,
+        &mut key,
+    );
+
+    let mut plaintext = Vec::new();
+    plaintext.extend_from_slice(Sha256::digest(host_key.as_bytes()).as_slice());
+    plaintext.extend_from_slice(value);
+
+    let padded_len = ((plaintext.len() / CHROMIUM_AES_BLOCK_LEN) + 1) * CHROMIUM_AES_BLOCK_LEN;
+    let mut buffer = vec![0_u8; padded_len];
+    buffer[..plaintext.len()].copy_from_slice(&plaintext);
+    let ciphertext = Aes128CbcEncryptor::new_from_slices(&key, &CHROMIUM_BASIC_IV)
+        .expect("fixed key and IV lengths")
+        .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+        .expect("test encryption");
+
+    let mut encrypted = CHROMIUM_V10_PREFIX.to_vec();
+    encrypted.extend_from_slice(ciphertext);
+    encrypted
 }
 
 fn fixture_sql(relative: &str) -> String {

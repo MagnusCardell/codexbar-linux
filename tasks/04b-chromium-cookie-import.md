@@ -131,6 +131,8 @@ provider refresh behavior:
 - Synthetic `v10` and `v11` encrypted rows are covered by fake decryptor tests.
   The production/env backend is `plain`, so encrypted rows fail closed with
   decryption/keyring diagnostics instead of fake-decrypting real browser data.
+  Task 04B.3 supersedes this for the verified Chromium Linux basic/plain `v10`
+  path only.
 - Unknown encrypted prefixes map to
   `browser_cookie_decryption_unavailable` without claiming a keyring backend.
 - A noninteractive Secret Service probe abstraction maps unavailable, locked,
@@ -151,6 +153,46 @@ Codex throwaway recon is rerun against a signed-in throwaway profile. The
 summary is designed to record whether `--password-store=basic` produced
 plaintext rows or encrypted rows, and which encrypted prefix/backend state is
 blocking any provider web fetch.
+
+## Task 04B.3 Result
+
+Implemented Chromium Linux basic/plain `v10` cookie decryption as a daemon-only
+extension of the existing plain backend:
+
+- Verified the supported path against Chromium Linux OSCrypt behavior: `v10`
+  encrypted cookie values from the basic/plain password-store path use
+  Chromium's hardcoded basic OSCrypt key source, PBKDF2-HMAC-SHA1,
+  AES-128-CBC, Chromium's fixed IV, and PKCS#7 padding. Cookie DB version 24+
+  encrypted values carry a SHA-256 `host_key` prefix in the decrypted bytes;
+  the daemon verifies and strips that prefix before cookie validation.
+- Added exactly pinned pure RustCrypto crates (`aes`, `cbc`, `pbkdf2`, `sha1`,
+  `sha2`). No OpenSSL/native keychain, Secret Service, KWallet, Shell, D-Bus
+  XML, JSON schema, default refresh, or localhost/TCP changes were made.
+- The decryptor rejects malformed lengths, bad padding, unsupported prefixes,
+  wrong host hash, invalid UTF-8, and invalid cookie material without printing
+  raw keys, encrypted bytes, decrypted bytes, cookie names, Cookie headers, or
+  profile paths.
+- `v11` remains keyring-needed/Secret Service future work. `v20`,
+  encrypted-value-prefix `v24`, and unknown prefixes remain unsupported and
+  fail closed.
+- Browser material summaries now include safe `decryptionFailureClass` metadata
+  so ignored live recon can distinguish `keyring_needed`,
+  `unsupported_format`, `malformed_ciphertext`, `wrong_key`,
+  `invalid_material`, `header_too_large`, `too_many_cookies`, `unavailable`,
+  and generic `failed` without exposing raw material.
+- Provider-scoped invalid cookie material now fails closed instead of being
+  silently skipped, preserving the rule that partial Cookie headers are not
+  sent when any relevant row fails.
+- Additional redaction and cookie path tests reject token assignment strings
+  and sibling-prefix path matches before a Cookie header can be built.
+- Gated live Codex recon against the signed-in throwaway profile was rerun.
+  The result still had `usableSessionCookies=0` and `webFetch=not_attempted`,
+  but it advanced from decryption unavailable to
+  `decryptionFailureClass=invalid_material`: all 19 provider-domain encrypted
+  rows were `v10`, the plain backend reached UTF-8 decrypted material, and a
+  safe aggregate-only check showed 2 rows failing value-character validation.
+  Parser and HTTP transport remain out of scope until cookie-name/header
+  material policy is verified.
 
 ## Checks To Run
 

@@ -5,7 +5,10 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+use aes::Aes128;
 use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
+use codexbar_linuxd::browser::cookie_store::DecryptionFailureClass;
 use codexbar_linuxd::browser::diagnostics as browser_diagnostics;
 use codexbar_linuxd::browser::keyring::{
     BrowserDecryptorMode, DecryptionStatus, DecryptorBackend, FakeDecryptorMode,
@@ -25,12 +28,21 @@ use codexbar_linuxd::web::diagnostics;
 use codexbar_linuxd::web::policy::CodexWebPolicy;
 use codexbar_linuxd::web::providers::codex;
 use codexbar_linuxd::web::{self, WebRefreshRequest};
-use rusqlite::Connection;
+use pbkdf2::pbkdf2_hmac;
+use rusqlite::{params, Connection};
+use sha1::Sha1;
+use sha2::{Digest, Sha256};
 
 const NOW: &str = "2026-05-02T12:00:00Z";
 const LINUX_WEB_LIVE_HTTP_DISABLED: &str = "linux_web_live_http_disabled";
 const LINUX_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
 const CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"providers":["codex"],"sourceAdapterPolicy":{"mode":"only","adapters":["linux_web"]}}"#;
+const CHROMIUM_V10_PREFIX: &[u8] = b"v10";
+const CHROMIUM_BASIC_PASSWORD: &[u8] = b"peanuts";
+const CHROMIUM_BASIC_SALT: &[u8] = b"saltysalt";
+const CHROMIUM_BASIC_ITERATIONS: u32 = 1;
+const CHROMIUM_AES_BLOCK_LEN: usize = 16;
+const CHROMIUM_BASIC_IV: [u8; CHROMIUM_AES_BLOCK_LEN] = [b' '; CHROMIUM_AES_BLOCK_LEN];
 
 #[test]
 fn codex_policy_allows_only_static_dashboard_target() {
@@ -639,6 +651,10 @@ fn live_recon_summary_includes_safe_cookie_material_counts_only() {
         summary.cookie_material.decryption_status,
         DecryptionStatus::Unavailable
     );
+    assert_eq!(
+        summary.cookie_material.decryption_failure_class,
+        DecryptionFailureClass::KeyringNeeded
+    );
     assert!(!summary_json.contains("plain_live"));
     assert!(!summary_json.contains("encrypted_live"));
     assert!(!summary_json.contains("fixture-chatgpt-live"));
@@ -986,6 +1002,50 @@ async fn live_transport_with_plaintext_cookie_builds_session_material() {
 }
 
 #[tokio::test]
+async fn live_transport_plain_backend_decrypts_v10_basic_cookie_and_fetches() {
+    let (tmp, paths) = common::temp_paths();
+    create_chatgpt_cookie_db(tmp.path(), &[ChatgptCookieRow::encrypted_v10_basic()]);
+    let app = App::new_with_runtime(
+        paths,
+        AppRuntime::production()
+            .with_browser_roots(BrowserDiscoveryRoots::synthetic_home(
+                tmp.path().to_path_buf(),
+            ))
+            .with_codex_web_live_transport_for_tests(true)
+            .with_codex_web_fixture(CodexWebFixture::Success),
+    )
+    .expect("app");
+    let start = app
+        .start_refresh(CODEX_LIVE_WEB_REFRESH_OPTIONS_JSON)
+        .expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    let completion = app.finish_refresh(&refresh_id).await.expect("refresh");
+    let snapshot: Snapshot = serde_json::from_str(&completion.snapshot_json).expect("snapshot");
+    let result: RefreshResult = serde_json::from_str(&completion.result_json).expect("result");
+    let provider = &snapshot.providers[0];
+    let payload =
+        serde_json::to_string(&(&snapshot, &result, &completion.provider_events)).expect("payload");
+
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert!(result.cache_written);
+    assert!(provider
+        .diagnostic_codes
+        .contains(&browser_diagnostics::COOKIE_DECRYPTED.to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&diagnostics::FETCH_STARTED.to_string()));
+    assert!(!provider
+        .diagnostic_codes
+        .contains(&diagnostics::COOKIE_ABSENT.to_string()));
+    assert!(!payload.contains("v10_basic_live"));
+    assert!(!payload.contains("fixture-chatgpt-basic"));
+    common::assert_public_json_safe(&payload);
+    assert_no_live_web_secret_markers("v10 basic live transport payload", &payload);
+}
+
+#[tokio::test]
 async fn live_transport_plain_backend_does_not_fetch_with_encrypted_cookie_only() {
     let (tmp, paths) = common::temp_paths();
     create_chatgpt_cookie_db(
@@ -1294,11 +1354,11 @@ fn refresh_for_response(response: WebResponse) -> codexbar_linuxd::web::WebRefre
     web::refresh_with_client(web_request(Some(session())), &client).expect("web refresh")
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ChatgptCookieRow<'a> {
     name: &'a str,
     value: &'a str,
-    encrypted_hex: &'a str,
+    encrypted_value: Vec<u8>,
 }
 
 impl<'a> ChatgptCookieRow<'a> {
@@ -1306,7 +1366,7 @@ impl<'a> ChatgptCookieRow<'a> {
         Self {
             name,
             value,
-            encrypted_hex: "",
+            encrypted_value: Vec::new(),
         }
     }
 
@@ -1314,7 +1374,15 @@ impl<'a> ChatgptCookieRow<'a> {
         Self {
             name,
             value: "",
-            encrypted_hex: "763131666978747572652d636861746770742d6b657972696e67",
+            encrypted_value: b"v11fixture-chatgpt-keyring".to_vec(),
+        }
+    }
+
+    fn encrypted_v10_basic() -> Self {
+        Self {
+            name: "v10_basic_live",
+            value: "",
+            encrypted_value: encrypt_v10_basic(".chatgpt.com", b"fixture-chatgpt-basic"),
         }
     }
 }
@@ -1355,15 +1423,42 @@ CREATE TABLE cookies(
         )
         .expect("chatgpt fixture schema");
     for row in rows {
-        let sql = format!(
-            "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', ?1, ?2, X'{}', '/', 20000000000000000, 1, 1, 1)",
-            row.encrypted_hex
-        );
         connection
-            .execute(&sql, [row.name, row.value])
+            .execute(
+                "INSERT INTO cookies(creation_utc, host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc) VALUES(1, '.chatgpt.com', ?1, ?2, ?3, '/', 20000000000000000, 1, 1, 1)",
+                params![row.name, row.value, row.encrypted_value.as_slice()],
+            )
             .expect("insert chatgpt fixture cookie");
     }
     db
+}
+
+fn encrypt_v10_basic(host_key: &str, value: &[u8]) -> Vec<u8> {
+    type Aes128CbcEncryptor = cbc::Encryptor<Aes128>;
+
+    let mut key = [0_u8; CHROMIUM_AES_BLOCK_LEN];
+    pbkdf2_hmac::<Sha1>(
+        CHROMIUM_BASIC_PASSWORD,
+        CHROMIUM_BASIC_SALT,
+        CHROMIUM_BASIC_ITERATIONS,
+        &mut key,
+    );
+
+    let mut plaintext = Vec::new();
+    plaintext.extend_from_slice(Sha256::digest(host_key.as_bytes()).as_slice());
+    plaintext.extend_from_slice(value);
+
+    let padded_len = ((plaintext.len() / CHROMIUM_AES_BLOCK_LEN) + 1) * CHROMIUM_AES_BLOCK_LEN;
+    let mut buffer = vec![0_u8; padded_len];
+    buffer[..plaintext.len()].copy_from_slice(&plaintext);
+    let ciphertext = Aes128CbcEncryptor::new_from_slices(&key, &CHROMIUM_BASIC_IV)
+        .expect("fixed key and IV lengths")
+        .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+        .expect("test encryption");
+
+    let mut encrypted = CHROMIUM_V10_PREFIX.to_vec();
+    encrypted.extend_from_slice(ciphertext);
+    encrypted
 }
 
 fn live_throwaway_fake_home() -> Option<PathBuf> {
