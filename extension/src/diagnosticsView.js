@@ -25,9 +25,9 @@ export function createDiagnosticsActionRow(diagnostics, actions, providerId = 'g
         x_expand: true,
     }));
     if (activeDiagnostics?.payload) {
-        header.add_child(actionButton('Copy', () => actions.copyDiagnostics(activeDiagnostics.payload)));
+        header.add_child(actionButton('Copy diagnostics', () => actions.copyDiagnostics(activeDiagnostics.payload)));
     } else {
-        header.add_child(actionButton('Load', () => actions.loadDiagnostics(diagnosticsProviderId)));
+        header.add_child(actionButton('Load diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId)));
     }
     box.add_child(header);
 
@@ -58,14 +58,14 @@ export function createDiagnosticsActionRow(diagnostics, actions, providerId = 'g
 
 export function createDiagnosticsButton(diagnostics, actions, providerId = 'global') {
     const diagnosticsProviderId = providerId || 'global';
-    return actionButton('Diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId));
+    return actionButton('Load diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId));
 }
 
 export function createDiagnosticsCopyButton(diagnostics, actions, providerId = 'global') {
     const activeDiagnostics = activeDiagnosticsForProvider(diagnostics, providerId);
     if (!activeDiagnostics?.payload)
         return null;
-    return actionButton('Copy', () => actions.copyDiagnostics(activeDiagnostics.payload));
+    return actionButton('Copy diagnostics', () => actions.copyDiagnostics(activeDiagnostics.payload));
 }
 
 export function createDiagnosticsDetails(diagnostics, providerId = 'global') {

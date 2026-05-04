@@ -38,7 +38,7 @@ export const STATE_LABELS = {
     ok: 'Up to date',
     stale: 'Stale data',
     unauthenticated: 'Sign-in required',
-    cookie_rejected: 'Browser session rejected',
+    cookie_rejected: 'Session rejected',
     missing_dependency: 'Dependency missing',
     provider_unavailable: 'Provider unavailable',
     parse_error: 'Could not read provider data',

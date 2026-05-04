@@ -85,7 +85,7 @@ async fn stale_cache_fallback_reports_partial_refresh() {
         .as_array()
         .expect("diagnostic codes")
         .iter()
-        .any(|code| code == "stale_cache_fallback"));
+        .any(|code| code == "stale_cache_used"));
 
     let snapshot: serde_json::Value =
         serde_json::from_str(&completion.snapshot_json).expect("snapshot json");

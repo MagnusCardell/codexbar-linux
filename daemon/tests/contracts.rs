@@ -159,6 +159,20 @@ fn app_getters_return_schema_shaped_redacted_json() {
     assert!(!info.capabilities.linux_web_adapters);
     assert_eq!(info.capabilities.cost, info.upstream_cli.available);
     assert!(info.capabilities.settings_patch);
+    for path in [
+        info.paths.config_file.as_deref(),
+        info.paths.cache_file.as_deref(),
+        info.paths.upstream_config_file.as_deref(),
+        info.upstream_cli.path.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert!(
+            !path.starts_with("~/") && !path.contains("/home/") && !path.contains("/Users/"),
+            "daemon info leaked local path-shaped value: {path}"
+        );
+    }
 
     let diagnostics: serde_json::Value =
         serde_json::from_str(&app.get_diagnostics_json("").expect("diagnostics json")).unwrap();

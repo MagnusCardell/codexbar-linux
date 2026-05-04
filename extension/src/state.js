@@ -28,55 +28,55 @@ const STATE_META = {
     stale: {
         label: STATE_LABELS.stale,
         severity: 'warning',
-        description: 'Showing cached usage data',
+        description: 'Showing cached data.',
         iconName: 'appointment-soon-symbolic',
     },
     unauthenticated: {
         label: STATE_LABELS.unauthenticated,
         severity: 'warning',
-        description: 'Provider needs a valid sign-in',
+        description: 'Sign in with the upstream CLI, then refresh.',
         iconName: 'dialog-password-symbolic',
     },
     cookie_rejected: {
-        label: STATE_LABELS.cookie_rejected,
+        label: 'Session unavailable',
         severity: 'warning',
-        description: 'Browser session was rejected',
+        description: 'Use upstream CLI setup, then refresh.',
         iconName: 'dialog-warning-symbolic',
     },
     missing_dependency: {
-        label: STATE_LABELS.missing_dependency,
+        label: 'CLI setup needed',
         severity: 'warning',
-        description: 'Required local dependency is unavailable',
+        description: 'Install or select the upstream CodexBar CLI, then refresh.',
         iconName: 'dialog-warning-symbolic',
     },
     provider_unavailable: {
         label: STATE_LABELS.provider_unavailable,
         severity: 'warning',
-        description: 'Provider or adapter is unavailable',
+        description: 'Check provider setup in the upstream CLI, then refresh.',
         iconName: 'network-offline-symbolic',
     },
     parse_error: {
-        label: STATE_LABELS.parse_error,
+        label: 'Provider data unreadable',
         severity: 'error',
-        description: 'Provider data was not readable',
+        description: 'Update or rerun the upstream CLI, then refresh.',
         iconName: 'dialog-error-symbolic',
     },
     timeout: {
-        label: STATE_LABELS.timeout,
+        label: 'Refresh timed out',
         severity: 'warning',
-        description: 'Provider refresh timed out',
+        description: 'Try Refresh again. If it repeats, open diagnostics.',
         iconName: 'alarm-symbolic',
     },
     error: {
         label: STATE_LABELS.error,
         severity: 'error',
-        description: 'Refresh did not complete',
+        description: 'Refresh failed. Try Refresh again or open diagnostics.',
         iconName: 'dialog-error-symbolic',
     },
     daemon_unavailable: {
         label: STATE_LABELS.daemon_unavailable,
         severity: 'error',
-        description: 'D-Bus service is unavailable',
+        description: 'Start the CodexBar daemon, then refresh.',
         iconName: 'network-offline-symbolic',
     },
 };
@@ -84,13 +84,13 @@ const STATE_META = {
 const SOURCE_LABELS = {
     api: 'API',
     local: 'Local',
-    web: 'Web',
+    web: 'Unsupported source',
     unknown: 'Unknown',
 };
 
 const ADAPTER_LABELS = {
     upstream_cli: 'Upstream CLI',
-    linux_web: 'Linux web',
+    linux_web: 'Unsupported adapter',
     cache: 'Cache fallback',
     fixture: 'Fixture',
     synthetic: 'Synthetic',
@@ -613,8 +613,6 @@ export function providerRow(provider, options = {}) {
         usageSections: usageSectionRows(meterRows),
         costRows,
         diagnosticsSummary: safeDisplay(provider?.diagnosticsSummary || ''),
-        dashboardUrl: safeUrl(provider?.dashboardUrl || ''),
-        statusPageUrl: safeUrl(provider?.status?.url || ''),
     };
 }
 
@@ -974,10 +972,7 @@ export function providerStatusText(provider) {
     if (provider.state === 'ok')
         return '';
 
-    return safeDisplay(
-        provider?.status?.description || provider?.diagnosticsSummary || '',
-        meta.description,
-    ) || meta.description;
+    return providerSetupStatusText(provider) || meta.description;
 }
 
 export function headerStatusText(state, stale, refreshing, generatedAt) {
@@ -1019,11 +1014,10 @@ export function footerStatusText(daemon, capabilities = null) {
     const upstream = daemon?.upstreamCli ?? null;
     return [
         `Daemon ${calmDaemonState(daemonState)}`,
-        upstream
-            ? `CLI ${upstream.available ? 'available' : 'unavailable'}`
-            : 'CLI unknown',
+        upstreamCliStatusText(upstream),
         capabilityStatusText('Cost', capabilities, 'cost'),
         browserImportStatusText(capabilities),
+        'No web adapters',
     ].join(' · ');
 }
 
@@ -1828,6 +1822,49 @@ function providerPlanLabel(provider, source, adapter) {
     return '';
 }
 
+function providerSetupStatusText(provider) {
+    if (isRateLimitedProvider(provider))
+        return 'Rate limit active. Wait, then refresh.';
+
+    const state = provider?.state ?? 'error';
+    if (state === 'stale')
+        return 'Showing cached data.';
+    if (state === 'unauthenticated')
+        return 'Sign in with the upstream CLI, then refresh.';
+    if (state === 'cookie_rejected')
+        return 'Use upstream CLI setup, then refresh.';
+    if (state === 'missing_dependency') {
+        const codes = Array.isArray(provider?.diagnosticCodes) ? provider.diagnosticCodes : [];
+        if (codes.includes('daemon_unavailable'))
+            return stateMeta('daemon_unavailable').description;
+        return stateMeta('missing_dependency').description;
+    }
+    if (state === 'provider_unavailable')
+        return stateMeta('provider_unavailable').description;
+    if (state === 'parse_error')
+        return stateMeta('parse_error').description;
+    if (state === 'timeout')
+        return stateMeta('timeout').description;
+    if (state === 'error')
+        return stateMeta('error').description;
+    if (state === 'loading')
+        return stateMeta('loading').description;
+    return stateMeta(state).description;
+}
+
+function isRateLimitedProvider(provider) {
+    const values = [
+        provider?.status?.indicator,
+        provider?.status?.description,
+        provider?.diagnosticsSummary,
+        ...(Array.isArray(provider?.diagnosticCodes) ? provider.diagnosticCodes : []),
+    ]
+        .filter(value => typeof value === 'string')
+        .map(value => value.toLowerCase());
+
+    return values.some(value => value.includes('rate') && value.includes('limit'));
+}
+
 function usageSectionTitle(row) {
     if (row?.key === 'primary')
         return safeDisplay(row.label || 'Session', 'Session');
@@ -1875,6 +1912,12 @@ function calmDaemonState(state) {
     if (state === 'error')
         return 'unavailable';
     return 'unknown';
+}
+
+function upstreamCliStatusText(upstream) {
+    if (!upstream)
+        return 'Upstream CLI unknown';
+    return `Upstream CLI ${upstream.available ? 'available' : 'missing'}`;
 }
 
 function capabilityStatusText(label, capabilities, key) {

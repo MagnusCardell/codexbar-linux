@@ -49,12 +49,12 @@ export default class CodexBarPreferences extends ExtensionPreferences {
     _buildPlaceholderGroup() {
         const group = new Adw.PreferencesGroup({
             title: 'Daemon settings',
-            description: 'Provider, refresh, diagnostics, and reserved unsupported browser-import settings are daemon-owned.',
+            description: 'Provider, refresh, and diagnostics settings are daemon-owned.',
         });
 
         const row = new Adw.ActionRow({
             title: 'Daemon configuration',
-            subtitle: 'This vertical slice only edits Shell presentation preferences.',
+            subtitle: 'Preferences edit only Shell presentation settings.',
         });
         row.activatable = false;
         group.add(row);

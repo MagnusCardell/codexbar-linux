@@ -60,10 +60,15 @@ Task 05C status: the development `.deb` package path is wired for local v0.1
 smoke testing and now has release-candidate package hardening for stripped,
 path-remapped daemon binaries. Non-mutating package inspection, apt dependency
 simulation, isolated D-Bus activation, missing-upstream-CLI behavior, and
-release-mode live upstream-CLI D-Bus smoke have been validated. Signed
-repository distribution, upgrade testing, and recorded root-backed Ubuntu
-24.04/26.04 package install/remove plus packaged GNOME panel/popover evidence
-remain release sign-off work.
+release-mode live upstream-CLI D-Bus smoke have been validated. Task 05C.1
+recorded root-backed package install, installed file layout,
+`/usr/bin/codexbar-linuxd --check`, D-Bus activation, missing-upstream-CLI
+degraded behavior, upstream-CLI refresh after `CODEXBAR_CLI` systemd user
+environment setup, system-wide extension discovery from `/usr/share` after
+logout/login, extension enablement, top-bar indicator appearance, and popover
+refresh. Signed repository distribution, upgrade testing, full Ubuntu 24.04/26.04
+matrix coverage, and rerunning package remove/purge after the final successful
+package-extension smoke remain release sign-off work.
 
 Exit criteria:
 
@@ -82,6 +87,14 @@ Deliverables:
 - Provider state and diagnostics polish.
 - Local cost/usage display improvements where upstream data is available.
 - `TestBrowserImport` remains schema-valid `not_implemented` and side-effect free while retained in v1 D-Bus.
+- Practical upstream CLI setup docs.
+- Implementation-facing upstream CLI UX state/copy matrix.
+
+Task 05D status: upstream CLI first-run, missing/broken CLI, timeout, parse,
+provider auth/dependency/unavailable, cost-unavailable, stale-cache, success,
+and partial-success states are documented in `docs/upstream-cli-ux.md`.
+`docs/upstream-cli-setup.md` documents the supported upstream CLI setup and
+systemd user environment flow for the packaged daemon.
 
 Exit criteria:
 

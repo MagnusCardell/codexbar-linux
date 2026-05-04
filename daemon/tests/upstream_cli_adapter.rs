@@ -184,10 +184,140 @@ esac
 
     let refresh = run_adapter(binary, vec!["codex".to_string()], short_timeouts()).await;
     assert!(tmp.path().is_dir());
-    assert_eq!(refresh.snapshot.providers[0].state, ProviderState::Error);
+    assert_eq!(
+        refresh.snapshot.providers[0].state,
+        ProviderState::ProviderUnavailable
+    );
     assert!(refresh.snapshot.providers[0]
         .diagnostic_codes
         .contains(&"upstream_cli_provider_error".to_string()));
+}
+
+#[tokio::test]
+async fn provider_error_payload_maps_to_provider_unavailable_without_raw_payload() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider all")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' '[{"provider":"codex","error":{"kind":"network_error","message":"provider temporarily unavailable for raw.user@example.com"},"source":"cli"}]'
+    exit 0
+    ;;
+esac
+"#,
+    );
+
+    let refresh = run_adapter(binary, vec!["codex".to_string()], short_timeouts()).await;
+    assert!(tmp.path().is_dir());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::ProviderUnavailable);
+    assert_eq!(
+        provider.diagnostic_codes,
+        vec!["upstream_cli_provider_unavailable".to_string()]
+    );
+    assert_eq!(
+        provider.diagnostics_summary.as_deref(),
+        Some("Provider data was unavailable from CodexBar CLI.")
+    );
+    let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+    common::assert_schema("snapshot.schema.json", &snapshot_json);
+    common::assert_public_json_safe(&snapshot_json);
+    assert!(!snapshot_json.contains("raw.user@example.com"));
+}
+
+#[tokio::test]
+async fn provider_error_payload_maps_common_upstream_messages_to_safe_states() {
+    let cases = [
+        (
+            "CLI session not found for raw.user@example.com. Run login/auth.",
+            ProviderState::Unauthenticated,
+            "upstream_cli_unauthenticated",
+            "Provider sign-in is required in the upstream CLI.",
+        ),
+        (
+            "provider CLI command not found",
+            ProviderState::MissingDependency,
+            "upstream_cli_provider_cli_missing",
+            "Provider CLI dependency was not found.",
+        ),
+        (
+            "provider is rate limited",
+            ProviderState::ProviderUnavailable,
+            "upstream_cli_provider_rate_limited",
+            "Provider is rate limited. Try again later.",
+        ),
+        (
+            "Source 'cli' is not supported",
+            ProviderState::ProviderUnavailable,
+            "upstream_cli_capability_unimplemented",
+            "Requested provider source is not available through CodexBar CLI.",
+        ),
+        (
+            "not supported on Linux; macOS only",
+            ProviderState::ProviderUnavailable,
+            "upstream_cli_unsupported_source",
+            "Requested provider source is not available on Linux through CodexBar CLI.",
+        ),
+    ];
+
+    for (message, expected_state, expected_code, expected_summary) in cases {
+        let payload = serde_json::json!([
+            {
+                "provider": "codex",
+                "error": {
+                    "kind": "provider",
+                    "message": message
+                },
+                "source": "cli"
+            }
+        ]);
+        let script = format!(
+            r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider all")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *)
+    cat <<'JSON'
+{payload}
+JSON
+    exit 0
+    ;;
+esac
+"#,
+        );
+        let (tmp, binary) = fake_codexbar(&script);
+        let refresh = run_adapter(binary, vec!["codex".to_string()], short_timeouts()).await;
+        assert!(tmp.path().is_dir());
+        let provider = &refresh.snapshot.providers[0];
+        assert_eq!(provider.state, expected_state, "message: {message}");
+        assert_eq!(
+            provider.diagnostic_codes,
+            vec![expected_code.to_string()],
+            "message: {message}"
+        );
+        assert_eq!(
+            provider.diagnostics_summary.as_deref(),
+            Some(expected_summary),
+            "message: {message}"
+        );
+        let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+        common::assert_public_json_safe(&snapshot_json);
+        assert!(!snapshot_json.contains("raw.user@example.com"));
+        assert!(!snapshot_json.contains(message));
+    }
 }
 
 #[tokio::test]
@@ -225,6 +355,16 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
     assert_eq!(snapshot["providers"][0]["provider"], "codex");
     assert_eq!(snapshot["providers"][0]["sourceAdapter"], "upstream_cli");
     assert_eq!(snapshot["providers"][0]["state"], "ok");
+    let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_no_warning_or_error_diagnostics(&diagnostics_json);
+    let provider_diagnostics_json = app
+        .get_diagnostics_json("codex")
+        .expect("provider diagnostics");
+    common::assert_schema("diagnostics.schema.json", &provider_diagnostics_json);
+    common::assert_public_json_safe(&provider_diagnostics_json);
+    assert_no_warning_or_error_diagnostics(&provider_diagnostics_json);
 
     let log = fs::read_to_string(&log_path).expect("command log");
     assert!(
@@ -364,6 +504,15 @@ async fn app_refresh_missing_upstream_cli_returns_schema_valid_missing_dependenc
         "upstream_cli_missing"
     );
     assert_eq!(result["status"], "error");
+
+    let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_diagnostic_message_contains(
+        &diagnostics_json,
+        "upstream_cli_missing",
+        "Install upstream CodexBar CLI",
+    );
 }
 
 #[tokio::test]
@@ -385,7 +534,7 @@ async fn app_refresh_not_executable_upstream_cli_returns_clear_missing_dependenc
     assert_eq!(snapshot["providers"][0]["state"], "missing_dependency");
     assert_eq!(
         snapshot["providers"][0]["diagnosticsSummary"],
-        "Configured CodexBar CLI is not executable"
+        "Configured CodexBar CLI path is not executable."
     );
     assert_eq!(
         snapshot["daemon"]["upstreamCli"]["diagnosticCode"],
@@ -396,6 +545,15 @@ async fn app_refresh_not_executable_upstream_cli_returns_clear_missing_dependenc
         .expect("diagnostic codes")
         .iter()
         .any(|code| code == "upstream_cli_not_executable"));
+
+    let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_diagnostic_message_contains(
+        &diagnostics_json,
+        "upstream_cli_not_executable",
+        "path is not executable",
+    );
 }
 
 #[tokio::test]
@@ -435,7 +593,90 @@ async fn stale_cache_fallback_after_cli_disappears_reports_current_cli_state() {
         .any(|code| code == "upstream_cli_missing"));
     assert!(diagnostic_codes
         .iter()
-        .any(|code| code == "stale_cache_fallback"));
+        .any(|code| code == "stale_cache_used"));
+    let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_diagnostic_message_contains(
+        &diagnostics_json,
+        "stale_cache_used",
+        "Showing cached usage data.",
+    );
+}
+
+#[tokio::test]
+async fn stale_cache_fallback_after_cli_timeout_preserves_cached_snapshot() {
+    let (tmp, mut paths) = common::temp_paths();
+    let cache = SnapshotCache::new(paths.cache_dir.clone(), paths.cache_file.clone());
+    let now = codexbar_linuxd::clock::now_rfc3339();
+    let cached = fixtures::refreshed_snapshot("cached-ok", &now, &now).expect("snapshot");
+    cache.store(&cached).expect("cache store");
+    let (fake_tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider all")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' 'provider request timed out' >&2
+    exit 1
+    ;;
+esac
+"#,
+    );
+    paths.upstream_cli_path = Some(binary);
+
+    let app = App::new(paths).expect("app starts");
+    let completion = run_app_refresh(
+        &app,
+        r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":true}}"#,
+    )
+    .await;
+    assert!(tmp.path().is_dir());
+    assert!(fake_tmp.path().is_dir());
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+    common::assert_public_json_safe(&completion.snapshot_json);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(snapshot["stale"], true);
+    assert_eq!(snapshot["providers"][0]["state"], "stale");
+    assert_eq!(snapshot["daemon"]["upstreamCli"]["available"], true);
+    let diagnostic_codes = result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes");
+    assert!(diagnostic_codes
+        .iter()
+        .any(|code| code == "upstream_cli_timeout"));
+    assert!(diagnostic_codes
+        .iter()
+        .any(|code| code == "stale_cache_used"));
+    let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
+    common::assert_schema("diagnostics.schema.json", &diagnostics_json);
+    common::assert_public_json_safe(&diagnostics_json);
+    assert_diagnostic_message_contains(
+        &diagnostics_json,
+        "stale_cache_used",
+        "Showing cached usage data.",
+    );
+    let provider_diagnostics_json = app
+        .get_diagnostics_json("codex")
+        .expect("provider diagnostics");
+    common::assert_schema("diagnostics.schema.json", &provider_diagnostics_json);
+    common::assert_public_json_safe(&provider_diagnostics_json);
+    assert_diagnostic_message_contains(
+        &provider_diagnostics_json,
+        "upstream_cli_timeout",
+        "timed out",
+    );
 }
 
 #[tokio::test]
@@ -492,10 +733,81 @@ esac
         .contains(&"upstream_cli_provider_error".to_string()));
     assert!(provider
         .diagnostic_codes
-        .contains(&"upstream_cli_timeout".to_string()));
+        .contains(&"upstream_cli_cost_unavailable".to_string()));
+    assert_eq!(
+        provider.diagnostics_summary.as_deref(),
+        Some("Upstream CLI returned partial diagnostics")
+    );
     let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
     common::assert_schema("snapshot.schema.json", &snapshot_json);
     common::assert_public_json_safe(&snapshot_json);
+    assert!(refresh
+        .diagnostics
+        .iter()
+        .any(|event| event.code == "upstream_cli_timeout"));
+    let cost_diagnostic = refresh
+        .diagnostics
+        .iter()
+        .find(|event| event.code == "upstream_cli_cost_unavailable")
+        .expect("cost unavailable diagnostic");
+    assert_eq!(
+        cost_diagnostic.safe_message,
+        "Local cost data was unavailable."
+    );
+}
+
+#[tokio::test]
+async fn cost_failure_does_not_fail_successful_usage_provider() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar local-build'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider all")
+    printf '%s\n' '{"providers":[{"provider":"codex","error":{"kind":"local_cost","message":"cost command unavailable for raw.user@example.com"}}]}'
+    exit 0
+    ;;
+  *"--status")
+    printf '%s\n' '[{"provider":"codex","source":"codex-cli","usage":{"primary":{"usedPercent":21,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"updatedAt":"2026-04-29T19:32:12Z"},"status":{"updatedAt":"2026-04-29T19:32:12Z","indicator":"none","description":"OK"}}]'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' '[{"provider":"codex","version":"local-build","source":"codex-cli","usage":{"primary":{"usedPercent":21,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"updatedAt":"2026-04-29T19:32:11Z"}}]'
+    exit 0
+    ;;
+esac
+"#,
+    );
+
+    let refresh = run_adapter(binary, vec!["codex".to_string()], short_timeouts()).await;
+    assert!(tmp.path().is_dir());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert!(provider.cost.is_none());
+    assert_eq!(
+        provider.diagnostic_codes,
+        vec!["upstream_cli_cost_unavailable".to_string()]
+    );
+    assert_eq!(
+        provider.diagnostics_summary.as_deref(),
+        Some("Local cost data was unavailable.")
+    );
+    assert_eq!(
+        refresh
+            .snapshot
+            .daemon
+            .upstream_cli
+            .as_ref()
+            .unwrap()
+            .version,
+        Some("CodexBar local-build".to_string())
+    );
+    let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+    common::assert_schema("snapshot.schema.json", &snapshot_json);
+    common::assert_public_json_safe(&snapshot_json);
+    assert!(!snapshot_json.contains("raw.user@example.com"));
 }
 
 #[tokio::test]
@@ -574,6 +886,46 @@ async fn live_upstream_cli_refresh_codex_smoke_redacts_outputs() {
     common::assert_schema("snapshot.schema.json", &cache_json);
     common::assert_public_json_safe(&cache_json);
     common::assert_no_live_secret_markers("live cache", &cache_json);
+}
+
+fn assert_diagnostic_message_contains(diagnostics_json: &str, code: &str, expected: &str) {
+    let diagnostics: serde_json::Value =
+        serde_json::from_str(diagnostics_json).expect("diagnostics json");
+    let event = diagnostics["events"]
+        .as_array()
+        .expect("diagnostics events")
+        .iter()
+        .find(|event| event["code"] == code)
+        .unwrap_or_else(|| panic!("missing diagnostic event {code} in {diagnostics_json}"));
+    let safe_message = event["safeMessage"]
+        .as_str()
+        .expect("diagnostic safeMessage");
+    assert!(
+        safe_message.contains(expected),
+        "diagnostic {code} safeMessage {safe_message:?} did not contain {expected:?}"
+    );
+    assert!(
+        event["details"].get("stdout").is_none(),
+        "diagnostic {code} must not expose stdout"
+    );
+    assert!(
+        event["details"].get("stderr").is_none(),
+        "diagnostic {code} must not expose stderr"
+    );
+}
+
+fn assert_no_warning_or_error_diagnostics(diagnostics_json: &str) {
+    let diagnostics: serde_json::Value =
+        serde_json::from_str(diagnostics_json).expect("diagnostics json");
+    for event in diagnostics["events"]
+        .as_array()
+        .expect("diagnostics events")
+    {
+        assert_eq!(
+            event["severity"], "info",
+            "expected only info diagnostics in clean refresh, got {event}"
+        );
+    }
 }
 
 async fn run_adapter(

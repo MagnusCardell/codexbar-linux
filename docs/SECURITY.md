@@ -59,7 +59,7 @@ Allowed in user-facing diagnostics and snapshots:
 
 - provider ID;
 - last success/error timestamp;
-- upstream CLI path/version;
+- redacted upstream CLI path label/version;
 - normalized state enum;
 - masked email/organization display and non-reversible local hashes if needed for account disambiguation.
 

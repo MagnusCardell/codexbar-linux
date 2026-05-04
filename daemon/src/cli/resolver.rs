@@ -110,11 +110,6 @@ fn linuxbrew_candidates() -> Vec<PathBuf> {
 }
 
 pub fn display_safe_path(path: &Path) -> String {
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        if let Ok(stripped) = path.strip_prefix(&home) {
-            return format!("~/{}", stripped.display());
-        }
-    }
     let path_text = path.to_string_lossy();
     if path_text == "/usr/bin/codexbar" || path_text == "/usr/local/bin/codexbar" {
         return path_text.to_string();
@@ -126,6 +121,15 @@ pub fn display_safe_path(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .map(|name| format!("[redacted-path]/{name}"))
         .unwrap_or_else(|| "[redacted-path]".to_string())
+}
+
+pub fn display_safe_owned_file(path: &Path) -> String {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("config.json") => "[redacted-config]/config.json".to_string(),
+        Some("snapshot.json") => "[redacted-cache]/snapshot.json".to_string(),
+        Some(name) => format!("[redacted-path]/{name}"),
+        None => "[redacted-path]".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +244,14 @@ mod tests {
         assert_eq!(
             display_safe_path(Path::new("/home/linuxbrew/.linuxbrew/bin/codexbar")),
             "linuxbrew:codexbar"
+        );
+        assert_eq!(
+            display_safe_path(&tmp.path().join("bin/codexbar")),
+            "[redacted-path]/codexbar"
+        );
+        assert_eq!(
+            display_safe_owned_file(&tmp.path().join(".config/codexbar-linux/config.json")),
+            "[redacted-config]/config.json"
         );
 
         if let Some(old_path) = old_path {

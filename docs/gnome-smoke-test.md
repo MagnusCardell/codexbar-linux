@@ -19,6 +19,7 @@ echo "${XDG_CONFIG_HOME:-$HOME/.config}"
 pgrep -af gnome-shell
 ps -o pid,lstart,cmd -p "$(pgrep -n gnome-shell)"
 gsettings get org.gnome.shell enabled-extensions
+gnome-extensions info codexbar-linux@codexbar.dev
 ```
 
 If a live upstream CLI smoke is being tested, also record whether
@@ -54,6 +55,26 @@ extension directory can be correct on disk while the running Shell process still
 has not rescanned user extensions. After logging back in, confirm the
 `gnome-shell` PID or start time changed before treating discovery as a live
 post-restart result.
+
+## Package Extension Path Sign-Off
+
+For package UI smoke, `gnome-extensions info codexbar-linux@codexbar.dev` must
+report the system extension path:
+
+```text
+Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
+```
+
+If it reports the user-local path instead:
+
+```text
+Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
+```
+
+then a development extension is shadowing the package extension. The package UI
+smoke is not valid until the user-local shadow is removed or moved aside, the
+session is restarted if needed, and `gnome-extensions info` reports the
+`/usr/share` path.
 
 ## Discovery Diagnostics
 
@@ -158,8 +179,8 @@ Use `docs/gnome-visual-target.md` as the visual acceptance source of truth.
   provider, bounded when loaded, and copied text remains redacted.
 - Stale, auth, timeout, parse-error, and daemon-unavailable wording is concise
   and does not repeat the same state twice.
-- `Usage Dashboard` and `Status Page` appear only when safe provider URLs are
-  present; unsafe or absent URLs omit those actions.
+- Provider dashboard/status URL actions are hidden in v0.1; setup guidance and
+  diagnostics stay local and D-Bus-backed.
 - Footer is one calm line that communicates daemon, CLI, cost, and
   `TestBrowserImport` unsupported/no-op status without showing raw paths or
   debug payloads.
@@ -206,6 +227,23 @@ Example result from the Task 03.3 live smoke on 2026-05-01:
 
 No private paths, raw account identifiers, raw diagnostics, screenshots, cookies,
 tokens, or browser-profile data are part of this recorded result.
+
+Task 05C.1 package smoke result from 2026-05-04:
+
+- After root-backed package install and logout/login,
+  `gnome-extensions info codexbar-linux@codexbar.dev` reported
+  `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`.
+- The extension enabled successfully from the packaged system extension.
+- The CodexBar top-bar indicator appeared.
+- Popover Refresh worked through the daemon D-Bus API.
+- Missing upstream CLI rendered degraded `upstream_cli_missing` safely.
+- After `CODEXBAR_CLI` was set in the systemd user environment and
+  `codexbar-linuxd.service` restarted, Refresh showed current `upstream_cli`
+  data.
+
+No browser-cookie, browser-profile, keyring, provider web-fetch,
+browser-extension, localhost/TCP, raw identity, token, cookie, diagnostics, or
+provider payload evidence was recorded as part of this result.
 
 ## Fixture Mode Development
 

@@ -149,6 +149,34 @@ for entry in expected_install_entries:
 if "extension/* " in debian_install or "extension/tests" in debian_install or "task" in debian_install.lower():
     raise SystemExit("packaging/debian/install must not install broad extension globs, tests, or task docs")
 
+release_smoke = (root / "docs/release-smoke-test.md").read_text(encoding="utf-8")
+release_smoke_requirements = {
+    "apt sandbox warning note": "`apt` may print a non-fatal `_apt` sandbox warning",
+    "architecture-neutral /tmp apt install command": "sudo apt install \"/tmp/codexbar-linux_0.1.0-1_${arch}.deb\"",
+    "packaged daemon check": "/usr/bin/codexbar-linuxd --check",
+    "system extension accepted path": "Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
+    "user-local shadowing path": "Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
+    "package remove gate": "sudo apt remove codexbar-linux",
+    "package purge gate": "sudo apt purge codexbar-linux",
+    "CODEXBAR_CLI systemd user environment smoke": "CODEXBAR_CLI` in the systemd user environment",
+    "recorded apt install success": "Real `sudo apt install ./dist/codexbar-linux_0.1.0-1_amd64.deb` succeeded",
+    "recorded D-Bus activation pass": "D-Bus activation passed from the installed service files",
+    "recorded CODEXBAR_CLI refresh pass": "After setting `CODEXBAR_CLI` in the systemd user environment and restarting",
+    "non-executable CODEXBAR_CLI degraded state": "`upstream_cli_not_executable` state safely",
+}
+for description, needle in release_smoke_requirements.items():
+    if needle not in release_smoke:
+        raise SystemExit(f"docs/release-smoke-test.md missing {description}: {needle}")
+
+gnome_smoke = (root / "docs/gnome-smoke-test.md").read_text(encoding="utf-8")
+for needle in (
+    "## Package Extension Path Sign-Off",
+    "Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
+    "Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
+):
+    if needle not in gnome_smoke:
+        raise SystemExit(f"docs/gnome-smoke-test.md missing package extension sign-off marker: {needle}")
+
 control = (root / "packaging/debian/control").read_text(encoding="utf-8")
 control_required = {
     "Source: codexbar-linux",

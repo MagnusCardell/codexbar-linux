@@ -4,7 +4,6 @@ import {PRODUCT_NAME} from './constants.js';
 import {
     createDiagnosticsButton,
     createDiagnosticsCopyButton,
-    createDiagnosticsDetails,
 } from './diagnosticsView.js';
 import {createContinuousMeter, createProviderMeters} from './meterBars.js';
 import {safeDisplay} from './state.js';
@@ -198,10 +197,6 @@ function createActionSection(row, view, actions) {
         style_class: 'codexbar-action-row',
         x_expand: true,
     });
-    if (row?.dashboardUrl)
-        buttons.add_child(actionButton('Usage Dashboard', () => actions.openDashboard(row.dashboardUrl)));
-    if (row?.statusPageUrl)
-        buttons.add_child(actionButton('Status Page', () => actions.openDashboard(row.statusPageUrl)));
     buttons.add_child(createDiagnosticsButton(view.diagnostics, actions, view.selectedProviderId));
     const copyButton = createDiagnosticsCopyButton(view.diagnostics, actions, view.selectedProviderId);
     if (copyButton)
@@ -209,10 +204,6 @@ function createActionSection(row, view, actions) {
     if (actions?.canOpenSettings)
         buttons.add_child(actionButton('Settings', () => actions.openSettings()));
     section.add_child(buttons);
-
-    const details = createDiagnosticsDetails(view.diagnostics, view.selectedProviderId);
-    if (details)
-        section.add_child(details);
 
     return section;
 }

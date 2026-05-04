@@ -53,6 +53,9 @@ function main() {
     assertViewModelUsesStateCopyMap();
     assertViewModelBuildsProviderStripAndSelectedSurface();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
+    assertStaleCacheCopyIsCalm();
+    assertProviderFailureCopyIsSetupOriented();
+    assertNormalUiLabelsRejectRawOperationalCopy();
     assertPanelViewModelBoundsProviderMode();
     assertPanelViewModelStaysCompactProgressOnly();
     assertPanelClassNamesAreStable();
@@ -76,7 +79,7 @@ function main() {
     assertDiagnosticsRejectUnsafeArrayPayloads();
     assertDiagnosticsRejectRawOutputFields();
     assertProviderUnsafeStringsFailClosed();
-    assertDashboardActionHiddenForUnsafeUrls();
+    assertProviderWebUrlsAreNotExposedInViewModel();
     assertSafeUrlRejectsLocalhost();
     assertSafeUrlRejectsPrivateAndTokenizedUrls();
     print('extension state tests passed');
@@ -136,12 +139,15 @@ function assertViewModelUsesStateCopyMap() {
     assertEqual(stateMeta('loading').label, 'Loading usage…');
     assertEqual(stateMeta('ok').label, 'Up to date');
     assertEqual(stateMeta('stale').label, 'Stale data');
+    assertEqual(stateMeta('stale').description, 'Showing cached data.');
     assertEqual(stateMeta('unauthenticated').label, 'Sign-in required');
-    assertEqual(stateMeta('cookie_rejected').label, 'Browser session rejected');
-    assertEqual(stateMeta('missing_dependency').label, 'Dependency missing');
+    assertEqual(stateMeta('unauthenticated').description, 'Sign in with the upstream CLI, then refresh.');
+    assertEqual(stateMeta('cookie_rejected').label, 'Session unavailable');
+    assertEqual(stateMeta('missing_dependency').label, 'CLI setup needed');
+    assertEqual(stateMeta('missing_dependency').description, 'Install or select the upstream CodexBar CLI, then refresh.');
     assertEqual(stateMeta('provider_unavailable').label, 'Provider unavailable');
-    assertEqual(stateMeta('parse_error').label, 'Could not read provider data');
-    assertEqual(stateMeta('timeout').label, 'Provider timed out');
+    assertEqual(stateMeta('parse_error').label, 'Provider data unreadable');
+    assertEqual(stateMeta('timeout').label, 'Refresh timed out');
     assertEqual(stateMeta('error').label, 'Error');
     assertEqual(stateMeta('daemon_unavailable').label, 'Daemon unavailable');
     assertEqual(view.panelStatus, 'Up to date');
@@ -152,7 +158,7 @@ function assertViewModelUsesStateCopyMap() {
     assertEqual(view.titleAction.label, 'Refresh');
     assertEqual(view.titleAction.action, 'refresh');
     assertEqual(view.titleAction.reactive, true);
-    assertEqual(view.footerStatus, 'Daemon running · CLI available · Cost unknown · Browser import unsupported');
+    assertEqual(view.footerStatus, 'Daemon running · Upstream CLI available · Cost unknown · Browser import unsupported · No web adapters');
 }
 
 function assertViewModelBuildsProviderStripAndSelectedSurface() {
@@ -248,18 +254,88 @@ function assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels() {
             'stderr',
             'rawPayload',
             'rawResponse',
+            'Usage Dashboard',
+            'Status Page',
+            'Linux web',
             'Partial System Degradation',
             'Stale · stale',
             'Credits (credits)',
         ]) {
             assert(!label.includes(forbidden), `default UI label leaked forbidden copy: ${forbidden}`);
         }
-        assert(!/[{[]\s*["'][^"']+["']\s*:/.test(label), `default UI label looks like raw JSON: ${label}`);
     }
+    assertNormalViewLabelsSafe(labels, 'default view labels');
     assertArrayEqual(
         view.selectedRow.usageSections.map(section => section.title),
         ['Session', 'Weekly', 'Credits'],
     );
+}
+
+function assertStaleCacheCopyIsCalm() {
+    const stale = readJson('fixtures/snapshots/stale.json');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(stale), 0);
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+
+    assertEqual(view.stateLabel, 'Stale data');
+    assertEqual(view.stateDescription, 'Showing cached data.');
+    assert(view.headerStatus.startsWith('Stale data'), 'stale header should use stable stale wording');
+    assert(view.selectedRow.titleStatusText.startsWith('Stale data'), 'provider title should use stable stale wording');
+    assertEqual(view.selectedRow.statusDescription, 'Showing cached data.');
+    assertNormalViewLabelsSafe(collectMainViewLabels(view), 'stale view labels');
+}
+
+function assertProviderFailureCopyIsSetupOriented() {
+    const missing = normalizeViewState(
+        applySnapshotJson(createInitialState(0), JSON.stringify(readJson('fixtures/snapshots/missing_dependency.json')), 0),
+        {panelMode: 'merged'},
+    );
+    assertEqual(missing.selectedRow.statusLabel, 'CLI setup needed');
+    assertEqual(missing.selectedRow.statusDescription, 'Install or select the upstream CodexBar CLI, then refresh.');
+
+    const unauthenticated = normalizeViewState(
+        applySnapshotJson(createInitialState(0), JSON.stringify(readJson('fixtures/snapshots/unauthenticated.json')), 0),
+        {panelMode: 'merged'},
+    );
+    assertEqual(unauthenticated.selectedRow.statusLabel, 'Sign-in required');
+    assertEqual(unauthenticated.selectedRow.statusDescription, 'Sign in with the upstream CLI, then refresh.');
+    assertEqual(unauthenticated.selectedRow.sourceLabel, 'Unsupported source');
+    assertEqual(unauthenticated.selectedRow.adapterLabel, 'Unsupported adapter');
+    for (const label of collectMainViewLabels(unauthenticated)) {
+        assert(!label.includes('Browser session'), 'auth copy should not imply browser-session support');
+        assert(!label.includes('Linux web'), 'auth copy should not expose web adapter labels');
+    }
+
+    const unavailable = normalizeViewState(
+        applySnapshotJson(createInitialState(0), JSON.stringify(readJson('fixtures/snapshots/provider_unavailable.json')), 0),
+        {panelMode: 'merged'},
+    );
+    assertEqual(unavailable.selectedRow.statusDescription, 'Check provider setup in the upstream CLI, then refresh.');
+
+    const rateLimited = readJson('fixtures/snapshots/provider_unavailable.json');
+    rateLimited.providers[0].status.indicator = 'rate_limited';
+    rateLimited.providers[0].status.description = 'Rate limit reached';
+    rateLimited.providers[0].diagnosticCodes = ['fixture_rate_limit'];
+    const rateView = normalizeViewState(
+        applySnapshotJson(createInitialState(0), JSON.stringify(rateLimited), 0),
+        {panelMode: 'merged'},
+    );
+    assertEqual(rateView.selectedRow.statusDescription, 'Rate limit active. Wait, then refresh.');
+    assertNormalViewLabelsSafe(collectMainViewLabels(rateView), 'rate-limited view labels');
+}
+
+function assertNormalUiLabelsRejectRawOperationalCopy() {
+    const state = withClientError(
+        createInitialState(0),
+        'stderr parse failed: {"rawPayload":"secret"} /home/test/.config/codex token=sk-proj-123456789012345678901234 stdout',
+        0,
+        'error',
+        'manual_refresh_failed',
+    );
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    const labels = collectMainViewLabels(view);
+
+    assertEqual(view.selectedRow.statusDescription, 'Refresh failed. Try Refresh again or open diagnostics.');
+    assertNormalViewLabelsSafe(labels, 'client-error view labels');
 }
 
 function assertPanelViewModelBoundsProviderMode() {
@@ -497,16 +573,20 @@ function assertFooterStatusIncludesCostCapability() {
     assertEqual(refreshButtonLabel('daemon_unavailable', true), 'Refreshing');
     assertEqual(
         footerStatusText(null, null),
-        'Daemon unknown · CLI unknown · Cost unknown · Browser import unsupported',
+        'Daemon unknown · Upstream CLI unknown · Cost unknown · Browser import unsupported · No web adapters',
     );
     const footer = footerStatusText(
         {state: 'degraded', upstreamCli: {available: true}},
         {cost: true, browserImport: false},
     );
-    assertEqual(footer, 'Daemon degraded · CLI available · Cost available · Browser import unsupported');
+    assertEqual(footer, 'Daemon degraded · Upstream CLI available · Cost available · Browser import unsupported · No web adapters');
     assertEqual(
         footerStatusText({state: 'ok', upstreamCli: {available: true}}, {cost: true, browserImport: true}),
-        'Daemon running · CLI available · Cost available · Browser import unsupported',
+        'Daemon running · Upstream CLI available · Cost available · Browser import unsupported · No web adapters',
+    );
+    assertEqual(
+        footerStatusText({state: 'degraded', upstreamCli: {available: false}}, {cost: false}),
+        'Daemon degraded · Upstream CLI missing · Cost unavailable · Browser import unsupported · No web adapters',
     );
 }
 
@@ -522,9 +602,9 @@ function assertDaemonUnavailableSyntheticStateIsConsistent() {
     assertEqual(view.state, 'daemon_unavailable');
     assertEqual(view.headerStatus, 'Daemon unavailable');
     assertEqual(view.refreshLabel, 'Retry');
-    assertEqual(view.footerStatus, 'Daemon unavailable · CLI unknown · Cost unknown · Browser import unsupported');
+    assertEqual(view.footerStatus, 'Daemon unavailable · Upstream CLI unknown · Cost unknown · Browser import unsupported · No web adapters');
     assertEqual(view.selectedRow.state, 'missing_dependency');
-    assertEqual(view.selectedRow.statusDescription, 'Daemon D-Bus service is unavailable');
+    assertEqual(view.selectedRow.statusDescription, 'Start the CodexBar daemon, then refresh.');
 }
 
 function assertProviderStatusUsesSafeDaemonDescription() {
@@ -532,7 +612,8 @@ function assertProviderStatusUsesSafeDaemonDescription() {
     snapshot.providers[0].status.description = 'Configured CodexBar CLI is not executable';
     const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
     const view = normalizeViewState(state, {panelMode: 'merged'});
-    assertEqual(view.selectedRow.statusDescription, 'Configured CodexBar CLI is not executable');
+    assertEqual(view.selectedRow.statusDescription, 'Install or select the upstream CodexBar CLI, then refresh.');
+    assert(!view.selectedRow.statusDescription.includes('not executable'), 'normal UI should use setup copy instead of daemon detail');
 
     snapshot.providers[0].status.description = '/home/user/.config/codexbar/private';
     const unsafe = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
@@ -544,8 +625,9 @@ function assertHeaderStatusPreservesNonOkStates() {
     assert(headerStatusText('ok', false, false, generatedAt).startsWith('Updated'), 'ok header should show updated age');
     assert(headerStatusText('stale', true, false, generatedAt).startsWith('Stale data'), 'stale header should keep stale wording');
     assert(headerStatusText('unauthenticated', false, false, generatedAt).startsWith('Sign-in required'), 'auth header should keep auth wording');
-    assert(headerStatusText('cookie_rejected', false, false, generatedAt).startsWith('Browser session rejected'), 'cookie header should keep cookie wording');
-    assert(headerStatusText('parse_error', false, false, generatedAt).startsWith('Could not read provider data'), 'parse header should keep parse wording');
+    assert(headerStatusText('cookie_rejected', false, false, generatedAt).startsWith('Session unavailable'), 'session header should keep setup wording');
+    assert(headerStatusText('parse_error', false, false, generatedAt).startsWith('Provider data unreadable'), 'parse header should keep parse wording');
+    assert(headerStatusText('timeout', false, false, generatedAt).startsWith('Refresh timed out'), 'timeout header should keep retry wording');
     assertEqual(headerStatusText('daemon_unavailable', false, false, generatedAt), 'Daemon unavailable');
     assertEqual(headerStatusText('ok', false, true, generatedAt), 'Refreshing…');
 }
@@ -782,24 +864,17 @@ function assertProviderUnsafeStringsFailClosed() {
     assert(!JSON.stringify(view.providerRows).includes('rawPayload'), 'raw payload marker surfaced in provider rows');
 }
 
-function assertDashboardActionHiddenForUnsafeUrls() {
+function assertProviderWebUrlsAreNotExposedInViewModel() {
     const ok = readJson('fixtures/snapshots/ok.json');
-    ok.providers[0].dashboardUrl = 'https://example.com/dashboard?access_token=secret';
-    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
-    const [row] = normalizeViewState(state, {}).providerRows;
-    assertEqual(row.dashboardUrl, '');
-
-    ok.providers[0].dashboardUrl = null;
+    ok.providers[0].dashboardUrl = 'https://example.com/dashboard';
     ok.providers[0].status.url = 'https://status.example.com/';
-    const statusUrlState = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
-    const [statusUrlRow] = normalizeViewState(statusUrlState, {}).providerRows;
-    assertEqual(statusUrlRow.dashboardUrl, '');
-    assertEqual(statusUrlRow.statusPageUrl, 'https://status.example.com/');
-
-    ok.providers[0].status.url = 'https://status.example.com/rawPayload/secret';
-    const unsafeStatusUrlState = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
-    const [unsafeStatusUrlRow] = normalizeViewState(unsafeStatusUrlState, {}).providerRows;
-    assertEqual(unsafeStatusUrlRow.statusPageUrl, '');
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {});
+    const [row] = view.providerRows;
+    assert(!Object.prototype.hasOwnProperty.call(row, 'dashboardUrl'), 'provider dashboard URL should not be exposed in normal UI');
+    assert(!Object.prototype.hasOwnProperty.call(row, 'statusPageUrl'), 'provider status URL should not be exposed in normal UI');
+    assert(!Object.prototype.hasOwnProperty.call(view.selectedRow, 'dashboardUrl'), 'selected provider dashboard URL should not be exposed in normal UI');
+    assert(!Object.prototype.hasOwnProperty.call(view.selectedRow, 'statusPageUrl'), 'selected provider status URL should not be exposed in normal UI');
 }
 
 function assertSafeUrlRejectsLocalhost() {
@@ -873,6 +948,18 @@ function collectMainViewLabels(view) {
     for (const row of view.selectedRow?.costRows ?? [])
         labels.push(row.label, row.value);
     return labels.filter(label => typeof label === 'string' && label.length > 0);
+}
+
+function assertNormalViewLabelsSafe(labels, context) {
+    for (const label of labels) {
+        assert(!/[{[]\s*["'][^"']+["']\s*:/.test(label), `${context} looked like raw JSON: ${label}`);
+        assert(!/\bstdout\b/i.test(label), `${context} leaked stdout copy: ${label}`);
+        assert(!/\bstderr\b/i.test(label), `${context} leaked stderr copy: ${label}`);
+        assert(!/\braw(?:Payload|Response|Output)\b/i.test(label), `${context} leaked raw payload copy: ${label}`);
+        assert(!/(^|[\s=:])\/(?:home|Users)\//.test(label), `${context} leaked a local path: ${label}`);
+        assert(!/\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/.test(label), `${context} leaked a raw token: ${label}`);
+        assert(!/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key)|token)\b\s*[:=]/i.test(label), `${context} leaked token-shaped copy: ${label}`);
+    }
 }
 
 function readJson(relativePath) {

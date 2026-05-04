@@ -27,6 +27,7 @@ pub fn validate_public_json_text(text: &str) -> Result<(), RedactionFinding> {
         ("raw_response", "\"rawresponse\""),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
+        ("tilde_local_path", "~/."),
         ("auth_json_path", "auth.json"),
         ("browser_cookie_db", "network/cookies"),
         ("browser_login_db", "login data"),
@@ -102,6 +103,7 @@ fn validate_public_json_text_without_json_parse(text: &str) -> Result<(), Redact
         ("slack_token", "xoxb-"),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
+        ("tilde_local_path", "~/."),
         ("auth_json_path", "auth.json"),
     ] {
         if lower.contains(needle) {
@@ -200,6 +202,7 @@ fn validate_public_string(value: &str) -> Result<(), RedactionFinding> {
         ("session_key", "sessionkey"),
         ("home_path", "/home/"),
         ("local_share_path", "~/.local/share"),
+        ("tilde_local_path", "~/."),
         ("auth_json_path", "auth.json"),
     ] {
         if lower.contains(needle) {

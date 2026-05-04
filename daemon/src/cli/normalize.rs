@@ -52,8 +52,8 @@ pub fn normalize_cost(value: &Value) -> NormalizedCost {
         };
         if entry.get("error").is_some() {
             normalized.diagnostics.push(AdapterDiagnostic::warning(
-                "upstream_cli_provider_error",
-                "Upstream CLI returned a provider cost error",
+                "upstream_cli_cost_unavailable",
+                "Local cost data was unavailable.",
                 Some(provider),
             ));
             continue;
@@ -410,16 +410,78 @@ fn entries(value: &Value) -> Vec<&Value> {
 }
 
 fn provider_error_code(entry: &Value) -> &'static str {
-    let message = entry
-        .get("error")
-        .and_then(|error| string_field(error, "message"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if message.contains("web support") || message.contains("macos") {
+    let mut message = String::new();
+    if let Some(error) = entry.get("error") {
+        for key in ["message", "description", "code", "kind"] {
+            if let Some(value) = string_field(error, key) {
+                message.push_str(&value);
+                message.push('\n');
+            }
+        }
+    }
+    let message = message.to_ascii_lowercase();
+    if message.contains("source 'cli' is not supported")
+        || message.contains("source cli is not supported")
+        || message.contains("source \"cli\" is not supported")
+    {
+        "upstream_cli_capability_unimplemented"
+    } else if message.contains("only supported on macos")
+        || message.contains("requires web support")
+        || message.contains("unsupported source")
+        || message.contains("unsupported platform")
+        || (message.contains("not supported")
+            && (message.contains("linux")
+                || message.contains("macos")
+                || message.contains("source")))
+    {
         "upstream_cli_unsupported_source"
-    } else if message.contains("authentication") || message.contains("unauthenticated") {
+    } else if message.contains("timed out") || message.contains("timeout") {
+        "upstream_cli_timeout"
+    } else if message.contains("authentication")
+        || message.contains("unauthenticated")
+        || message.contains("unauthorized")
+        || message.contains("auth required")
+        || message.contains("not logged in")
+        || message.contains("login required")
+        || message.contains("run login")
+        || message.contains("run auth")
+        || message.contains("cli session not found")
+        || message.contains("session not found")
+        || message.contains("401")
+    {
         "upstream_cli_unauthenticated"
-    } else if message.contains("rate") {
+    } else if message.contains("command not found")
+        || message.contains("not installed")
+        || message.contains("not found")
+        || message.contains("missing")
+        || message.contains("no such file")
+        || message.contains("enoent")
+    {
+        "upstream_cli_provider_cli_missing"
+    } else if message.contains("rate limit")
+        || message.contains("rate_limit")
+        || message.contains("rate limited")
+        || message.contains("too many requests")
+        || message.contains("429")
+    {
+        "upstream_cli_provider_rate_limited"
+    } else if message.contains("temporarily unavailable")
+        || message.contains("unavailable")
+        || message.contains("service unavailable")
+        || message.contains("provider unavailable")
+        || message.contains("network")
+        || message.contains("connection refused")
+        || message.contains("connection reset")
+        || message.contains("econnrefused")
+        || message.contains("econnreset")
+        || message.contains("enotfound")
+        || message.contains("dns")
+        || message.contains("fetch failed")
+        || message.contains("gateway")
+        || message.contains("502")
+        || message.contains("503")
+        || message.contains("504")
+    {
         "upstream_cli_provider_unavailable"
     } else {
         "upstream_cli_provider_error"
@@ -429,21 +491,32 @@ fn provider_error_code(entry: &Value) -> &'static str {
 fn provider_error_message(code: &str) -> &'static str {
     match code {
         "upstream_cli_unsupported_source" => {
-            "Upstream CLI reported that the requested source is unsupported on Linux"
+            "Requested provider source is not available on Linux through CodexBar CLI."
         }
-        "upstream_cli_unauthenticated" => {
-            "Upstream CLI reported provider authentication is missing"
+        "upstream_cli_unauthenticated" => "Provider sign-in is required in the upstream CLI.",
+        "upstream_cli_timeout" => "CodexBar CLI timed out.",
+        "upstream_cli_provider_cli_missing" => "Provider CLI dependency was not found.",
+        "upstream_cli_provider_rate_limited" => "Provider is rate limited. Try again later.",
+        "upstream_cli_provider_unavailable" | "upstream_cli_provider_error" => {
+            "Provider data was unavailable from CodexBar CLI."
         }
-        "upstream_cli_provider_unavailable" => "Upstream CLI reported provider unavailable",
-        _ => "Upstream CLI returned a provider error",
+        "upstream_cli_capability_unimplemented" => {
+            "Requested provider source is not available through CodexBar CLI."
+        }
+        _ => "Provider data was unavailable from CodexBar CLI.",
     }
 }
 
 fn state_for_error_code(code: &str) -> ProviderState {
     match code {
+        "upstream_cli_timeout" => ProviderState::Timeout,
         "upstream_cli_unauthenticated" => ProviderState::Unauthenticated,
-        "upstream_cli_provider_unavailable" => ProviderState::ProviderUnavailable,
-        "upstream_cli_unsupported_source" => ProviderState::MissingDependency,
+        "upstream_cli_provider_cli_missing" => ProviderState::MissingDependency,
+        "upstream_cli_provider_unavailable"
+        | "upstream_cli_provider_rate_limited"
+        | "upstream_cli_provider_error"
+        | "upstream_cli_capability_unimplemented"
+        | "upstream_cli_unsupported_source" => ProviderState::ProviderUnavailable,
         _ => ProviderState::Error,
     }
 }
@@ -614,7 +687,7 @@ mod tests {
         let normalized = normalize_usage(&value, "codex", NOW);
         assert_eq!(
             normalized.providers[0].state,
-            ProviderState::MissingDependency
+            ProviderState::ProviderUnavailable
         );
         assert_eq!(
             normalized.diagnostics[0].code,

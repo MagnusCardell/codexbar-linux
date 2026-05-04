@@ -1,8 +1,7 @@
-import Gio from 'gi://Gio';
 import St from 'gi://St';
 
 import {MANUAL_REFRESH_OPTIONS, SETTINGS_KEYS} from './constants.js';
-import {diagnosticsCopyText, safeUrl} from './state.js';
+import {diagnosticsCopyText} from './state.js';
 
 export class ShellActions {
     constructor(client, store, settings = null, openSettings = null) {
@@ -52,18 +51,6 @@ export class ShellActions {
     copyDiagnostics(payload) {
         const clipboard = St.Clipboard.get_default();
         clipboard.set_text(St.ClipboardType.CLIPBOARD, diagnosticsCopyText(payload));
-    }
-
-    openDashboard(url) {
-        const safe = safeUrl(url);
-        if (!safe)
-            return false;
-        try {
-            Gio.AppInfo.launch_default_for_uri(safe, null);
-            return true;
-        } catch (_error) {
-            return false;
-        }
     }
 
     openSettings() {

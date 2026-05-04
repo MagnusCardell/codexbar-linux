@@ -24,6 +24,8 @@ use crate::paths::AppPaths;
 use crate::redact;
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
+const STALE_CACHE_USED_MESSAGE: &str = "Showing cached usage data.";
+
 pub struct App {
     paths: AppPaths,
     runtime: AppRuntime,
@@ -410,10 +412,10 @@ impl App {
             snapshot.daemon.last_refresh_started_at = Some(active.started_at.clone());
             snapshot.daemon.last_refresh_finished_at = Some(finished_at.clone());
             snapshot.daemon.upstream_cli = current_daemon.upstream_cli;
-            diagnostic_codes.push("stale_cache_fallback".to_string());
+            diagnostic_codes.push("stale_cache_used".to_string());
             diagnostics.push(diagnostic_event(
-                "stale_cache_fallback",
-                "Live refresh failed; serving stale normalized cache",
+                "stale_cache_used",
+                STALE_CACHE_USED_MESSAGE,
                 &finished_at,
                 None,
             ));
@@ -511,9 +513,17 @@ impl App {
                 settings_patch: true,
             },
             paths: DaemonPathsInfo {
-                config_file: Some(cli::resolver::display_safe_path(&self.paths.config_file)),
-                cache_file: Some(cli::resolver::display_safe_path(&self.paths.cache_file)),
-                upstream_config_file: self.paths.upstream_config_file_hint.clone(),
+                config_file: Some(cli::resolver::display_safe_owned_file(
+                    &self.paths.config_file,
+                )),
+                cache_file: Some(cli::resolver::display_safe_owned_file(
+                    &self.paths.cache_file,
+                )),
+                upstream_config_file: self
+                    .paths
+                    .upstream_config_file_hint
+                    .as_ref()
+                    .map(|_| "[redacted-config]/config.json".to_string()),
             },
             upstream_cli,
             build: Some(crate::model::BuildInfo {
@@ -563,7 +573,7 @@ fn refresh_status(
 ) -> RefreshStatus {
     if diagnostic_codes
         .iter()
-        .any(|code| code == "stale_cache_fallback")
+        .any(|code| code == "stale_cache_used")
         && !diagnostic_codes
             .iter()
             .any(|code| code == "fixture_not_allowed")

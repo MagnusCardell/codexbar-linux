@@ -13,7 +13,11 @@
 
 - If `codexbar` is on PATH and configured, daemon can fetch `usage` JSON.
 - If `codexbar cost` is available, cost summaries appear in diagnostics/card secondary detail where appropriate.
-- CLI missing, timeout, parse error, and non-zero exit states are distinct.
+- CLI missing, non-executable configured CLI path, timeout, parse error, and
+  non-zero exit states are distinct.
+- Provider CLI missing, unauthenticated, rate limited, unavailable, local cost
+  unavailable, stale-cache fallback, success, and partial success states have
+  setup-oriented copy and redacted diagnostics.
 - Upstream provider IDs/order are preserved where possible.
 
 ### C. No-browser data path
@@ -36,15 +40,19 @@
 - Popover renders cards for enabled providers.
 - Loading and loaded states have stable dimensions.
 - Manual refresh is always reachable.
-- Dashboard links open in default browser.
+- Provider dashboard/status URL actions are hidden for v0.1.
 - Diagnostics copy action redacts secrets.
 
 ### F. Preferences
 
 - General preferences save and apply.
-- Provider enable/source preferences save and apply.
+- Panel mode, reset time format, theme, selected provider, and start-on-login
+  preferences save and apply.
+- Provider enablement/source configuration remains daemon-owned and is not
+  exposed as unsupported UI.
 - Reserved browser import test reports unsupported/no-op behavior.
-- Diagnostics page shows daemon status, CLI path/version, cache path, and D-Bus service.
+- Diagnostics page shows daemon status, redacted CLI/config/cache path labels,
+  CLI version when available, and D-Bus service.
 
 ## Engineering acceptance
 
@@ -63,6 +71,10 @@ the command or smoke evidence used.
   reports no browser-cookie, browser-profile, keyring, provider web-fetch,
   browser-extension, localhost/TCP, forbidden dependency, fixture, validator, or
   runtime marker surface.
+- Package install smoke passed on the recorded operator host: real
+  `sudo apt install` succeeded, the local `_apt` sandbox warning was non-fatal,
+  `/usr/bin/codexbar-linuxd --check` passed, D-Bus activation passed, and the
+  packaged extension path was verified under `/usr/share/...`.
 - Full repository gate passes: `./scripts/check.sh` completes successfully on
   Ubuntu 24.04 or newer.
 - Live GNOME 46+ Wayland smoke passes after `./scripts/install-local.sh`, an
@@ -71,6 +83,10 @@ the command or smoke evidence used.
 - Upstream CLI missing degraded UI passes: with no resolvable `codexbar`, manual
   refresh remains available, provider state is `missing_dependency`, and
   diagnostics are copyable and redacted.
+- Upstream CLI broken-path degraded UI passes: with `CODEXBAR_CLI` pointing at a
+  non-executable file, manual refresh remains available, provider state is
+  `missing_dependency`, and diagnostics report
+  `upstream_cli_not_executable` without exposing the raw path.
 - Upstream CLI available Codex refresh passes: with a configured upstream
   `codexbar`, targeted Codex usage/status refresh succeeds through
   `sourceAdapter=upstream_cli`, cost is attempted through `provider all`, and no
@@ -92,11 +108,23 @@ the command or smoke evidence used.
   daemon or install a TCP listener, supports D-Bus activation after
   `systemctl --user daemon-reload`, and package removal removes only
   package-owned system files while preserving user config/cache.
+- Package UI smoke is accepted only when
+  `gnome-extensions info codexbar-linux@codexbar.dev` reports
+  `Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`. If it
+  reports `Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`,
+  a user-local development extension is shadowing the package extension and the
+  package UI smoke is invalid.
 - Task 05C package candidate validation records whether the package was tested
   through real `sudo apt install/remove/purge` or only through non-mutating
   package inspection and `apt-get -s install`. A candidate remains blocked from
   release sign-off until the real root-backed install/remove path is recorded on
-  the target Ubuntu GNOME host.
+  the target Ubuntu GNOME host. If remove/purge was not rerun after the final
+  successful package-extension smoke, it remains a required release-smoke gate
+  even when package install and UI evidence have passed.
+- A non-fatal `_apt` sandbox warning during `sudo apt install ./dist/*.deb` is
+  not a package failure when the install succeeds; it indicates the local `.deb`
+  path was inaccessible to the `_apt` sandbox user. The reproducible package
+  smoke path copies the `.deb` to `/tmp` before installing.
 - Packaged release binaries must not leak exact private build-root, home, Cargo,
   Rustup, or package-staging paths. The development package builder must compile
   with path remapping, strip the staged daemon, and fail the package build if
@@ -105,3 +133,5 @@ the command or smoke evidence used.
   normalized cache, D-Bus payloads, fixture outputs, and command summaries
   contain no raw secrets, raw identity, raw provider payloads, raw paths,
   stdout/stderr snippets, cookie/header strings, or browser/session material.
+- Missing/broken CLI diagnostics are user-facing and redacted according to
+  `docs/upstream-cli-ux.md`.

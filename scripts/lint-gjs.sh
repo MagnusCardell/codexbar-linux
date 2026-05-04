@@ -329,32 +329,33 @@ if "sectionTitle(" in provider_card_js and not re.search(r"\b(?:function\s+secti
     violations.append("src/providerCard.js: sectionTitle() is called but no local helper is defined")
 if "codexbar-state-pill" in provider_card_js:
     violations.append("src/providerCard.js: selected provider surface must not render a status pill")
-if "loadDiagnostics(" in provider_card_js:
-    violations.append("src/providerCard.js: diagnostics action belongs in the secondary diagnostics row")
 if "row.shortLabel" in provider_card_js:
     violations.append("src/providerCard.js: popover must not render provider short-code glyphs")
 if "'Open'" in provider_card_js or '"Open"' in provider_card_js:
     violations.append("src/providerCard.js: visible dashboard action must not use generic Open wording")
-for action_label in ("Usage Dashboard", "Status Page", "Diagnostics"):
-    if action_label not in provider_card_js:
-        violations.append(f"src/providerCard.js: missing visible secondary action label {action_label!r}")
+for removed_action_label in ("Usage Dashboard", "Status Page"):
+    if removed_action_label in provider_card_js:
+        violations.append(f"src/providerCard.js: provider web/dashboard action label remains: {removed_action_label!r}")
+for action_label in ("Load diagnostics", "Copy diagnostics"):
+    if action_label not in (root / "src/diagnosticsView.js").read_text(encoding="utf-8"):
+        violations.append(f"src/diagnosticsView.js: missing diagnostics action label {action_label!r}")
 if "createDiagnosticsButton" not in provider_card_js:
-    violations.append("src/providerCard.js: missing secondary Diagnostics action")
-if "dashboardUrl: safeUrl(provider?.dashboardUrl || '')" not in state_js:
-    violations.append("src/state.js: Usage Dashboard action must be derived through safeUrl()")
-if "statusPageUrl: safeUrl(provider?.status?.url || '')" not in state_js:
-    violations.append("src/state.js: Status Page action must be derived through safeUrl()")
+    violations.append("src/providerCard.js: missing secondary Load diagnostics action")
+if "dashboardUrl: safeUrl(provider?.dashboardUrl || '')" in state_js:
+    violations.append("src/state.js: provider dashboard URL must not be exposed in the normal view model")
+if "statusPageUrl: safeUrl(provider?.status?.url || '')" in state_js:
+    violations.append("src/state.js: provider status URL must not be exposed in the normal view model")
 
 launch_users = []
 for path in sorted(root.rglob("*.js")):
     rel = path.relative_to(root)
     if "launch_default_for_uri" in path.read_text(encoding="utf-8"):
         launch_users.append(str(rel))
-if launch_users != ["src/actions.js"]:
+if any(path != "src/actions.js" for path in launch_users):
     violations.append(f"Gio.AppInfo.launch_default_for_uri must only be used in src/actions.js, got {launch_users}")
 actions_js = (root / "src/actions.js").read_text(encoding="utf-8")
-if "const safe = safeUrl(url);" not in actions_js or "launch_default_for_uri(safe" not in actions_js:
-    violations.append("src/actions.js: dashboard launches must pass through safeUrl()")
+if "src/actions.js" in launch_users and ("const safe = safeUrl(url);" not in actions_js or "launch_default_for_uri(safe" not in actions_js):
+    violations.append("src/actions.js: URI launches must pass through safeUrl()")
 
 if violations:
     raise SystemExit("\n".join(violations))

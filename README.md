@@ -26,10 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 05C package release-candidate validation**
-status, building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser
-cleanup, Task 05A upstream-CLI-only hardening, and Task 05B development package
-work.
+This repository is at **Task 05D upstream CLI UX polish** status, building on
+the Task 03 GNOME Shell vertical slice, Task 04R no-browser cleanup, Task 05A
+upstream-CLI-only hardening, Task 05B development package work, and Task 05C
+package smoke validation.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -62,6 +62,13 @@ Present:
   config/cache.
 - Validation scripts and GitHub Actions check workflow.
 - Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
+- Recorded root-backed package install smoke evidence, including installed file
+  layout, `/usr/bin/codexbar-linuxd --check`, D-Bus activation,
+  missing-upstream-CLI degraded state, upstream-CLI refresh after
+  `CODEXBAR_CLI` systemd user environment setup, system extension discovery from
+  `/usr/share`, extension enablement, top-bar indicator, and popover refresh.
+- Upstream CLI UX state copy in `docs/upstream-cli-ux.md`.
+- Upstream CLI setup guidance in `docs/upstream-cli-setup.md`.
 
 Out of production scope after Task 04R:
 
@@ -71,11 +78,14 @@ Out of production scope after Task 04R:
 - provider web fetches or dashboard scraping;
 - browser extension or localhost/TCP bridge.
 
-Not implemented after Task 05C:
+Not implemented after Task 05D:
 
-- Signed repository distribution, package upgrade matrix coverage, and recorded
-  root-backed package install/remove GNOME smoke evidence for Ubuntu
-  24.04/26.04 release sign-off.
+- Signed repository distribution and package upgrade matrix coverage.
+- Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
+- Re-running `sudo apt remove codexbar-linux` and optional
+  `sudo apt purge codexbar-linux` after the final successful package-extension
+  smoke. Remove/purge was previously tested and remains part of the release
+  smoke gate.
 
 `TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
 reserved and unsupported. The daemon validates the request JSON and returns a
@@ -87,6 +97,11 @@ The upstream CLI adapter does not default production usage/status refresh to
 all-provider usage/status probes. The first proven Linux usage/status provider
 is `codex`; `all` remains explicit for usage/status and is used by default only
 for cost summaries.
+
+For upstream CLI installation, verification, and packaged daemon configuration,
+see [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md). For the
+user-facing state/copy matrix used by daemon diagnostics and the Shell UI, see
+[Upstream CLI UX States](docs/upstream-cli-ux.md).
 
 ## Local checks
 
@@ -171,9 +186,20 @@ The user still controls extension enablement. On Wayland, a logout/login may be
 needed before GNOME Shell discovers newly installed system extension files.
 Task 05C validated the package build, contents, non-mutating apt dependency
 resolution, isolated D-Bus activation, missing-upstream-CLI degraded behavior,
-and release-mode live upstream-CLI D-Bus smoke. Real `sudo apt install/remove`
-and packaged GNOME panel/popover smoke still need to be recorded on the target
-Ubuntu GNOME host.
+and release-mode live upstream-CLI D-Bus smoke. Task 05C.1 recorded
+root-backed `sudo apt install`, installed file layout,
+`/usr/bin/codexbar-linuxd --check`, D-Bus activation, missing-upstream-CLI
+degraded behavior, upstream-CLI refresh after setting `CODEXBAR_CLI` in the
+systemd user environment, system extension discovery after logout/login,
+extension enablement, top-bar indicator appearance, and popover refresh.
+
+If `apt` prints a non-fatal `_apt` sandbox warning while installing a local
+`.deb` from the project directory, copy the package to `/tmp` and install from
+there as documented in [Release Smoke Test](docs/release-smoke-test.md). Package
+UI smoke is valid only when `gnome-extensions info codexbar-linux@codexbar.dev`
+reports `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`; a
+`~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev` path means a
+development extension is shadowing the package.
 
 ## Repository layout
 
