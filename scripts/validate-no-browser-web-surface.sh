@@ -74,7 +74,8 @@ if rg -n \
   --glob '!daemon/src/model.rs' \
   --glob '!daemon/src/redact.rs' \
   --glob '!daemon/tests/browser_import_stub.rs' \
-  --glob '!daemon/tests/redaction.rs'; then
+  --glob '!daemon/tests/redaction.rs' \
+  --glob '!packaging/man/**'; then
   fail "runtime code contains browser-cookie/web-fetch/keyring/localhost implementation marker"
 fi
 

@@ -1,12 +1,15 @@
 use std::fs;
+use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use codexbar_linuxd::app::{App, AppRuntime, RefreshStart};
 use codexbar_linuxd::cache::validate_snapshot;
 use codexbar_linuxd::error::AppError;
 use codexbar_linuxd::model::{
-    BrowserImportResult, BrowserImportStatus, DaemonInfo, ProviderEvent, ProviderState,
+    BrowserImportResult, BrowserImportStatus, BuildInfo, DaemonInfo, ProviderEvent, ProviderState,
     RefreshResult, Settings, Snapshot,
 };
 use codexbar_linuxd::paths::AppPaths;
@@ -153,12 +156,14 @@ fn app_getters_return_schema_shaped_redacted_json() {
     let info: DaemonInfo =
         serde_json::from_str(&app.get_daemon_info_json().expect("daemon info json")).unwrap();
     assert_eq!(info.schema_version, 1);
+    assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
     assert_eq!(info.dbus.interface, DBUS_INTERFACE);
     assert_eq!(info.capabilities.upstream_cli, info.upstream_cli.available);
     assert!(!info.capabilities.browser_import);
     assert!(!info.capabilities.linux_web_adapters);
     assert_eq!(info.capabilities.cost, info.upstream_cli.available);
     assert!(info.capabilities.settings_patch);
+    assert_build_info_safe(info.build.as_ref().expect("build info"));
     for path in [
         info.paths.config_file.as_deref(),
         info.paths.cache_file.as_deref(),
@@ -178,6 +183,126 @@ fn app_getters_return_schema_shaped_redacted_json() {
         serde_json::from_str(&app.get_diagnostics_json("").expect("diagnostics json")).unwrap();
     assert_eq!(diagnostics["schemaVersion"], 1);
     assert_eq!(diagnostics["redaction"]["applied"], true);
+}
+
+#[test]
+fn daemon_binary_version_check_and_package_version_are_consistent() {
+    let debian_version = debian_upstream_version();
+    assert_eq!(env!("CARGO_PKG_VERSION"), debian_version);
+
+    let mut version_command = daemon_command();
+    version_command.arg("--version").env_clear();
+    let version = output_with_timeout(version_command, "--version");
+    assert!(
+        version.status.success(),
+        "--version failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&version.stdout),
+        String::from_utf8_lossy(&version.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout),
+        format!("codexbar-linuxd {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(
+        version.stderr.is_empty(),
+        "--version should not write stderr: {}",
+        String::from_utf8_lossy(&version.stderr)
+    );
+
+    let check_home = tempfile::tempdir().expect("check home");
+    let mut check_command = daemon_command();
+    check_command
+        .arg("--check")
+        .env_clear()
+        .env("XDG_CONFIG_HOME", check_home.path().join("config"))
+        .env("XDG_CACHE_HOME", check_home.path().join("cache"));
+    let check = output_with_timeout(check_command, "--check");
+    assert!(
+        check.status.success(),
+        "--check failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        check.stdout.is_empty() && check.stderr.is_empty(),
+        "--check should be quiet: stdout={} stderr={}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
+
+fn daemon_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_codexbar-linuxd"))
+}
+
+fn output_with_timeout(mut command: Command, label: &str) -> Output {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn daemon command");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                return child.wait_with_output().expect("collect daemon output");
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                match child.kill() {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == io::ErrorKind::InvalidInput => {}
+                    Err(err) => panic!("failed to kill timed-out daemon {label}: {err}"),
+                }
+                let _ = child.wait();
+                panic!("daemon {label} timed out");
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(err) => panic!("failed to poll daemon {label}: {err}"),
+        }
+    }
+}
+
+fn assert_build_info_safe(build: &BuildInfo) {
+    let target = build.target.as_deref().expect("build target");
+    let profile = build.profile.as_deref().expect("build profile");
+    assert_safe_build_value(target, "target");
+    assert_safe_build_value(profile, "profile");
+
+    if let Some(git_sha) = build.git_sha.as_deref() {
+        assert_eq!(git_sha.len(), 40, "gitSha must be a full SHA-1");
+        assert!(
+            git_sha.chars().all(|ch| ch.is_ascii_hexdigit()),
+            "gitSha must be hex only"
+        );
+    }
+}
+
+fn assert_safe_build_value(value: &str, field: &str) {
+    assert!(
+        !value.is_empty() && value.len() <= 128,
+        "build {field} has unsafe length"
+    );
+    assert!(
+        value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')),
+        "build {field} contains unsafe characters: {value}"
+    );
+    assert!(
+        !value.contains('/') && !value.contains('\\') && !value.contains(':'),
+        "build {field} must not contain path-shaped content: {value}"
+    );
+}
+
+fn debian_upstream_version() -> String {
+    let changelog = read_repo_file("packaging/debian/changelog");
+    let first_line = changelog.lines().next().expect("changelog first line");
+    let version = first_line
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(version, _)| version)
+        .expect("Debian changelog version");
+    version
+        .split_once('-')
+        .map_or(version, |(upstream, _)| upstream)
+        .to_string()
 }
 
 #[tokio::test]

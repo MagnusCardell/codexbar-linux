@@ -85,18 +85,24 @@ The package contents must include:
 - `/usr/lib/systemd/user/codexbar-linuxd.service`
 - `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/`
 - `/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml`
+- `/usr/share/man/man1/codexbar-linuxd.1.gz`
 
-Install:
+Install from `/tmp` to avoid non-fatal `_apt` sandbox permission notes from
+project-local paths:
 
 ```bash
-sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
+arch="$(dpkg --print-architecture)"
+cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
+sudo apt install "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
 systemctl --user daemon-reload
 test -x /usr/bin/codexbar-linuxd
+/usr/bin/codexbar-linuxd --version
 /usr/bin/codexbar-linuxd --check
 test -f /usr/share/dbus-1/services/org.codexbar.Linux1.service
 test -f /usr/lib/systemd/user/codexbar-linuxd.service
 test -d /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
 test -f /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml
+test -f /usr/share/man/man1/codexbar-linuxd.1.gz
 busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 GetDaemonInfo
 gnome-extensions list | grep -Fx codexbar-linux@codexbar.dev
 gnome-extensions enable codexbar-linux@codexbar.dev
@@ -106,13 +112,11 @@ gnome-extensions info codexbar-linux@codexbar.dev
 `apt` may print a non-fatal `_apt` sandbox warning when installing a local
 `.deb` from a project directory that the `_apt` sandbox user cannot access. If
 `sudo apt install` succeeds and the package files are installed, that warning
-is not a package failure. To avoid the note and make the install path cleaner,
-copy the package to `/tmp` first:
+is not a package failure. The reproducible release-smoke command above copies
+the package to `/tmp`; the project-local fallback is:
 
 ```bash
-arch="$(dpkg --print-architecture)"
-cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sudo apt install "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
 ```
 
 If the system-wide extension is not listed immediately on Wayland, log out and
@@ -133,9 +137,12 @@ If `gnome-extensions info codexbar-linux@codexbar.dev` reports:
 Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
 ```
 
-then a user-local development extension is shadowing the package extension, and
-the package UI smoke is not valid. Remove or move the user-local extension, log
-out and back in if needed, and repeat the package discovery and UI checks.
+or any expanded path under
+`${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/codexbar-linux@codexbar.dev`,
+then a user-local development extension is shadowing the package extension. The
+package UI smoke is not valid until that shadow is removed or moved aside, the
+session is restarted if needed, and `gnome-extensions info` reports the
+`/usr/share` path.
 
 Exercise the same service and UI cases as the local install path:
 
@@ -152,7 +159,11 @@ Pass conditions:
 
 - `sudo apt install` succeeds. A non-fatal `_apt` sandbox warning from a
   project-local `.deb` path is acceptable only when the install itself succeeds.
+- `/usr/bin/codexbar-linuxd --version` reports `codexbar-linuxd 0.1.0`.
 - `/usr/bin/codexbar-linuxd --check` succeeds.
+- `GetDaemonInfo` returns a schema-valid daemon info JSON string with
+  `version` equal to `0.1.0` and `capabilities.browserImport=false`,
+  `capabilities.linuxWebAdapters=false`.
 - D-Bus activation uses the packaged daemon path `/usr/bin/codexbar-linuxd`.
 - The installed service remains a user service; no system daemon or socket unit
   is installed or started.
@@ -203,7 +214,8 @@ Sanitized result:
   provider-dashboard dependency was present.
 - Package contents were inspected with `dpkg-deb -c`; the archive contained the
   daemon, session D-Bus service, user systemd unit, system-wide GNOME extension
-  files, GSettings schema, and smoke-test docs under the intended paths.
+  files, GSettings schema, manual page, and smoke-test docs under the intended
+  paths.
 - The package builder now compiles release binaries with path remapping, strips
   the staged daemon, and fails the build if exact private build-root, home,
   Cargo, Rustup, or package-staging paths remain in the packaged daemon.
@@ -248,10 +260,8 @@ Sanitized result:
   during package candidate validation, but were not rerun after the final
   successful package-extension smoke. They remain part of the release smoke gate
   and must be rerun before final release sign-off.
-- `lintian` exited successfully for the rebuilt package. Remaining development
-  package warnings were `initial-upload-closes-no-bugs`,
-  `maintainer-script-empty` for the intentionally empty `prerm`, and
-  `no-manual-page` for `codexbar-linuxd`.
+- `lintian` exited successfully for the rebuilt package. The remaining
+  development package warning was `initial-upload-closes-no-bugs`.
 
 Known limitations before v0.1 release sign-off:
 

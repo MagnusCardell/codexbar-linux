@@ -1,0 +1,50 @@
+.TH CODEXBAR-LINUXD 1 "2026-05-04" "codexbar-linux 0.1.0" "User Commands"
+.SH NAME
+codexbar-linuxd \- user-scoped CodexBar GNOME daemon
+.SH SYNOPSIS
+.B codexbar-linuxd
+[\fB--version\fR] [\fB--check\fR] [\fB--print-snapshot\fR]
+.SH DESCRIPTION
+.B codexbar-linuxd
+is the user-scoped daemon for CodexBar GNOME. It exposes the
+.B org.codexbar.Linux1
+session D-Bus API used by the GNOME Shell extension, keeps normalized local
+cache and settings, and invokes the upstream
+.B codexbar
+CLI for supported provider usage and cost snapshots.
+.PP
+The daemon is intended to be started through D-Bus activation or the packaged
+systemd user service. It does not open a TCP listener and does not enable the
+GNOME Shell extension.
+.PP
+Credential import, profile discovery, desktop secret-store access, dashboard
+collection, browser integration, and local network APIs are outside the v0.1
+data plane.
+.SH OPTIONS
+.TP
+.B --version
+Print the daemon binary name and package version, then exit.
+.TP
+.B --check
+Validate daemon startup prerequisites and exit.
+.TP
+.B --print-snapshot
+Print the current normalized snapshot JSON and exit. This is primarily useful
+for local diagnostics.
+.SH FILES
+.TP
+.I ~/.config/codexbar-linux/config.json
+Daemon-owned user settings.
+.TP
+.I ~/.cache/codexbar-linux/snapshot.json
+Normalized snapshot cache.
+.TP
+.I /usr/share/dbus-1/services/org.codexbar.Linux1.service
+Packaged D-Bus session activation file.
+.TP
+.I /usr/lib/systemd/user/codexbar-linuxd.service
+Packaged systemd user service.
+.SH SEE ALSO
+.BR systemctl (1),
+.BR busctl (1),
+.BR gnome-extensions (1)

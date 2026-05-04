@@ -1,6 +1,6 @@
 [package]
 name = "codexbar-linuxd"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 description = "CodexBar GNOME user daemon"
 license = "MIT"

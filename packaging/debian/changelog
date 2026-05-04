@@ -3,5 +3,7 @@ codexbar-linux (0.1.0-1) unstable; urgency=medium
   * Development package for the upstream-CLI-only GNOME Shell companion.
   * Install user-scoped D-Bus activation, systemd user unit, extension assets,
     and GSettings schema without auto-enabling the extension.
+  * Align daemon package metadata with the v0.1 candidate and ship
+    codexbar-linuxd(1).
 
  -- CodexBar GNOME Maintainers <maintainers@example.invalid>  Mon, 04 May 2026 12:00:00 +0000

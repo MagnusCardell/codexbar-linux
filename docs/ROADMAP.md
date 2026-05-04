@@ -70,6 +70,15 @@ refresh. Signed repository distribution, upgrade testing, full Ubuntu 24.04/26.0
 matrix coverage, and rerunning package remove/purge after the final successful
 package-extension smoke remain release sign-off work.
 
+Task 05E status: v0.1 release-candidate cleanup aligns daemon/package version
+metadata at `0.1.0` / `0.1.0-1`, adds safe daemon build metadata reporting,
+adds `codexbar-linuxd --version`, keeps `--check` quiet while validating version
+metadata, installs a minimal `codexbar-linuxd(1)` manual page, removes the empty
+`prerm` maintainer script, adds v0.1 release notes, and refreshes acceptance and
+release-smoke documentation. No D-Bus XML, JSON schemas, provider behavior, or
+data plane were changed. The same remove/purge rerun, full Ubuntu 24.04/26.04
+matrix, signed repository, and upgrade gates remain open until recorded.
+
 Exit criteria:
 
 - `.deb` installs daemon, service, extension, schema.

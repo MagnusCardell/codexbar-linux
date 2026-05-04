@@ -202,6 +202,7 @@ impl App {
     }
 
     pub fn check_startup() -> AppResult<()> {
+        validate_version_metadata()?;
         let app = Self::from_env()?;
         let _ = app.get_daemon_info_json()?;
         Ok(())
@@ -527,12 +528,20 @@ impl App {
             },
             upstream_cli,
             build: Some(crate::model::BuildInfo {
-                git_sha: option_env!("GIT_SHA").map(str::to_string),
-                target: option_env!("TARGET").map(str::to_string),
-                profile: option_env!("PROFILE").map(str::to_string),
+                git_sha: option_env!("CODEXBAR_BUILD_GIT_SHA").map(str::to_string),
+                target: option_env!("CODEXBAR_BUILD_TARGET").map(str::to_string),
+                profile: option_env!("CODEXBAR_BUILD_PROFILE").map(str::to_string),
             }),
         }
     }
+}
+
+fn validate_version_metadata() -> AppResult<()> {
+    let version = env!("CARGO_PKG_VERSION");
+    if version.is_empty() || version == "0.0.0" {
+        return Err(AppError::internal_redacted());
+    }
+    Ok(())
 }
 
 fn result_diagnostic_codes(events: &[DiagnosticEvent]) -> Vec<String> {

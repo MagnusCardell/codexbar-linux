@@ -18,10 +18,10 @@ required = [
     "packaging/debian/rules",
     "packaging/debian/install",
     "packaging/debian/postinst",
-    "packaging/debian/prerm",
     "packaging/debian/postrm",
     "packaging/debian/copyright",
     "packaging/debian/source/format",
+    "packaging/man/codexbar-linuxd.1",
     "scripts/install-local.sh",
     "scripts/uninstall-local.sh",
     "scripts/build-deb.sh",
@@ -29,6 +29,7 @@ required = [
     "extension/metadata.json",
     "daemon/Cargo.toml",
     "daemon/src/main.rs",
+    "docs/release-notes-0.1.0.md",
 ]
 for rel in required:
     if not (root / rel).is_file():
@@ -138,10 +139,12 @@ expected_install_entries = [
     "extension/stylesheet.css usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
     "extension/src/*.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/src/",
     "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml usr/share/glib-2.0/schemas/",
+    "packaging/man/codexbar-linuxd.1 usr/share/man/man1/",
     "README.md usr/share/doc/codexbar-linux/",
     "LICENSE usr/share/doc/codexbar-linux/",
     "docs/gnome-smoke-test.md usr/share/doc/codexbar-linux/",
     "docs/release-smoke-test.md usr/share/doc/codexbar-linux/",
+    "docs/release-notes-0.1.0.md usr/share/doc/codexbar-linux/",
 ]
 for entry in expected_install_entries:
     if entry not in debian_install:
@@ -200,6 +203,12 @@ if not re.search(r"^codexbar-linux \(0\.1\.0-1\) ", changelog):
 if "Task 08" in changelog or "skeleton" in changelog.lower():
     raise SystemExit("packaging/debian/changelog must not describe packaging as a skeleton")
 
+cargo_toml = (root / "daemon/Cargo.toml").read_text(encoding="utf-8")
+package_match = re.search(r"^codexbar-linux \(([^)-]+)(?:-[^)]+)?\) ", changelog, re.MULTILINE)
+cargo_match = re.search(r'^version = "([^"]+)"$', cargo_toml, re.MULTILINE)
+if not package_match or not cargo_match or package_match.group(1) != cargo_match.group(1):
+    raise SystemExit("daemon/Cargo.toml version must match the upstream version in packaging/debian/changelog")
+
 rules = (root / "packaging/debian/rules").read_text(encoding="utf-8")
 if "cargo build --manifest-path daemon/Cargo.toml --release --locked" not in rules:
     raise SystemExit("packaging/debian/rules must build the release daemon")
@@ -208,7 +217,10 @@ if "--remap-path-prefix=$(CURDIR)=codexbar-linux" not in rules or "--remap-path-
 if "cargo test --manifest-path daemon/Cargo.toml --locked" not in rules:
     raise SystemExit("packaging/debian/rules must run daemon tests")
 
-maintainer_scripts = ["packaging/debian/postinst", "packaging/debian/prerm", "packaging/debian/postrm"]
+if (root / "packaging/debian/prerm").exists():
+    raise SystemExit("packaging/debian/prerm must stay absent unless it performs release-required work")
+
+maintainer_scripts = ["packaging/debian/postinst", "packaging/debian/postrm"]
 for rel in maintainer_scripts:
     text = (root / rel).read_text(encoding="utf-8")
     if "gnome-extensions enable" in text or "gsettings set org.gnome.shell enabled-extensions" in text:
@@ -235,6 +247,23 @@ if "systemctl --user daemon-reload" not in (root / "packaging/debian/postrm").re
 for rel in maintainer_scripts:
     if (root / rel).stat().st_mode & 0o111 == 0:
         raise SystemExit(f"{rel} must be executable in git/package staging")
+
+man_page = (root / "packaging/man/codexbar-linuxd.1").read_text(encoding="utf-8")
+for needle in (
+    ".TH CODEXBAR-LINUXD 1",
+    ".SH NAME",
+    "codexbar-linuxd \\- user-scoped CodexBar GNOME daemon",
+    ".B --version",
+    ".B --check",
+    ".B --print-snapshot",
+    "Credential import, profile discovery, desktop secret-store access, dashboard",
+    "collection, browser integration, and local network APIs are outside the v0.1",
+):
+    if needle not in man_page:
+        raise SystemExit(f"packaging/man/codexbar-linuxd.1 missing manual-page content: {needle}")
+for forbidden in ("cookie", "keyring", "localhost", "TcpListener", "provider dashboard", "provider web fetch"):
+    if forbidden.lower() in man_page.lower():
+        raise SystemExit(f"packaging/man/codexbar-linuxd.1 contains forbidden release-scope marker: {forbidden}")
 
 import json
 import xml.etree.ElementTree as ET
@@ -294,8 +323,10 @@ for needle in [
     "validate_no_build_path_leaks \"$PKG_ROOT/usr/bin/codexbar-linuxd\"",
     "strings -a \"$binary\"",
     "gzip -cn9 \"$ROOT/packaging/debian/changelog\"",
+    "gzip -cn9 \"$ROOT/packaging/man/codexbar-linuxd.1\"",
     "usr/share/gnome-shell/extensions/$EXTENSION_UUID",
     "usr/share/glib-2.0/schemas/$SCHEMA_ID.gschema.xml",
+    "usr/share/man/man1/codexbar-linuxd.1.gz",
     "usr/share/dbus-1/services/org.codexbar.Linux1.service",
     "usr/lib/systemd/user/codexbar-linuxd.service",
     "--check",

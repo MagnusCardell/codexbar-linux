@@ -75,6 +75,18 @@ the command or smoke evidence used.
   `sudo apt install` succeeded, the local `_apt` sandbox warning was non-fatal,
   `/usr/bin/codexbar-linuxd --check` passed, D-Bus activation passed, and the
   packaged extension path was verified under `/usr/share/...`.
+- Release smoke documentation recommends copying the local `.deb` to `/tmp`
+  before `sudo apt install` so the `_apt` sandbox user can read the package
+  without a project-directory permission note.
+- Daemon/package version metadata passes: the daemon crate version is `0.1.0`,
+  the Debian package version is `0.1.0-1`, `/usr/bin/codexbar-linuxd --version`
+  reports `codexbar-linuxd 0.1.0`, `/usr/bin/codexbar-linuxd --check` validates
+  version metadata quietly, and `GetDaemonInfo.version` reports `0.1.0` rather
+  than `0.0.0`.
+- Package metadata/content inspection passes: `dpkg-deb -I` and `dpkg-deb -c`
+  show the expected package name, version, dependencies, daemon, D-Bus service,
+  systemd user unit, system GNOME extension path, GSettings schema,
+  `codexbar-linuxd(1)` manual page, and release smoke docs.
 - Full repository gate passes: `./scripts/check.sh` completes successfully on
   Ubuntu 24.04 or newer.
 - Live GNOME 46+ Wayland smoke passes after `./scripts/install-local.sh`, an
@@ -102,7 +114,7 @@ the command or smoke evidence used.
   `dist/codexbar-linux_0.1.0-1_<arch>.deb` from source without requiring live
   GNOME Shell or upstream `codexbar`, and the package contains the daemon,
   session D-Bus service, systemd user unit, system-wide GNOME extension files,
-  GSettings schema, and release smoke docs.
+  GSettings schema, `codexbar-linuxd(1)` manual page, and release smoke docs.
 - Package install/uninstall smoke passes: installing the development `.deb`
   compiles schemas, does not auto-enable the extension, does not start a system
   daemon or install a TCP listener, supports D-Bus activation after
@@ -111,9 +123,10 @@ the command or smoke evidence used.
 - Package UI smoke is accepted only when
   `gnome-extensions info codexbar-linux@codexbar.dev` reports
   `Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`. If it
-  reports `Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`,
-  a user-local development extension is shadowing the package extension and the
-  package UI smoke is invalid.
+  reports any path under
+  `${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/codexbar-linux@codexbar.dev`
+  or an expanded user-local equivalent, a development extension is shadowing the
+  package extension and the package UI smoke is invalid.
 - Task 05C package candidate validation records whether the package was tested
   through real `sudo apt install/remove/purge` or only through non-mutating
   package inspection and `apt-get -s install`. A candidate remains blocked from
@@ -128,7 +141,9 @@ the command or smoke evidence used.
 - Packaged release binaries must not leak exact private build-root, home, Cargo,
   Rustup, or package-staging paths. The development package builder must compile
   with path remapping, strip the staged daemon, and fail the package build if
-  those exact paths remain in the packaged daemon.
+  those exact paths remain in the packaged daemon. Path-leak scanner failure
+  output must report only redacted marker classes/counts, not the raw matching
+  private paths.
 - Diagnostics/cache/log-like output redaction passes: copied diagnostics,
   normalized cache, D-Bus payloads, fixture outputs, and command summaries
   contain no raw secrets, raw identity, raw provider payloads, raw paths,

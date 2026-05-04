@@ -95,7 +95,7 @@ release_rustflags() {
 
 validate_no_build_path_leaks() {
   local binary="$1"
-  local leaks="" cargo_home rustup_home
+  local leaks="" leak_label="" cargo_home rustup_home
   cargo_home="${CARGO_HOME:-}"
   if [[ -z "$cargo_home" && -n "${HOME:-}" ]]; then
     cargo_home="$HOME/.cargo"
@@ -111,15 +111,29 @@ validate_no_build_path_leaks() {
     fi
     leaks="$(strings -a "$binary" | LC_ALL=C grep -F "$marker" || true)"
     if [[ -n "$leaks" ]]; then
+      case "$marker" in
+        "$ROOT") leak_label="source-root" ;;
+        "$BUILD_ROOT") leak_label="package-build-root" ;;
+        "$PKG_ROOT") leak_label="package-staging-root" ;;
+        "$cargo_home") leak_label="cargo-home" ;;
+        "$rustup_home") leak_label="rustup-home" ;;
+        "${HOME:-}") leak_label="home" ;;
+        *) leak_label="private-path" ;;
+      esac
       break
     fi
   done
   if [[ -z "$leaks" ]]; then
     leaks="$(strings -a "$binary" | LC_ALL=C grep -E '/Users/|/private/var/|target/debian|daemon/target/release' || true)"
+    if [[ -n "$leaks" ]]; then
+      leak_label="path-pattern"
+    fi
   fi
   if [[ -n "$leaks" ]]; then
+    local leak_count
+    leak_count="$(printf '%s\n' "$leaks" | sed '/^$/d' | wc -l | awk '{print $1}')"
     echo "Packaged daemon contains build-host path strings; release build path remapping failed." >&2
-    printf '%s\n' "$leaks" | sed -n '1,20p' >&2
+    echo "Redacted leak class: ${leak_label:-private-path}; matching strings: $leak_count" >&2
     exit 1
   fi
 }
@@ -144,9 +158,9 @@ check_inputs() {
   require_file "packaging/debian/changelog"
   require_file "packaging/debian/control"
   require_file "packaging/debian/postinst"
-  require_file "packaging/debian/prerm"
   require_file "packaging/debian/postrm"
   require_file "packaging/debian/copyright"
+  require_file "packaging/man/codexbar-linuxd.1"
   require_file "packaging/dbus/org.codexbar.Linux1.service"
   require_file "packaging/systemd/codexbar-linuxd.service"
   require_file "extension/metadata.json"
@@ -158,6 +172,7 @@ check_inputs() {
   require_file "LICENSE"
   require_file "docs/gnome-smoke-test.md"
   require_file "docs/release-smoke-test.md"
+  require_file "docs/release-notes-0.1.0.md"
 
   if [[ -z "$(package_version)" ]]; then
     echo "Could not parse package version from packaging/debian/changelog" >&2
@@ -256,13 +271,16 @@ stage_package() {
   install -Dm644 "$ROOT/LICENSE" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/LICENSE"
   install -Dm644 "$ROOT/docs/gnome-smoke-test.md" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/gnome-smoke-test.md"
   install -Dm644 "$ROOT/docs/release-smoke-test.md" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/release-smoke-test.md"
+  install -Dm644 "$ROOT/docs/release-notes-0.1.0.md" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/release-notes-0.1.0.md"
   install -Dm644 "$ROOT/packaging/debian/copyright" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/copyright"
   gzip -cn9 "$ROOT/packaging/debian/changelog" > "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/changelog.Debian.gz"
   chmod 0644 "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/changelog.Debian.gz"
+  install -d -m 0755 "$PKG_ROOT/usr/share/man/man1"
+  gzip -cn9 "$ROOT/packaging/man/codexbar-linuxd.1" > "$PKG_ROOT/usr/share/man/man1/codexbar-linuxd.1.gz"
+  chmod 0644 "$PKG_ROOT/usr/share/man/man1/codexbar-linuxd.1.gz"
 
   install -d -m 0755 "$PKG_ROOT/DEBIAN"
   install -m 0755 "$ROOT/packaging/debian/postinst" "$PKG_ROOT/DEBIAN/postinst"
-  install -m 0755 "$ROOT/packaging/debian/prerm" "$PKG_ROOT/DEBIAN/prerm"
   install -m 0755 "$ROOT/packaging/debian/postrm" "$PKG_ROOT/DEBIAN/postrm"
 
   local architecture installed_size

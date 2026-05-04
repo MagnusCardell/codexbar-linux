@@ -71,6 +71,8 @@ If it reports the user-local path instead:
 Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
 ```
 
+or any expanded path under
+`${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/codexbar-linux@codexbar.dev`,
 then a development extension is shadowing the package extension. The package UI
 smoke is not valid until the user-local shadow is removed or moved aside, the
 session is restarted if needed, and `gnome-extensions info` reports the

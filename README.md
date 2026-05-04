@@ -26,10 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 05D upstream CLI UX polish** status, building on
-the Task 03 GNOME Shell vertical slice, Task 04R no-browser cleanup, Task 05A
-upstream-CLI-only hardening, Task 05B development package work, and Task 05C
-package smoke validation.
+This repository is at **Task 05E v0.1 release-candidate cleanup** status,
+building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser cleanup,
+Task 05A upstream-CLI-only hardening, Task 05B development package work, Task
+05C package smoke validation, and Task 05D upstream CLI UX polish.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -57,6 +57,10 @@ Present:
 - Development package hardening that strips the packaged daemon, remaps private
   build paths in release binaries, and rejects packaged daemon binaries that
   retain exact private build-root, home, Cargo, Rustup, or staging paths.
+- Daemon/package version metadata aligned at `0.1.0` / `0.1.0-1`, with
+  `codexbar-linuxd --version`, quiet `codexbar-linuxd --check`, safe
+  `GetDaemonInfo.build` metadata, and package version consistency tests.
+- Minimal `codexbar-linuxd(1)` manual page installed by the development package.
 - Local install/uninstall bootstrap scripts that copy only runtime extension
   files, compile schemas strictly, and remove owned files while preserving user
   config/cache.
@@ -69,6 +73,7 @@ Present:
   `/usr/share`, extension enablement, top-bar indicator, and popover refresh.
 - Upstream CLI UX state copy in `docs/upstream-cli-ux.md`.
 - Upstream CLI setup guidance in `docs/upstream-cli-setup.md`.
+- v0.1 release notes in `docs/release-notes-0.1.0.md`.
 
 Out of production scope after Task 04R:
 
@@ -78,7 +83,7 @@ Out of production scope after Task 04R:
 - provider web fetches or dashboard scraping;
 - browser extension or localhost/TCP bridge.
 
-Not implemented after Task 05D:
+Not implemented after Task 05E:
 
 - Signed repository distribution and package upgrade matrix coverage.
 - Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
