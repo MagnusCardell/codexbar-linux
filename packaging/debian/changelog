@@ -1,5 +1,7 @@
-codexbar-linux (0.0.0-1) unstable; urgency=medium
+codexbar-linux (0.1.0-1) unstable; urgency=medium
 
-  * Bootstrap packaging skeleton. Task 08 wires real Debian package builds.
+  * Development package for the upstream-CLI-only GNOME Shell companion.
+  * Install user-scoped D-Bus activation, systemd user unit, extension assets,
+    and GSettings schema without auto-enabling the extension.
 
- -- CodexBar GNOME Maintainers <maintainers@example.invalid>  Mon, 27 Apr 2026 12:00:00 +0000
+ -- CodexBar GNOME Maintainers <maintainers@example.invalid>  Mon, 04 May 2026 12:00:00 +0000

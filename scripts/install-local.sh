@@ -44,6 +44,11 @@ record_manifest_path() {
 
 install_runtime_extension() {
   EXT_DIR="$DATA_HOME/gnome-shell/extensions/$EXTENSION_UUID"
+  if [[ -e "$EXT_DIR" && ! -f "$EXT_DIR/$OWNERSHIP_MARKER" ]]; then
+    echo "Refusing to replace extension directory without CodexBar ownership marker: $EXT_DIR" >&2
+    echo "Move or remove that directory manually if it is safe to replace." >&2
+    exit 1
+  fi
   rm -rf "$EXT_DIR"
   install -d -m 0755 "$EXT_DIR" "$EXT_DIR/src" "$EXT_DIR/schemas"
   for rel_file in metadata.json extension.js prefs.js stylesheet.css; do
@@ -90,8 +95,9 @@ write_and_validate_service_files() {
 
 require_tool cargo
 require_tool glib-compile-schemas
+require_tool python3
 
-cargo build --manifest-path "$ROOT/daemon/Cargo.toml"
+cargo build --manifest-path "$ROOT/daemon/Cargo.toml" --locked
 
 install -Dm755 "$ROOT/daemon/target/debug/codexbar-linuxd" "$DAEMON_BIN"
 install -d -m 0755 "$MANIFEST_DIR"

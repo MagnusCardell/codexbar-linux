@@ -209,6 +209,9 @@ Manual refresh bypasses normal interval throttling but still respects concurrenc
 
 ## Packaging rules
 
+Task 05B chooses Option A: a development `.deb` package for local v0.1 release
+smoke testing.
+
 Primary package installs:
 
 - `/usr/bin/codexbar-linuxd`
@@ -217,7 +220,11 @@ Primary package installs:
 - `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/`
 - `/usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml`
 
-Package post-install may compile schemas and reload systemd user daemon. It must not silently enable the extension.
+Package maintainer scripts compile GSettings schemas when the GLib tool is
+available. They must not silently enable the extension, start a system daemon,
+create a TCP/listener unit, touch browser/keyring/web files, or assume an active
+user session. Active user managers may need `systemctl --user daemon-reload`
+after package install or removal.
 
 ## Open decisions
 

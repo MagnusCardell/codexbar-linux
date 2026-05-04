@@ -4,6 +4,9 @@ Use these steps on a real GNOME Shell 46+ session after installing the
 extension, schema, D-Bus service file, and user daemon from the local package or
 development install script.
 
+For v0.1 release sign-off, also run the local development and Debian package
+paths in `docs/release-smoke-test.md`.
+
 ## Record Environment
 
 Capture these values in the test notes:

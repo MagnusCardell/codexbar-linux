@@ -1,12 +1,14 @@
 [Unit]
-Description=CodexBar Linux bootstrap user daemon
+Description=CodexBar GNOME user daemon
 Documentation=https://codexbar.dev
 
 [Service]
 Type=dbus
 BusName=org.codexbar.Linux1
 ExecStart=/usr/bin/codexbar-linuxd
-Restart=no
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=10s
 
 [Install]
 WantedBy=default.target

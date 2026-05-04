@@ -7,3 +7,7 @@ extension/prefs.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
 extension/stylesheet.css usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
 extension/src/*.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/src/
 schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml usr/share/glib-2.0/schemas/
+README.md usr/share/doc/codexbar-linux/
+LICENSE usr/share/doc/codexbar-linux/
+docs/gnome-smoke-test.md usr/share/doc/codexbar-linux/
+docs/release-smoke-test.md usr/share/doc/codexbar-linux/

@@ -20,6 +20,7 @@ cargo fmt --manifest-path "$ROOT/daemon/Cargo.toml" -- --check
 cargo clippy --manifest-path "$ROOT/daemon/Cargo.toml" --all-targets -- -D warnings
 # Ignored live upstream CLI smoke tests are opt-in and intentionally excluded.
 cargo test --manifest-path "$ROOT/daemon/Cargo.toml"
+cargo run --manifest-path "$ROOT/daemon/Cargo.toml" -- --check
 DBUS_TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/codexbar-dbus-test.XXXXXX")"
 cleanup_dbus_test_home() {
   rm -rf "$DBUS_TEST_HOME"

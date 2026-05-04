@@ -56,6 +56,10 @@ Deliverables:
 - Smoke test script for Ubuntu 24.04/26.04 VMs.
 - Static no-browser/web guard in CI.
 
+Task 05B status: the development `.deb` package path is wired for local v0.1
+smoke testing. Signed repository distribution, upgrade testing, and recorded
+Ubuntu 24.04/26.04 package smoke evidence remain release sign-off work.
+
 Exit criteria:
 
 - `.deb` installs daemon, service, extension, schema.

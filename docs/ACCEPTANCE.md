@@ -82,9 +82,16 @@ the command or smoke evidence used.
   in user-local paths, does not auto-enable the extension, compiles schemas
   strictly, reloads the user systemd manager, and uninstall removes owned files
   while preserving user config/cache.
-- Package skeleton status is clear: `scripts/build-deb.sh` intentionally fails
-  with the Task 08 not-implemented message. A real `.deb` release cannot be
-  claimed until Task 08 wires Debian packaging to build from source.
+- Development package build passes: `./scripts/build-deb.sh` produces
+  `dist/codexbar-linux_0.1.0-1_<arch>.deb` from source without requiring live
+  GNOME Shell or upstream `codexbar`, and the package contains the daemon,
+  session D-Bus service, systemd user unit, system-wide GNOME extension files,
+  GSettings schema, and release smoke docs.
+- Package install/uninstall smoke passes: installing the development `.deb`
+  compiles schemas, does not auto-enable the extension, does not start a system
+  daemon or install a TCP listener, supports D-Bus activation after
+  `systemctl --user daemon-reload`, and package removal removes only
+  package-owned system files while preserving user config/cache.
 - Diagnostics/cache/log-like output redaction passes: copied diagnostics,
   normalized cache, D-Bus payloads, fixture outputs, and command summaries
   contain no raw secrets, raw identity, raw provider payloads, raw paths,

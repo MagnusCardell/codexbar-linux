@@ -26,9 +26,9 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 05A upstream-CLI-only hardening** status, building
-on the Task 03 GNOME Shell vertical slice and Task 04R no-browser cleanup, with
-live GNOME 46 Wayland activation smoke proven.
+This repository is at **Task 05B packaging and release-install hardening**
+status, building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser
+cleanup, and Task 05A upstream-CLI-only hardening.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -51,7 +51,8 @@ Present:
 - GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
 - Preferences UI that exposes only the five GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
-- User-scoped systemd/D-Bus and Debian packaging skeleton files.
+- User-scoped systemd/D-Bus activation files and a development Debian package
+  path for v0.1 local release smoke testing.
 - Local install/uninstall bootstrap scripts that copy only runtime extension
   files, compile schemas strictly, and remove owned files while preserving user
   config/cache.
@@ -66,10 +67,10 @@ Out of production scope after Task 04R:
 - provider web fetches or dashboard scraping;
 - browser extension or localhost/TCP bridge.
 
-Not implemented after Task 05A:
+Not implemented after Task 05B:
 
-- Debian package build wiring. `scripts/build-deb.sh` intentionally fails until
-  Task 08 wires a real `.deb` build from source.
+- Signed repository distribution, package upgrade matrix coverage, and recorded
+  package-install GNOME smoke evidence for Ubuntu 24.04/26.04 release sign-off.
 
 `TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
 reserved and unsupported. The daemon validates the request JSON and returns a
@@ -98,6 +99,7 @@ Useful narrower checks:
 ./scripts/validate-gsettings.sh
 ./scripts/validate-packaging.sh
 ./scripts/validate-no-browser-web-surface.sh
+./scripts/build-deb.sh --check
 ./scripts/test-fixtures.sh
 ./scripts/lint-gjs.sh
 cargo fmt --manifest-path daemon/Cargo.toml -- --check
@@ -124,7 +126,8 @@ CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
 
 Static checks cannot prove GNOME Shell lifecycle behavior. For Task 03 changes
 to extension runtime code, run the detailed [GNOME smoke checklist](docs/gnome-smoke-test.md)
-on GNOME 46+:
+on GNOME 46+. For release packaging, run both paths in
+[Release Smoke Test](docs/release-smoke-test.md):
 
 ```bash
 ./scripts/install-local.sh
@@ -142,6 +145,25 @@ D-Bus, disabling removes the panel item, and re-enabling does not create duplica
 panel items or timers. Install scripts and package hooks must not enable the
 extension automatically; the `gnome-extensions enable` command above is the
 explicit user action.
+
+## Development Debian package
+
+Task 05B chooses **Option A: development `.deb` package**. The package installs
+system-owned files under `/usr/bin`, `/usr/share/dbus-1/services`,
+`/usr/lib/systemd/user`, `/usr/share/gnome-shell/extensions`, and
+`/usr/share/glib-2.0/schemas`. It does not enable the GNOME extension, start a
+system daemon, install any TCP listener, or require a live GNOME session or
+upstream `codexbar` CLI during package build.
+
+```bash
+./scripts/build-deb.sh
+sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
+systemctl --user daemon-reload
+gnome-extensions enable codexbar-linux@codexbar.dev
+```
+
+The user still controls extension enablement. On Wayland, a logout/login may be
+needed before GNOME Shell discovers newly installed system extension files.
 
 ## Repository layout
 

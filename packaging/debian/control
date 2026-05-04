@@ -2,13 +2,15 @@ Source: codexbar-linux
 Section: gnome
 Priority: optional
 Maintainer: CodexBar GNOME Maintainers <maintainers@example.invalid>
-Build-Depends: debhelper-compat (= 13), cargo, rustc
+Build-Depends: debhelper-compat (= 13), cargo, rustc, libglib2.0-bin, dbus
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 
 Package: codexbar-linux
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, gnome-shell
-Description: Bootstrap skeleton for CodexBar GNOME
- Native Ubuntu/GNOME top-bar companion skeleton for CodexBar.
- Task 00 packaging is structural only; Task 08 wires real Debian packaging.
+Depends: ${misc:Depends}, ${shlibs:Depends}, dbus-user-session | dbus-session-bus, gnome-shell (>= 46), gir1.2-adw-1, gir1.2-gtk-4.0, libgcc-s1, libglib2.0-bin, systemd
+Description: Native GNOME companion for upstream CodexBar usage snapshots
+ CodexBar GNOME installs a user-scoped Rust daemon, D-Bus session
+ activation, a systemd user unit, GSettings schema, and GNOME Shell extension
+ assets for the upstream-CLI-only CodexBar data path. It does not enable the
+ extension automatically.

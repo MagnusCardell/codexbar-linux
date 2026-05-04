@@ -11,6 +11,9 @@ EXT_DIR="$DATA_HOME/gnome-shell/extensions/$EXTENSION_UUID"
 MANIFEST_DIR="$DATA_HOME/codexbar-linux"
 MANIFEST_FILE="$MANIFEST_DIR/install-local-manifest.txt"
 OWNERSHIP_MARKER=".codexbar-linux-owned"
+DAEMON_BIN="$PREFIX/bin/codexbar-linuxd"
+USER_SERVICE_FILE="$USER_SYSTEMD_DIR/codexbar-linuxd.service"
+DBUS_SERVICE_FILE="$DBUS_SERVICE_DIR/org.codexbar.Linux1.service"
 
 reload_user_systemd() {
   if ! command -v systemctl >/dev/null 2>&1; then
@@ -23,23 +26,65 @@ reload_user_systemd() {
   fi
 }
 
+canonical_path() {
+  realpath -m -- "$1"
+}
+
+is_exact_path() {
+  [[ "$(canonical_path "$1")" == "$(canonical_path "$2")" ]]
+}
+
+is_inside_dir() {
+  local path_canon dir_canon
+  path_canon="$(canonical_path "$1")"
+  dir_canon="$(canonical_path "$2")"
+  [[ "$path_canon" == "$dir_canon"/* ]]
+}
+
+is_owned_user_service() {
+  [[ -f "$USER_SERVICE_FILE" ]] && grep -F "ExecStart=$PREFIX/bin/codexbar-linuxd" "$USER_SERVICE_FILE" >/dev/null 2>&1
+}
+
+is_owned_dbus_service() {
+  [[ -f "$DBUS_SERVICE_FILE" ]] && grep -F "Exec=$PREFIX/bin/codexbar-linuxd" "$DBUS_SERVICE_FILE" >/dev/null 2>&1
+}
+
 safe_remove_file() {
   local path="$1"
-  case "$path" in
-    "$PREFIX"/bin/codexbar-linuxd|"$USER_SYSTEMD_DIR"/codexbar-linuxd.service|"$DBUS_SERVICE_DIR"/org.codexbar.Linux1.service|"$EXT_DIR"/*|"$EXT_DIR"/.codexbar-linux-owned)
+  if is_exact_path "$path" "$DAEMON_BIN"; then
+    rm -f "$path"
+    return 0
+  fi
+  if is_exact_path "$path" "$USER_SERVICE_FILE"; then
+    if is_owned_user_service; then
       rm -f "$path"
-      ;;
-    *)
-      echo "Skipping non-owned path from manifest: $path" >&2
-      ;;
-  esac
+    else
+      echo "Skipping user service not owned by local install: $path" >&2
+    fi
+    return 0
+  fi
+  if is_exact_path "$path" "$DBUS_SERVICE_FILE"; then
+    if is_owned_dbus_service; then
+      rm -f "$path"
+    else
+      echo "Skipping D-Bus service not owned by local install: $path" >&2
+    fi
+    return 0
+  fi
+  if [[ -f "$EXT_DIR/$OWNERSHIP_MARKER" ]] && is_inside_dir "$path" "$EXT_DIR"; then
+    rm -f "$path"
+    return 0
+  fi
+  echo "Skipping non-owned path from manifest: $path" >&2
 }
 
 stop_user_service() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 0
   fi
-  systemctl --user stop codexbar-linuxd.service >/dev/null 2>&1 || true
+  if is_owned_user_service || is_owned_dbus_service; then
+    systemctl --user stop codexbar-linuxd.service >/dev/null 2>&1 || true
+  fi
 }
 
 stop_user_service
@@ -56,8 +101,16 @@ if [[ -f "$MANIFEST_FILE" ]]; then
   done < "$MANIFEST_FILE"
   rm -f "$MANIFEST_FILE"
 else
-  rm -f "$USER_SYSTEMD_DIR/codexbar-linuxd.service"
-  rm -f "$DBUS_SERVICE_DIR/org.codexbar.Linux1.service"
+  if is_owned_user_service; then
+    rm -f "$USER_SERVICE_FILE"
+  else
+    echo "Skipping user service not owned by local install: $USER_SERVICE_FILE" >&2
+  fi
+  if is_owned_dbus_service; then
+    rm -f "$DBUS_SERVICE_FILE"
+  else
+    echo "Skipping D-Bus service not owned by local install: $DBUS_SERVICE_FILE" >&2
+  fi
   if [[ -f "$EXT_DIR/$OWNERSHIP_MARKER" ]]; then
     rm -rf "$EXT_DIR"
   else
@@ -91,4 +144,4 @@ fi
 reload_user_systemd
 
 echo "Removed CodexBar GNOME files installed by scripts/install-local.sh."
-echo "User config/cache is left untouched. Task 08 will define package purge behavior."
+echo "User config/cache is left untouched."

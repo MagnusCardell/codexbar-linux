@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+compile_gsettings_schemas() {
+    if command -v glib-compile-schemas >/dev/null 2>&1; then
+        glib-compile-schemas /usr/share/glib-2.0/schemas
+    fi
+}
+
+reload_user_systemd_if_available() {
+    if command -v systemctl >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+}
+
+case "$1" in
+    remove|purge|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        compile_gsettings_schemas
+        reload_user_systemd_if_available
+        ;;
+esac
+
+exit 0
