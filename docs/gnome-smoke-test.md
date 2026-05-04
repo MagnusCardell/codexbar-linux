@@ -97,22 +97,33 @@ activation yet; restart the full user session and rerun the discovery checks.
    `reason=manual`, `force=true`, and `busyBehavior=return_existing`.
 4. If `CODEXBAR_CLI` is configured, verify upstream_cli-normalized Codex data
    appears with `sourceAdapter=upstream_cli` and no raw identity/path fields.
-5. Press Diagnostics on a provider and copy the payload. Confirm copied text is
+5. Run a missing-CLI degraded pass:
+   `systemctl --user unset-environment CODEXBAR_CLI`, ensure `codexbar` is not
+   resolvable for the daemon process, restart `codexbar-linuxd.service`, press
+   Refresh, and confirm the UI remains recoverable with a
+   `missing_dependency` provider state and safe `upstream_cli_missing`
+   diagnostics. The copied diagnostics must not include raw PATH contents,
+   stdout, stderr, or local filesystem paths.
+6. If a non-executable CLI path is being tested, set
+   `CODEXBAR_CLI=/path/to/non-executable-codexbar` for the user service,
+   restart the daemon, press Refresh, and confirm the UI reports a safe
+   not-executable dependency diagnostic without crashing.
+7. Press Diagnostics on a provider and copy the payload. Confirm copied text is
    redacted and contains no raw cookies, tokens, emails, browser paths, stdout,
    stderr, provider payloads, or request headers.
-6. Stop the daemon:
+8. Stop the daemon:
    `systemctl --user stop codexbar-linuxd.service`.
    Confirm the panel/popover render a daemon-unavailable state instead of going
    blank.
-7. Restart the daemon:
+9. Restart the daemon:
    `systemctl --user restart codexbar-linuxd.service`.
    Confirm Retry or Refresh recovers D-Bus data without reloading GNOME Shell.
-8. Open preferences and switch `panel-mode` through `merged`, `provider`, and
+10. Open preferences and switch `panel-mode` through `merged`, `provider`, and
    `minimal`. Confirm each mode updates the same top-bar item and opens the
    full popover.
-9. Change `reset-time-format`, `theme`, and `selected-provider`. Confirm the
+11. Change `reset-time-format`, `theme`, and `selected-provider`. Confirm the
    display changes but no daemon config files are edited by preferences.
-10. Disable and re-enable:
+12. Disable and re-enable:
     `gnome-extensions disable codexbar-linux@codexbar.dev` then
     `gnome-extensions enable codexbar-linux@codexbar.dev`.
     Confirm only one panel item remains and refresh/diagnostics still work.
@@ -146,8 +157,9 @@ Use `docs/gnome-visual-target.md` as the visual acceptance source of truth.
   and does not repeat the same state twice.
 - `Usage Dashboard` and `Status Page` appear only when safe provider URLs are
   present; unsafe or absent URLs omit those actions.
-- Footer is one calm line that communicates daemon, CLI, cost, and browser
-  import capability without showing raw paths or debug payloads.
+- Footer is one calm line that communicates daemon, CLI, cost, and
+  `TestBrowserImport` unsupported/no-op status without showing raw paths or
+  debug payloads.
 - Disable/re-enable does not leave duplicate top-bar items, timers, signals, or
   stale popover actors behind.
 

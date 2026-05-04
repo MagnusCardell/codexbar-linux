@@ -225,6 +225,13 @@
   max-width: 30px;
 }
 
+.codexbar-panel-overflow {
+  font-size: 0.78em;
+  font-weight: 700;
+  color: #a8adb5;
+  min-width: 18px;
+}
+
 .codexbar-panel-meter-stack {
   width: 30px;
   min-width: 30px;

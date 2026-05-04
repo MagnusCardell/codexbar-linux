@@ -1,5 +1,9 @@
 target/release/codexbar-linuxd usr/bin/
 packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/
 packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/
-extension/* usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
+extension/metadata.json usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
+extension/extension.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
+extension/prefs.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
+extension/stylesheet.css usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/
+extension/src/*.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/src/
 schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml usr/share/glib-2.0/schemas/

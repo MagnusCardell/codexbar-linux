@@ -82,11 +82,18 @@ Responsibilities:
 The adapter invokes:
 
 ```bash
-codexbar --format json --json-only --provider all
+codexbar --format json --json-only --provider <provider> --source cli
+codexbar --format json --json-only --provider <provider> --source cli --status
 codexbar cost --format json --json-only --provider all
 codexbar config dump --pretty
 codexbar config validate --format json --json-only
 ```
+
+Usage/status refreshes default to the targeted `codex` provider unless daemon
+settings or `RefreshOptions.providers` select a different provider set. The
+adapter does not default usage/status to `--provider all`; all-provider
+usage/status probes are explicit only. Cost remains the upstream all-provider
+cost command and deliberately omits `--source`.
 
 All invocations require:
 

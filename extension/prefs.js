@@ -49,7 +49,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
     _buildPlaceholderGroup() {
         const group = new Adw.PreferencesGroup({
             title: 'Daemon settings',
-            description: 'Provider, browser import, refresh, and diagnostics settings are daemon-owned.',
+            description: 'Provider, refresh, diagnostics, and reserved unsupported browser-import settings are daemon-owned.',
         });
 
         const row = new Adw.ActionRow({

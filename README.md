@@ -26,8 +26,9 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 03 GNOME Shell vertical slice plus Task 04R
-no-browser cleanup** status, with live GNOME 46 Wayland activation smoke proven.
+This repository is at **Task 05A upstream-CLI-only hardening** status, building
+on the Task 03 GNOME Shell vertical slice and Task 04R no-browser cleanup, with
+live GNOME 46 Wayland activation smoke proven.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -51,7 +52,9 @@ Present:
 - Preferences UI that exposes only the five GSettings-owned UI keys from `docs/CONTRACTS.md`.
 - GSettings schema under `schemas/`.
 - User-scoped systemd/D-Bus and Debian packaging skeleton files.
-- Local install/uninstall bootstrap scripts.
+- Local install/uninstall bootstrap scripts that copy only runtime extension
+  files, compile schemas strictly, and remove owned files while preserving user
+  config/cache.
 - Validation scripts and GitHub Actions check workflow.
 - Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
 
@@ -63,9 +66,10 @@ Out of production scope after Task 04R:
 - provider web fetches or dashboard scraping;
 - browser extension or localhost/TCP bridge.
 
-Not implemented after Task 03:
+Not implemented after Task 05A:
 
-- Debian package build wiring.
+- Debian package build wiring. `scripts/build-deb.sh` intentionally fails until
+  Task 08 wires a real `.deb` build from source.
 
 `TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
 reserved and unsupported. The daemon validates the request JSON and returns a

@@ -385,13 +385,14 @@ fn assert_dbus_test_paths_are_isolated(daemon_info_json: &str, tmp: &TempDir) {
     let cache_file = info["paths"]["cacheFile"].as_str().expect("cache path");
     let tmp_display = tmp.path().display().to_string();
     assert!(
-        config_file.starts_with(&tmp_display),
-        "D-Bus contract test config path is not isolated: {config_file}"
+        !config_file.contains(&tmp_display),
+        "D-Bus daemon info must not expose raw temp config path: {config_file}"
     );
     assert!(
-        cache_file.starts_with(&tmp_display),
-        "D-Bus contract test cache path is not isolated: {cache_file}"
+        !cache_file.contains(&tmp_display),
+        "D-Bus daemon info must not expose raw temp cache path: {cache_file}"
     );
+    common::assert_public_json_safe(daemon_info_json);
 }
 
 fn method_error_name(err: &zbus::Error) -> String {

@@ -29,6 +29,7 @@ import {
     selectProvider,
     applyDiagnosticsJson,
     stateMeta,
+    withClientError,
 } from '../src/state.js';
 
 const FIXTURE_STATES = [
@@ -62,6 +63,8 @@ function main() {
     assertMeterCssClassNamesMatchStylesheet();
     assertSnapshotRejectsSchemaDrift();
     assertFooterStatusIncludesCostCapability();
+    assertDaemonUnavailableSyntheticStateIsConsistent();
+    assertProviderStatusUsesSafeDaemonDescription();
     assertHeaderStatusPreservesNonOkStates();
     assertRefreshFinishedRejectsUnsafeResults();
     assertRefreshFinishedRejectsSchemaDrift();
@@ -149,7 +152,7 @@ function assertViewModelUsesStateCopyMap() {
     assertEqual(view.titleAction.label, 'Refresh');
     assertEqual(view.titleAction.action, 'refresh');
     assertEqual(view.titleAction.reactive, true);
-    assertEqual(view.footerStatus, 'Daemon running · CLI available · Cost unknown · Browser import unknown');
+    assertEqual(view.footerStatus, 'Daemon running · CLI available · Cost unknown · Browser import unsupported');
 }
 
 function assertViewModelBuildsProviderStripAndSelectedSurface() {
@@ -494,13 +497,46 @@ function assertFooterStatusIncludesCostCapability() {
     assertEqual(refreshButtonLabel('daemon_unavailable', true), 'Refreshing');
     assertEqual(
         footerStatusText(null, null),
-        'Daemon unknown · CLI unknown · Cost unknown · Browser import unknown',
+        'Daemon unknown · CLI unknown · Cost unknown · Browser import unsupported',
     );
     const footer = footerStatusText(
         {state: 'degraded', upstreamCli: {available: true}},
         {cost: true, browserImport: false},
     );
-    assertEqual(footer, 'Daemon degraded · CLI available · Cost available · Browser import unavailable');
+    assertEqual(footer, 'Daemon degraded · CLI available · Cost available · Browser import unsupported');
+    assertEqual(
+        footerStatusText({state: 'ok', upstreamCli: {available: true}}, {cost: true, browserImport: true}),
+        'Daemon running · CLI available · Cost available · Browser import unsupported',
+    );
+}
+
+function assertDaemonUnavailableSyntheticStateIsConsistent() {
+    const state = withClientError(
+        createInitialState(0),
+        'Daemon D-Bus service is unavailable',
+        0,
+        'daemon_unavailable',
+        'daemon_unavailable',
+    );
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    assertEqual(view.state, 'daemon_unavailable');
+    assertEqual(view.headerStatus, 'Daemon unavailable');
+    assertEqual(view.refreshLabel, 'Retry');
+    assertEqual(view.footerStatus, 'Daemon unavailable · CLI unknown · Cost unknown · Browser import unsupported');
+    assertEqual(view.selectedRow.state, 'missing_dependency');
+    assertEqual(view.selectedRow.statusDescription, 'Daemon D-Bus service is unavailable');
+}
+
+function assertProviderStatusUsesSafeDaemonDescription() {
+    const snapshot = readJson('fixtures/snapshots/missing_dependency.json');
+    snapshot.providers[0].status.description = 'Configured CodexBar CLI is not executable';
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    assertEqual(view.selectedRow.statusDescription, 'Configured CodexBar CLI is not executable');
+
+    snapshot.providers[0].status.description = '/home/user/.config/codexbar/private';
+    const unsafe = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    assertEqual(unsafe.clientState, 'parse_error');
 }
 
 function assertHeaderStatusPreservesNonOkStates() {

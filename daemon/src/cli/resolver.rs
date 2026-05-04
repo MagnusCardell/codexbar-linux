@@ -47,27 +47,42 @@ impl CliResolver {
             };
         }
 
+        let mut saw_not_executable = false;
         let Some(path) = env::var_os("PATH") else {
-            return CliResolution::Missing {
-                diagnostic_code: "upstream_cli_missing",
-            };
+            return resolve_linuxbrew_or_missing(false);
         };
         for dir in env::split_paths(&path) {
             let candidate = dir.join("codexbar");
             if is_executable_file(&candidate) {
                 return CliResolution::Found { path: candidate };
             }
-        }
-
-        for candidate in linuxbrew_candidates() {
-            if is_executable_file(&candidate) {
-                return CliResolution::Found { path: candidate };
+            if candidate.exists() {
+                saw_not_executable = true;
             }
         }
 
-        CliResolution::Missing {
-            diagnostic_code: "upstream_cli_missing",
+        resolve_linuxbrew_or_missing(saw_not_executable)
+    }
+}
+
+fn resolve_linuxbrew_or_missing(mut saw_not_executable: bool) -> CliResolution {
+    for candidate in linuxbrew_candidates() {
+        if is_executable_file(&candidate) {
+            return CliResolution::Found { path: candidate };
         }
+        if candidate.exists() {
+            saw_not_executable = true;
+        }
+    }
+
+    if saw_not_executable {
+        return CliResolution::Missing {
+            diagnostic_code: "upstream_cli_not_executable",
+        };
+    }
+
+    CliResolution::Missing {
+        diagnostic_code: "upstream_cli_missing",
     }
 }
 
@@ -100,7 +115,17 @@ pub fn display_safe_path(path: &Path) -> String {
             return format!("~/{}", stripped.display());
         }
     }
-    path.display().to_string()
+    let path_text = path.to_string_lossy();
+    if path_text == "/usr/bin/codexbar" || path_text == "/usr/local/bin/codexbar" {
+        return path_text.to_string();
+    }
+    if path_text.ends_with("/.linuxbrew/bin/codexbar") {
+        return "linuxbrew:codexbar".to_string();
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("[redacted-path]/{name}"))
+        .unwrap_or_else(|| "[redacted-path]".to_string())
 }
 
 #[cfg(test)]
@@ -109,6 +134,12 @@ mod tests {
 
     use std::fs;
     use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn executable(path: &Path) {
         let mut file = fs::File::create(path).expect("file");
@@ -141,6 +172,7 @@ mod tests {
 
     #[test]
     fn path_lookup_works_and_missing_is_safe() {
+        let _guard = env_lock().lock().expect("env lock");
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("codexbar");
         executable(&path);
@@ -159,6 +191,66 @@ mod tests {
         ));
         if let Some(old_path) = old_path {
             env::set_var("PATH", old_path);
+        } else {
+            env::remove_var("PATH");
+        }
+    }
+
+    #[test]
+    fn path_lookup_reports_existing_non_executable_candidate() {
+        let _guard = env_lock().lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("codexbar");
+        fs::write(&path, b"not executable").expect("write");
+        let old_path = env::var_os("PATH");
+        env::set_var("PATH", tmp.path());
+
+        assert!(matches!(
+            CliResolver::new(None).resolve(),
+            CliResolution::Missing {
+                diagnostic_code: "upstream_cli_not_executable"
+            }
+        ));
+
+        if let Some(old_path) = old_path {
+            env::set_var("PATH", old_path);
+        } else {
+            env::remove_var("PATH");
+        }
+    }
+
+    #[test]
+    fn linuxbrew_candidate_reports_not_executable_and_path_is_public_safe() {
+        let _guard = env_lock().lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let candidate = tmp.path().join(".linuxbrew/bin/codexbar");
+        fs::create_dir_all(candidate.parent().expect("candidate parent")).expect("linuxbrew dir");
+        fs::write(&candidate, b"not executable").expect("write");
+        let old_path = env::var_os("PATH");
+        let old_home = env::var_os("HOME");
+        env::set_var("PATH", tmp.path().join("empty-path"));
+        env::set_var("HOME", tmp.path());
+
+        assert!(matches!(
+            CliResolver::new(None).resolve(),
+            CliResolution::Missing {
+                diagnostic_code: "upstream_cli_not_executable"
+            }
+        ));
+        assert_eq!(
+            display_safe_path(Path::new("/home/linuxbrew/.linuxbrew/bin/codexbar")),
+            "linuxbrew:codexbar"
+        );
+
+        if let Some(old_path) = old_path {
+            env::set_var("PATH", old_path);
+        } else {
+            env::remove_var("PATH");
+        }
+        if let Some(old_home) = old_home {
+            env::set_var("HOME", old_home);
+        } else {
+            env::remove_var("HOME");
         }
     }
 }

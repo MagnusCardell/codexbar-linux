@@ -243,12 +243,12 @@ Acceptable content:
 - Daemon availability.
 - Upstream CLI availability.
 - Cost capability.
-- Browser import capability.
+- Reserved `TestBrowserImport` unsupported/no-op status.
 
 Examples:
 
-- `Daemon running · CLI available · Cost available · Browser import ready`
-- `Daemon unavailable · CLI unknown · Cost unknown · Browser import unknown`
+- `Daemon running · CLI available · Cost available · Browser import unsupported`
+- `Daemon unavailable · CLI unknown · Cost unknown · Browser import unsupported`
 
 Do not include raw paths, adapter payloads, stdout/stderr, provider IDs,
 diagnostic codes, account identifiers, version strings, or raw timestamps unless

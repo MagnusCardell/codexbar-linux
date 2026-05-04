@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use codexbar_linuxd::app::{App, RefreshStart};
+use codexbar_linuxd::cache::SnapshotCache;
 use codexbar_linuxd::cli::{CliRefreshRequest, CliTimeouts, UpstreamCliAdapter};
+use codexbar_linuxd::fixtures;
 use codexbar_linuxd::model::{ProviderState, SemanticSource};
 
 const UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"]}}"#;
@@ -210,6 +212,16 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
     common::assert_public_json_safe(&completion.snapshot_json);
     let snapshot: serde_json::Value =
         serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(result["status"], "ok");
+    assert_eq!(
+        result["diagnosticCodes"]
+            .as_array()
+            .expect("diagnostic codes")
+            .len(),
+        0
+    );
     assert_eq!(snapshot["providers"][0]["provider"], "codex");
     assert_eq!(snapshot["providers"][0]["sourceAdapter"], "upstream_cli");
     assert_eq!(snapshot["providers"][0]["state"], "ok");
@@ -234,6 +246,92 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
         !log.lines()
             .any(|line| line.contains("--provider all --source cli")),
         "usage/status must not default to all-provider cli probes: {log}"
+    );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_uses_configured_provider_targets() {
+    let (fake_tmp, binary, log_path) = fake_codexbar_recording();
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    app.set_settings_patch_json(
+        r#"{"schemaVersion":1,"providers":{"codex":{"enabled":false},"claude":{"enabled":true}}}"#,
+    )
+    .expect("settings patch");
+
+    let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+
+    let log = fs::read_to_string(&log_path).expect("command log");
+    assert!(
+        log.lines()
+            .any(|line| line == "--format json --json-only --provider claude --source cli"),
+        "configured provider should be targeted: {log}"
+    );
+    assert!(
+        !log.lines()
+            .any(|line| line == "--format json --json-only --provider codex --source cli"),
+        "disabled default provider should not be targeted: {log}"
+    );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_explicit_providers_override_settings() {
+    let (fake_tmp, binary, log_path) = fake_codexbar_recording();
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    app.set_settings_patch_json(r#"{"schemaVersion":1,"providers":{"claude":{"enabled":true}}}"#)
+        .expect("settings patch");
+
+    let completion = run_app_refresh(
+        &app,
+        r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"]},"providers":["gemini"]}"#,
+    )
+    .await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+
+    let log = fs::read_to_string(&log_path).expect("command log");
+    assert!(
+        log.lines()
+            .any(|line| line == "--format json --json-only --provider gemini --source cli"),
+        "explicit provider should be targeted: {log}"
+    );
+    assert!(
+        !log.lines()
+            .any(|line| line == "--format json --json-only --provider claude --source cli"),
+        "configured provider should not override explicit provider: {log}"
+    );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_explicit_all_provider_is_allowed_only_when_requested() {
+    let (fake_tmp, binary, log_path) = fake_codexbar_recording();
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+
+    let completion = run_app_refresh(
+        &app,
+        r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"]},"providers":["all"]}"#,
+    )
+    .await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+
+    let log = fs::read_to_string(&log_path).expect("command log");
+    assert!(
+        log.lines()
+            .any(|line| line == "--format json --json-only --provider all --source cli"),
+        "all-provider usage should only appear for explicit all requests: {log}"
+    );
+    assert!(
+        log.lines()
+            .any(|line| line == "--format json --json-only --provider all --source cli --status"),
+        "all-provider status should only appear for explicit all requests: {log}"
     );
     assert!(fake_tmp.path().is_dir());
 }
@@ -266,6 +364,138 @@ async fn app_refresh_missing_upstream_cli_returns_schema_valid_missing_dependenc
         "upstream_cli_missing"
     );
     assert_eq!(result["status"], "error");
+}
+
+#[tokio::test]
+async fn app_refresh_not_executable_upstream_cli_returns_clear_missing_dependency() {
+    let (tmp, mut paths) = common::temp_paths();
+    let binary = tmp.path().join("codexbar");
+    fs::write(&binary, b"not executable").expect("write fake cli");
+    chmod(&binary, 0o600);
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(snapshot["providers"][0]["state"], "missing_dependency");
+    assert_eq!(
+        snapshot["providers"][0]["diagnosticsSummary"],
+        "Configured CodexBar CLI is not executable"
+    );
+    assert_eq!(
+        snapshot["daemon"]["upstreamCli"]["diagnosticCode"],
+        "upstream_cli_not_executable"
+    );
+    assert!(result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes")
+        .iter()
+        .any(|code| code == "upstream_cli_not_executable"));
+}
+
+#[tokio::test]
+async fn stale_cache_fallback_after_cli_disappears_reports_current_cli_state() {
+    let (tmp, mut paths) = common::temp_paths();
+    let cache = SnapshotCache::new(paths.cache_dir.clone(), paths.cache_file.clone());
+    let now = codexbar_linuxd::clock::now_rfc3339();
+    let cached = fixtures::refreshed_snapshot("cached-ok", &now, &now).expect("snapshot");
+    cache.store(&cached).expect("cache store");
+    paths.upstream_cli_path = Some(tmp.path().join("missing-codexbar"));
+
+    let app = App::new(paths).expect("app starts");
+    let completion = run_app_refresh(
+        &app,
+        r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":true}}"#,
+    )
+    .await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(snapshot["stale"], true);
+    assert_eq!(snapshot["providers"][0]["state"], "stale");
+    assert_eq!(snapshot["daemon"]["upstreamCli"]["available"], false);
+    assert_eq!(
+        snapshot["daemon"]["upstreamCli"]["diagnosticCode"],
+        "upstream_cli_missing"
+    );
+    let diagnostic_codes = result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes");
+    assert!(diagnostic_codes
+        .iter()
+        .any(|code| code == "upstream_cli_missing"));
+    assert!(diagnostic_codes
+        .iter()
+        .any(|code| code == "stale_cache_fallback"));
+}
+
+#[tokio::test]
+async fn usage_success_survives_status_and_cost_failures_with_diagnostics() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar not-semver'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider all")
+    sleep 1
+    exit 0
+    ;;
+  *"--status")
+    printf '%s\n' '[{"provider":"codex","error":{"message":"provider status failed"}}]'
+    exit 1
+    ;;
+  *)
+    printf '%s\n' '[{"provider":"codex","version":"not-semver","source":"codex-cli","usage":{"primary":{"usedPercent":21,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"updatedAt":"2026-04-29T19:32:11Z"}}]'
+    exit 0
+    ;;
+esac
+"#,
+    );
+
+    let refresh = run_adapter(
+        binary,
+        vec!["codex".to_string()],
+        CliTimeouts {
+            version: Duration::from_secs(1),
+            usage: Duration::from_secs(1),
+            status: Duration::from_secs(1),
+            cost: Duration::from_millis(50),
+        },
+    )
+    .await;
+    assert!(tmp.path().is_dir());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert_eq!(
+        refresh
+            .snapshot
+            .daemon
+            .upstream_cli
+            .as_ref()
+            .unwrap()
+            .version,
+        Some("CodexBar not-semver".to_string())
+    );
+    assert!(provider
+        .diagnostic_codes
+        .contains(&"upstream_cli_provider_error".to_string()));
+    assert!(provider
+        .diagnostic_codes
+        .contains(&"upstream_cli_timeout".to_string()));
+    let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+    common::assert_schema("snapshot.schema.json", &snapshot_json);
+    common::assert_public_json_safe(&snapshot_json);
 }
 
 #[tokio::test]
@@ -362,6 +592,16 @@ async fn run_adapter(
         })
         .await
         .expect("adapter refresh")
+}
+
+async fn run_app_refresh(app: &App, options_json: &str) -> codexbar_linuxd::app::RefreshCompletion {
+    let start = app.start_refresh(options_json).expect("refresh starts");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("refresh should start");
+    };
+    app.finish_refresh(&refresh_id)
+        .await
+        .expect("refresh finishes")
 }
 
 fn short_timeouts() -> CliTimeouts {

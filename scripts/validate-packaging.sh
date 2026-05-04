@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 python3 - "$ROOT" <<'PY'
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,6 +35,8 @@ if "SystemdService=codexbar-linuxd.service" not in dbus:
 systemd = (root / "packaging/systemd/codexbar-linuxd.service").read_text(encoding="utf-8")
 if "ExecStart=/usr/bin/codexbar-linuxd" not in systemd:
     raise SystemExit("systemd user service must execute /usr/bin/codexbar-linuxd")
+if "Type=dbus" not in systemd or "BusName=org.codexbar.Linux1" not in systemd:
+    raise SystemExit("systemd user service must be D-Bus activated with BusName=org.codexbar.Linux1")
 listener_directives = ("ListenStream=", "ListenDatagram=", "ListenFIFO=", "SocketUser=", "SocketGroup=")
 if any(directive in systemd for directive in listener_directives):
     raise SystemExit("Task 00 service file must not define listener/socket behavior")
@@ -47,13 +50,20 @@ if "ExecStart=$PACKAGED_DAEMON_BIN" not in install_local or "ExecStart=$daemon_b
     raise SystemExit("install-local.sh must rewrite systemd ExecStart to the user-local daemon path")
 if "systemctl --user daemon-reload" not in install_local:
     raise SystemExit("install-local.sh must reload the user systemd manager after writing the local unit")
+if "require_tool glib-compile-schemas" not in install_local:
+    raise SystemExit("install-local.sh must require glib-compile-schemas for strict schema compilation")
+if "install_runtime_extension" not in install_local or "find src -maxdepth 1 -type f -name '*.js'" not in install_local:
+    raise SystemExit("install-local.sh must install only runtime extension files")
+if "install-local-manifest.txt" not in install_local or ".codexbar-linux-owned" not in install_local:
+    raise SystemExit("install-local.sh must write ownership manifest and extension marker")
 local_install_requirements = {
     "XDG_DATA_HOME data root": 'DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"',
     "XDG_CONFIG_HOME config root": 'CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"',
     "GNOME extension under XDG data home": 'EXT_DIR="$DATA_HOME/gnome-shell/extensions/$EXTENSION_UUID"',
     "D-Bus service under XDG data home": 'DBUS_SERVICE_DIR="$DATA_HOME/dbus-1/services"',
-    "installed service file permissions": 'chmod 0644 "$USER_SERVICE_FILE" "$DBUS_SERVICE_FILE"',
-    "deterministic extension directory permissions": 'install -d -m 0755 "$EXT_DIR" "$EXT_DIR/schemas"',
+    "installed user service permissions": 'install -m 0644 "$user_tmp" "$USER_SERVICE_FILE"',
+    "installed D-Bus service permissions": 'install -m 0644 "$dbus_tmp" "$DBUS_SERVICE_FILE"',
+    "deterministic extension directory permissions": 'install -d -m 0755 "$EXT_DIR" "$EXT_DIR/src" "$EXT_DIR/schemas"',
     "deterministic extension file permissions": 'install -m 0644 "$ROOT/extension/$rel_file" "$EXT_DIR/$rel_file"',
     "strict installed schema compilation": 'glib-compile-schemas --strict "$EXT_DIR/schemas"',
     "compiled schema file permissions": 'chmod 0644 "$EXT_DIR/schemas/gschemas.compiled"',
@@ -66,6 +76,10 @@ for description, needle in local_install_requirements.items():
 uninstall_local = (root / "scripts/uninstall-local.sh").read_text(encoding="utf-8")
 if "systemctl --user daemon-reload" not in uninstall_local:
     raise SystemExit("uninstall-local.sh must reload the user systemd manager after removing the local unit")
+if "systemctl --user stop codexbar-linuxd.service" not in uninstall_local:
+    raise SystemExit("uninstall-local.sh must stop the user service before removing activation files")
+if "install-local-manifest.txt" not in uninstall_local or ".codexbar-linux-owned" not in uninstall_local:
+    raise SystemExit("uninstall-local.sh must use ownership manifest and extension marker")
 local_uninstall_requirements = {
     "XDG_DATA_HOME data root": 'DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"',
     "XDG_CONFIG_HOME config root": 'CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"',
@@ -82,12 +96,18 @@ expected_install_entries = [
     "target/release/codexbar-linuxd usr/bin/",
     "packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/",
     "packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/",
-    "extension/* usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "extension/metadata.json usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "extension/extension.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "extension/prefs.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "extension/stylesheet.css usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
+    "extension/src/*.js usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/src/",
     "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml usr/share/glib-2.0/schemas/",
 ]
 for entry in expected_install_entries:
     if entry not in debian_install:
         raise SystemExit(f"packaging/debian/install missing required install mapping: {entry}")
+if "extension/* " in debian_install or "extension/tests" in debian_install or ".md " in debian_install:
+    raise SystemExit("packaging/debian/install must not install broad extension globs, tests, or markdown task/docs")
 
 packaging_text = "\n".join(
     [
@@ -122,6 +142,11 @@ if auto_enable_violations:
 build_deb = (root / "scripts/build-deb.sh").read_text(encoding="utf-8")
 if "Task 08 packaging not implemented" not in build_deb:
     raise SystemExit("build-deb.sh must clearly report Task 08 packaging is not implemented")
+
+for rel in ("scripts/install-local.sh", "scripts/uninstall-local.sh", "scripts/build-deb.sh"):
+    completed = subprocess.run(["bash", "-n", str(root / rel)], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if completed.returncode != 0:
+        raise SystemExit(f"{rel} failed bash -n:\n{completed.stderr}")
 
 print("Packaging skeleton structurally valid")
 PY

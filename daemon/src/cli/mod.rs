@@ -97,19 +97,21 @@ impl UpstreamCliAdapter {
                 .diagnostic_code
                 .clone()
                 .unwrap_or_else(|| "upstream_cli_missing".to_string());
+            let message = cli_dependency_message(&code);
             let snapshot = error_snapshot(
                 &request,
                 &providers,
                 cli,
                 ProviderState::MissingDependency,
                 &code,
+                message,
             );
             validate_snapshot(&snapshot)?;
             return Ok(CliRefresh {
                 snapshot,
                 diagnostics: vec![diagnostic(
                     &code,
-                    "Upstream CodexBar CLI is not available",
+                    message,
                     DiagnosticSeverity::Error,
                     &request.finished_at,
                     None,
@@ -199,61 +201,62 @@ impl UpstreamCliAdapter {
             None,
             &request.finished_at,
         ));
-        let cost_by_provider = match self.run(&path, cost_spec(self.timeouts.cost)).await {
-            Ok(output) => match parse_success_json(&output) {
-                Ok(value) => {
-                    diagnostics.push(command_event(
-                        "upstream_cli_command_finished",
-                        CommandKind::Cost,
-                        None,
-                        &request.finished_at,
-                    ));
-                    let costs = normalize_costs(&value);
-                    if !costs.is_empty() {
-                        diagnostics.push(diagnostic(
-                            "upstream_cli_cost_normalized",
-                            "Upstream CLI cost output normalized",
-                            DiagnosticSeverity::Info,
-                            &request.finished_at,
+        let (cost_by_provider, cost_failure) =
+            match self.run(&path, cost_spec(self.timeouts.cost)).await {
+                Ok(output) => match parse_success_json(&output) {
+                    Ok(value) => {
+                        diagnostics.push(command_event(
+                            "upstream_cli_command_finished",
+                            CommandKind::Cost,
                             None,
-                            command_details(CommandKind::Cost, Some(&output)),
+                            &request.finished_at,
                         ));
+                        let costs = normalize_costs(&value);
+                        if !costs.is_empty() {
+                            diagnostics.push(diagnostic(
+                                "upstream_cli_cost_normalized",
+                                "Upstream CLI cost output normalized",
+                                DiagnosticSeverity::Info,
+                                &request.finished_at,
+                                None,
+                                command_details(CommandKind::Cost, Some(&output)),
+                            ));
+                        }
+                        (costs, None)
                     }
-                    costs
-                }
-                Err(failure) => {
+                    Err(failure) => {
+                        diagnostics.push(command_event(
+                            "upstream_cli_command_finished",
+                            CommandKind::Cost,
+                            None,
+                            &request.finished_at,
+                        ));
+                        diagnostics.push(failure.to_diagnostic(
+                            CommandKind::Cost,
+                            None,
+                            &request.finished_at,
+                            Some(&output),
+                        ));
+                        (BTreeMap::new(), Some(failure))
+                    }
+                },
+                Err(err) => {
                     diagnostics.push(command_event(
                         "upstream_cli_command_finished",
                         CommandKind::Cost,
                         None,
                         &request.finished_at,
                     ));
+                    let failure = CliFailure::from_run_error(err);
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Cost,
                         None,
                         &request.finished_at,
-                        Some(&output),
+                        None,
                     ));
-                    BTreeMap::new()
+                    (BTreeMap::new(), Some(failure))
                 }
-            },
-            Err(err) => {
-                diagnostics.push(command_event(
-                    "upstream_cli_command_finished",
-                    CommandKind::Cost,
-                    None,
-                    &request.finished_at,
-                ));
-                let failure = CliFailure::from_run_error(err);
-                diagnostics.push(failure.to_diagnostic(
-                    CommandKind::Cost,
-                    None,
-                    &request.finished_at,
-                    None,
-                ));
-                BTreeMap::new()
-            }
-        };
+            };
 
         let mut normalized = Vec::with_capacity(providers.len());
         for provider in &providers {
@@ -340,6 +343,7 @@ impl UpstreamCliAdapter {
                         Some(value)
                     }
                     Err(failure) => {
+                        provider_diagnostics.push(failure.clone());
                         diagnostics.push(failure.to_diagnostic(
                             CommandKind::Status,
                             Some(provider),
@@ -351,6 +355,7 @@ impl UpstreamCliAdapter {
                 },
                 Err(err) => {
                     let failure = CliFailure::from_run_error(err);
+                    provider_diagnostics.push(failure.clone());
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Status,
                         Some(provider),
@@ -362,6 +367,9 @@ impl UpstreamCliAdapter {
             };
 
             let cost = cost_by_provider.get(provider).cloned();
+            if let Some(failure) = &cost_failure {
+                provider_diagnostics.push(failure.clone());
+            }
             let normalized_provider = normalize_provider(
                 provider,
                 usage_value.as_ref(),
@@ -589,7 +597,7 @@ fn normalize_provider(
     };
 
     if object.get("error").is_some() {
-        let failure = CliFailure::provider_error();
+        let failure = CliFailure::from_provider_error(object.get("error"));
         return error_provider(
             requested_provider,
             failure.provider_state(),
@@ -820,6 +828,7 @@ fn error_snapshot(
     cli: UpstreamCliInfo,
     state: ProviderState,
     code: &str,
+    summary: &str,
 ) -> Snapshot {
     Snapshot {
         schema_version: 1,
@@ -839,15 +848,7 @@ fn error_snapshot(
         },
         providers: providers
             .iter()
-            .map(|provider| {
-                error_provider(
-                    provider,
-                    state,
-                    code,
-                    "Upstream CLI dependency is unavailable",
-                    &request.finished_at,
-                )
-            })
+            .map(|provider| error_provider(provider, state, code, summary, &request.finished_at))
             .collect(),
     }
 }
@@ -1098,6 +1099,25 @@ impl CliFailure {
         }
     }
 
+    fn from_provider_error(error: Option<&Value>) -> Self {
+        let mut text = String::new();
+        if let Some(error) = error {
+            match error {
+                Value::String(value) => text.push_str(value),
+                Value::Object(object) => {
+                    for key in ["message", "description", "code", "kind"] {
+                        if let Some(value) = object.get(key).and_then(Value::as_str) {
+                            text.push_str(value);
+                            text.push('\n');
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self::from_failure_text(&text).unwrap_or_else(Self::provider_error)
+    }
+
     fn from_run_error(error: CommandRunError) -> Self {
         match error {
             CommandRunError::Spawn => Self {
@@ -1128,27 +1148,50 @@ impl CliFailure {
             String::from_utf8_lossy(&output.stderr)
         )
         .to_ascii_lowercase();
+        Self::from_failure_text(&text).unwrap_or(Self {
+            code: "upstream_cli_nonzero_exit",
+            safe_message: "Upstream CLI command exited with an error",
+        })
+    }
+
+    fn from_failure_text(text: &str) -> Option<Self> {
+        let text = text.to_ascii_lowercase();
         if text.contains("only supported on macos") || text.contains("requires web support") {
-            Self {
+            Some(Self {
                 code: "upstream_cli_unsupported_source",
                 safe_message: "Upstream CLI source is unavailable on this platform",
-            }
+            })
         } else if text.contains("unauthorized")
             || text.contains("unauthenticated")
             || text.contains("not logged in")
             || text.contains("login")
         {
-            Self {
+            Some(Self {
                 code: "upstream_cli_unauthenticated",
                 safe_message: "Upstream CLI provider is unauthenticated",
-            }
+            })
+        } else if text.contains("not installed")
+            || text.contains("not found")
+            || text.contains("missing")
+            || text.contains("no such file")
+        {
+            Some(Self {
+                code: "upstream_cli_provider_cli_missing",
+                safe_message: "Provider CLI dependency is unavailable",
+            })
+        } else if text.contains("rate limit")
+            || text.contains("temporarily unavailable")
+            || text.contains("unavailable")
+            || text.contains("service unavailable")
+        {
+            Some(Self {
+                code: "upstream_cli_provider_unavailable",
+                safe_message: "Upstream CLI provider is unavailable",
+            })
         } else if text.contains("provider") {
-            Self::provider_error()
+            Some(Self::provider_error())
         } else {
-            Self {
-                code: "upstream_cli_nonzero_exit",
-                safe_message: "Upstream CLI command exited with an error",
-            }
+            None
         }
     }
 
@@ -1158,13 +1201,15 @@ impl CliFailure {
             "upstream_cli_parse_error"
             | "upstream_cli_output_truncated"
             | "upstream_cli_empty_stdout" => ProviderState::ParseError,
-            "upstream_cli_missing" | "upstream_cli_spawn_failed" | "upstream_cli_io_error" => {
-                ProviderState::MissingDependency
-            }
+            "upstream_cli_missing"
+            | "upstream_cli_not_executable"
+            | "upstream_cli_spawn_failed"
+            | "upstream_cli_io_error"
+            | "upstream_cli_provider_cli_missing" => ProviderState::MissingDependency,
             "upstream_cli_unauthenticated" => ProviderState::Unauthenticated,
-            "upstream_cli_unsupported_source" | "upstream_cli_nonzero_exit" => {
-                ProviderState::ProviderUnavailable
-            }
+            "upstream_cli_unsupported_source"
+            | "upstream_cli_nonzero_exit"
+            | "upstream_cli_provider_unavailable" => ProviderState::ProviderUnavailable,
             _ => ProviderState::Error,
         }
     }
@@ -1236,6 +1281,14 @@ fn command_details(
         );
     }
     details
+}
+
+fn cli_dependency_message(code: &str) -> &'static str {
+    match code {
+        "upstream_cli_not_executable" => "Configured CodexBar CLI is not executable",
+        "upstream_cli_missing" => "Upstream CodexBar CLI is not installed or not on PATH",
+        _ => "Upstream CodexBar CLI is unavailable",
+    }
 }
 
 fn stderr_class_label(classification: StderrClassification) -> &'static str {

@@ -35,6 +35,8 @@ absent_paths=(
   "tasks/04e-browser-import-hardening.md"
   "tasks/05-browser-cookie-adapter.md"
   "tasks/06-provider-web-adapters.md"
+  "extension/browser-extension"
+  "extension/manifest.json"
 )
 
 for rel in "${absent_paths[@]}"; do
@@ -43,23 +45,37 @@ for rel in "${absent_paths[@]}"; do
   fi
 done
 
-if rg -n '^(reqwest|rusqlite|url|aes|cbc|pbkdf2|sha1|sha2)\s*=' "$ROOT/daemon/Cargo.toml"; then
-  fail "daemon/Cargo.toml contains direct browser/web dependency"
+if find "$ROOT/extension/src" -maxdepth 1 -type f ! -name '*.js' ! -name 'README.md' -print -quit | grep -q .; then
+  find "$ROOT/extension/src" -maxdepth 1 -type f ! -name '*.js' ! -name 'README.md' -print >&2
+  fail "extension/src must not contain task prompts or non-runtime artifacts"
 fi
 
-if rg -n '\b(pkg-config|libsqlite3-dev|cmake|ca-certificates)\b' \
+if find "$ROOT/tasks" -maxdepth 1 -type f \( -iname '*browser*' -o -iname '*cookie*' -o -iname '*web*' \) -print -quit | grep -q .; then
+  find "$ROOT/tasks" -maxdepth 1 -type f \( -iname '*browser*' -o -iname '*cookie*' -o -iname '*web*' \) -print >&2
+  fail "browser/cookie/web task files are out of scope; use the no-browser ADR for rejected alternatives"
+fi
+
+if rg -n '^(reqwest|rusqlite|url|aes|cbc|pbkdf2|sha1|sha2|hyper|axum|warp|ureq|isahc|curl|keyring|secret-service|libsecret|cookie_store|sqlite)\s*=' "$ROOT/daemon/Cargo.toml"; then
+  fail "daemon/Cargo.toml contains direct browser/web/keyring dependency"
+fi
+
+if rg -n 'package\s*=\s*"(reqwest|rusqlite|url|aes|cbc|pbkdf2|sha1|sha2|hyper|axum|warp|ureq|isahc|curl|keyring|secret-service|libsecret|cookie_store|sqlite)"' "$ROOT/daemon/Cargo.toml"; then
+  fail "daemon/Cargo.toml contains renamed browser/web/keyring dependency"
+fi
+
+if rg -n '\b(pkg-config|libsqlite3-dev|sqlite3|cmake|ca-certificates|libsoup|webkit|libsecret|gir1\.2-secret|curl|chromium|google-chrome|firefox)\b' \
   "$ROOT/packaging/debian/control" "$ROOT/.github/workflows/check.yml"; then
-  fail "packaging or CI contains browser/web-only system dependency"
+  fail "packaging or CI contains browser/web/keyring-only system dependency"
 fi
 
 if rg -n \
-  'CODEXBAR_BROWSER|CODEXBAR_CODEX_WEB_LIVE|CODEXBAR_WEB_HOME|BrowserDiscoveryRoots|collect_session_material|ReqwestStaticGetClient|FakeWebClient|decrypt_cookie|cookie_store|provider web fetch|chatgpt\.com/codex/settings/usage|libsecret|Secret Service|KWallet' \
-  "$ROOT/daemon/src" "$ROOT/daemon/tests" "$ROOT/extension/src" "$ROOT/packaging" "$ROOT/.github" \
+  'CODEXBAR_BROWSER|CODEXBAR_CODEX_WEB_LIVE|CODEXBAR_WEB_HOME|BrowserDiscoveryRoots|collect_session_material|ReqwestStaticGetClient|FakeWebClient|decrypt_cookie|cookie_store|provider web fetch|chatgpt\.com/codex/settings/usage|libsecret|Secret Service|KWallet|TcpListener|TcpStream|std::net|tokio::net|Gio\.SocketService|Gio\.SocketListener|Soup\.Server|axum|warp|hyper|ureq|isahc' \
+  "$ROOT/daemon/src" "$ROOT/daemon/tests" "$ROOT/extension/src/"*.js "$ROOT/packaging" "$ROOT/.github" \
   --glob '!daemon/src/model.rs' \
   --glob '!daemon/src/redact.rs' \
   --glob '!daemon/tests/browser_import_stub.rs' \
   --glob '!daemon/tests/redaction.rs'; then
-  fail "runtime code contains browser-cookie/web-fetch implementation marker"
+  fail "runtime code contains browser-cookie/web-fetch/keyring/localhost implementation marker"
 fi
 
 if rg -n 'cookies\.sqlite|Network/Cookies|Cookie header|Set-Cookie' \

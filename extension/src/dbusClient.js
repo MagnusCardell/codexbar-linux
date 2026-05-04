@@ -71,24 +71,27 @@ export class CodexbarDbusClient {
         if (this._destroyed)
             return;
 
-        try {
-            const [snapshotJson, daemonInfoJson] = await Promise.all([
-                this.getSnapshot(),
-                this.getDaemonInfo(),
-            ]);
-            if (this._destroyed)
-                return;
+        const [snapshotResult, daemonInfoResult] = await Promise.allSettled([
+            this.getSnapshot(),
+            this.getDaemonInfo(),
+        ]);
+        if (this._destroyed)
+            return;
+
+        if (snapshotResult.status === 'fulfilled') {
             this.available = true;
-            this._emit('snapshot', snapshotJson);
-            this._emit('daemon-info', daemonInfoJson);
-        } catch (error) {
-            if (this._destroyed)
-                return;
-            this.available = false;
-            this._emit('unavailable', error);
-            if (allowRetry)
-                this._scheduleStartupRetries();
+            this._emit('snapshot', snapshotResult.value);
+            if (daemonInfoResult.status === 'fulfilled')
+                this._emit('daemon-info', daemonInfoResult.value);
+            else
+                Log.warn(daemonInfoResult.reason?.message ?? String(daemonInfoResult.reason));
+            return;
         }
+
+        this.available = false;
+        this._emit('unavailable', snapshotResult.reason);
+        if (allowRetry)
+            this._scheduleStartupRetries();
     }
 
     getSnapshot() {

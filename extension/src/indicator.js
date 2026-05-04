@@ -63,7 +63,9 @@ class CodexbarIndicator extends PanelMenu.Button {
         this._syncPanelStyle();
         this.accessible_name = panelAccessibleName(view);
 
-        if (options.panelMode === 'provider')
+        if (options.panelMode === 'minimal')
+            this._renderMinimal(view);
+        else if (options.panelMode === 'provider')
             this._renderProviderGroup(view);
         else
             this._renderMerged(view);
@@ -100,13 +102,26 @@ class CodexbarIndicator extends PanelMenu.Button {
             item.set_child(createMicroMeterStack(row.meters ?? []));
             this._content.add_child(item);
         }
-        if (rows.length === 0)
+        if (rows.length === 0) {
             this._renderMinimal(view);
+            return;
+        }
+        if (panel.overflowCount > 0) {
+            this._content.add_child(new St.Label({
+                text: `+${panel.overflowCount}`,
+                style_class: 'codexbar-panel-overflow',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+        }
     }
 
     _renderMinimal(view) {
         const panel = view.panel ?? {};
-        this._content.add_child(createMicroMeterStack(panel.meters ?? []));
+        this._content.add_child(new St.Icon({
+            icon_name: panel.iconName ?? 'view-statistics-symbolic',
+            style_class: 'codexbar-panel-icon',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
     }
 
     _syncPanelStyle() {

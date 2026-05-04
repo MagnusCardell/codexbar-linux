@@ -253,7 +253,10 @@ export function createSyntheticSnapshot(state, options = {}) {
     const providerId = options.providerId ?? 'codex';
     const displayName = options.displayName ?? 'Codex';
     const summary = options.summary ?? stateMeta(state).description;
-    const providerState = PROVIDER_STATES.includes(state) ? state : 'provider_unavailable';
+    const daemonUnavailable = state === 'daemon_unavailable';
+    const providerState = daemonUnavailable
+        ? 'missing_dependency'
+        : (PROVIDER_STATES.includes(state) ? state : 'provider_unavailable');
 
     return {
         schemaVersion: 1,
@@ -262,7 +265,7 @@ export function createSyntheticSnapshot(state, options = {}) {
         selectedProvider: providerId,
         daemon: {
             version: 'unknown',
-            state: providerState === 'loading' ? 'starting' : 'degraded',
+            state: daemonUnavailable ? 'error' : (providerState === 'loading' ? 'starting' : 'degraded'),
             lastRefreshId: null,
             lastRefreshStartedAt: null,
             lastRefreshFinishedAt: null,
@@ -403,6 +406,9 @@ export function applyProviderEventJson(state, providerId, eventJson, nowMs = Dat
 }
 
 export function applyRefreshStarted(state, refreshId) {
+    if (!state?.refreshing && state?.lastRefreshResult?.refreshId === refreshId)
+        return state;
+
     return {
         ...state,
         clientState: 'loading',
@@ -968,7 +974,10 @@ export function providerStatusText(provider) {
     if (provider.state === 'ok')
         return '';
 
-    return meta.description;
+    return safeDisplay(
+        provider?.status?.description || provider?.diagnosticsSummary || '',
+        meta.description,
+    ) || meta.description;
 }
 
 export function headerStatusText(state, stale, refreshing, generatedAt) {
@@ -1876,8 +1885,8 @@ function capabilityStatusText(label, capabilities, key) {
 
 function browserImportStatusText(capabilities) {
     if (!capabilities || !Object.prototype.hasOwnProperty.call(capabilities, 'browserImport'))
-        return 'Browser import unknown';
-    return capabilities.browserImport ? 'Browser import ready' : 'Browser import unavailable';
+        return 'Browser import unsupported';
+    return 'Browser import unsupported';
 }
 
 function lowerInitial(value) {

@@ -379,11 +379,7 @@ impl App {
                         selected_provider: previous_snapshot.selected_provider.clone(),
                     })
                     .await?;
-                let diagnostic_codes = refresh
-                    .diagnostics
-                    .iter()
-                    .map(|event| event.code.clone())
-                    .collect::<Vec<_>>();
+                let diagnostic_codes = result_diagnostic_codes(&refresh.diagnostics);
                 (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
             } else {
                 (
@@ -408,10 +404,12 @@ impl App {
                 .iter()
                 .any(|provider| provider.state.is_usable_for_stale_cache())
         {
+            let current_daemon = snapshot.daemon.clone();
             snapshot = stale_mutated(previous_snapshot, &finished_at);
             snapshot.daemon.last_refresh_id = Some(refresh_id.to_string());
             snapshot.daemon.last_refresh_started_at = Some(active.started_at.clone());
             snapshot.daemon.last_refresh_finished_at = Some(finished_at.clone());
+            snapshot.daemon.upstream_cli = current_daemon.upstream_cli;
             diagnostic_codes.push("stale_cache_fallback".to_string());
             diagnostics.push(diagnostic_event(
                 "stale_cache_fallback",
@@ -483,26 +481,15 @@ impl App {
 
     fn daemon_info(&self, state: &AppState) -> DaemonInfo {
         let resolved_upstream_cli = cli::resolve_info(&self.paths);
-        let upstream_cli = if resolved_upstream_cli.available {
-            let mut info = resolved_upstream_cli;
-            if info.version.is_none() {
-                info.version = state
-                    .snapshot
-                    .daemon
-                    .upstream_cli
-                    .as_ref()
-                    .and_then(|cli| cli.version.clone());
-            }
-            info
-        } else {
-            state
+        let mut upstream_cli = resolved_upstream_cli;
+        if upstream_cli.available && upstream_cli.version.is_none() {
+            upstream_cli.version = state
                 .snapshot
                 .daemon
                 .upstream_cli
-                .clone()
-                .filter(|cli| cli.available)
-                .unwrap_or(resolved_upstream_cli)
-        };
+                .as_ref()
+                .and_then(|cli| cli.version.clone());
+        }
         let upstream_cli_available = upstream_cli.available;
         DaemonInfo {
             schema_version: 1,
@@ -536,6 +523,14 @@ impl App {
             }),
         }
     }
+}
+
+fn result_diagnostic_codes(events: &[DiagnosticEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|event| event.severity != DiagnosticSeverity::Info)
+        .map(|event| event.code.clone())
+        .collect()
 }
 
 fn refresh_result(
