@@ -133,3 +133,61 @@ systemctl --user daemon-reload
 After removal, confirm package-owned files under `/usr/bin`, `/usr/share`, and
 `/usr/lib/systemd/user` are gone. User config/cache remains preserved unless a
 future explicit purge policy documents otherwise.
+
+## Recorded Task 05C Candidate Result
+
+Task 05C local release-candidate validation was run on 2026-05-04 against the
+v0.1 development package candidate. Sanitized result:
+
+- Package build passed and produced `codexbar-linux_0.1.0-1_amd64.deb`.
+- Package metadata was inspected with `dpkg-deb -I`; package name, version,
+  architecture, and GNOME/D-Bus/GSettings/systemd dependencies were correct.
+  No browser, cookie, web-fetch, keyring, browser-extension, localhost, or
+  provider-dashboard dependency was present.
+- Package contents were inspected with `dpkg-deb -c`; the archive contained the
+  daemon, session D-Bus service, user systemd unit, system-wide GNOME extension
+  files, GSettings schema, and smoke-test docs under the intended paths.
+- The package builder now compiles release binaries with path remapping, strips
+  the staged daemon, and fails the build if exact private build-root, home,
+  Cargo, Rustup, or package-staging paths remain in the packaged daemon.
+- `apt-get -s install ./dist/codexbar-linux_0.1.0-1_amd64.deb` resolved
+  cleanly as one new local package.
+- Real `sudo apt install`, `sudo apt remove`, and `sudo apt purge` were not run
+  in this session because noninteractive sudo required a password. Treat
+  package install/remove as not release-signed-off until run on the target host.
+- Isolated session-bus activation using the release-built daemon and the package
+  D-Bus activation file passed for the missing-upstream-CLI path:
+  `GetDaemonInfo` returned `browserImport=false`, `linuxWebAdapters=false`,
+  `upstreamCli.available=false`, and `diagnosticCode=upstream_cli_missing`;
+  `Refresh` produced a schema-valid `missing_dependency` provider state and
+  redacted diagnostics.
+- Release-mode live D-Bus upstream-CLI smoke passed with an explicitly
+  configured upstream CLI binary. The test validated `GetDaemonInfo`, refresh
+  signals, `RefreshFinished`, `GetSnapshot`, diagnostics, cache write, schemas,
+  and live secret-marker checks without copying raw identity or diagnostics into
+  this document.
+- Host GNOME was GNOME Shell 46 on Wayland. The extension UUID was discoverable
+  and could be enabled/disabled from an existing user-local install, but that
+  path shadows any system-wide package extension with the same UUID. Package
+  extension discovery and panel/popover behavior from `/usr/share` remain
+  unproven until the root-backed package install is run in a clean user profile
+  or after removing the user-local shadowing extension.
+- `lintian` exited successfully for the rebuilt package. Remaining development
+  package warnings were `initial-upload-closes-no-bugs`,
+  `maintainer-script-empty` for the intentionally empty `prerm`, and
+  `no-manual-page` for `codexbar-linuxd`.
+
+Known limitations before v0.1 release sign-off:
+
+- Run the real package install/remove/purge smoke with sudo on Ubuntu GNOME.
+- Verify `/usr/bin/codexbar-linuxd --check`, installed schema compilation,
+  D-Bus activation from `/usr/share/dbus-1/services`, and user-systemd
+  activation from `/usr/lib/systemd/user` after package install.
+- Verify system-wide GNOME extension discovery after a logout/login if Wayland
+  does not rescan immediately.
+- Manually verify the panel item, popover, refresh action, daemon-unavailable
+  state, daemon restart recovery, merged/provider/minimal modes, diagnostics
+  redaction, and disable/re-enable lifecycle from the packaged extension.
+- Re-run package discovery in a clean user profile or after removing any
+  user-local extension with the same UUID, because user-local extensions take
+  precedence over system-wide extensions.

@@ -129,7 +129,7 @@ for description, needle in local_uninstall_requirements.items():
 
 debian_install = (root / "packaging/debian/install").read_text(encoding="utf-8")
 expected_install_entries = [
-    "target/release/codexbar-linuxd usr/bin/",
+    "daemon/target/release/codexbar-linuxd usr/bin/",
     "packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/",
     "packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/",
     "extension/metadata.json usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
@@ -175,6 +175,8 @@ if "Task 08" in changelog or "skeleton" in changelog.lower():
 rules = (root / "packaging/debian/rules").read_text(encoding="utf-8")
 if "cargo build --manifest-path daemon/Cargo.toml --release --locked" not in rules:
     raise SystemExit("packaging/debian/rules must build the release daemon")
+if "--remap-path-prefix=$(CURDIR)=codexbar-linux" not in rules or "--remap-path-prefix=$(HOME)=home" not in rules:
+    raise SystemExit("packaging/debian/rules must remap private build paths in release binaries")
 if "cargo test --manifest-path daemon/Cargo.toml --locked" not in rules:
     raise SystemExit("packaging/debian/rules must run daemon tests")
 
@@ -256,8 +258,14 @@ build_deb = (root / "scripts/build-deb.sh").read_text(encoding="utf-8")
 if "Task 08 packaging not implemented" in build_deb or "not implemented" in build_deb:
     raise SystemExit("build-deb.sh must implement the v0.1 development package target")
 for needle in [
-    "cargo build --manifest-path \"$ROOT/daemon/Cargo.toml\" --release --locked",
+    "env RUSTFLAGS=\"$RELEASE_RUSTFLAGS\" cargo build --manifest-path \"$ROOT/daemon/Cargo.toml\" --release --locked",
+    "--remap-path-prefix=$ROOT=codexbar-linux",
+    "--remap-path-prefix=$HOME=home",
     "dpkg-deb --root-owner-group --build",
+    "strip --strip-unneeded \"$PKG_ROOT/usr/bin/codexbar-linuxd\"",
+    "validate_no_build_path_leaks \"$PKG_ROOT/usr/bin/codexbar-linuxd\"",
+    "strings -a \"$binary\"",
+    "gzip -cn9 \"$ROOT/packaging/debian/changelog\"",
     "usr/share/gnome-shell/extensions/$EXTENSION_UUID",
     "usr/share/glib-2.0/schemas/$SCHEMA_ID.gschema.xml",
     "usr/share/dbus-1/services/org.codexbar.Linux1.service",

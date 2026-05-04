@@ -56,9 +56,14 @@ Deliverables:
 - Smoke test script for Ubuntu 24.04/26.04 VMs.
 - Static no-browser/web guard in CI.
 
-Task 05B status: the development `.deb` package path is wired for local v0.1
-smoke testing. Signed repository distribution, upgrade testing, and recorded
-Ubuntu 24.04/26.04 package smoke evidence remain release sign-off work.
+Task 05C status: the development `.deb` package path is wired for local v0.1
+smoke testing and now has release-candidate package hardening for stripped,
+path-remapped daemon binaries. Non-mutating package inspection, apt dependency
+simulation, isolated D-Bus activation, missing-upstream-CLI behavior, and
+release-mode live upstream-CLI D-Bus smoke have been validated. Signed
+repository distribution, upgrade testing, and recorded root-backed Ubuntu
+24.04/26.04 package install/remove plus packaged GNOME panel/popover evidence
+remain release sign-off work.
 
 Exit criteria:
 

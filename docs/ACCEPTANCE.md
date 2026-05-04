@@ -92,6 +92,15 @@ the command or smoke evidence used.
   daemon or install a TCP listener, supports D-Bus activation after
   `systemctl --user daemon-reload`, and package removal removes only
   package-owned system files while preserving user config/cache.
+- Task 05C package candidate validation records whether the package was tested
+  through real `sudo apt install/remove/purge` or only through non-mutating
+  package inspection and `apt-get -s install`. A candidate remains blocked from
+  release sign-off until the real root-backed install/remove path is recorded on
+  the target Ubuntu GNOME host.
+- Packaged release binaries must not leak exact private build-root, home, Cargo,
+  Rustup, or package-staging paths. The development package builder must compile
+  with path remapping, strip the staged daemon, and fail the package build if
+  those exact paths remain in the packaged daemon.
 - Diagnostics/cache/log-like output redaction passes: copied diagnostics,
   normalized cache, D-Bus payloads, fixture outputs, and command summaries
   contain no raw secrets, raw identity, raw provider payloads, raw paths,

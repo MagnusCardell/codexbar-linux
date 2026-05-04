@@ -1,4 +1,4 @@
-target/release/codexbar-linuxd usr/bin/
+daemon/target/release/codexbar-linuxd usr/bin/
 packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/
 packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/
 extension/metadata.json usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/

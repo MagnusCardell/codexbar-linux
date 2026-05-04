@@ -67,6 +67,63 @@ package_version() {
   sed -n "1s/^$PACKAGE_NAME (\([^)]*\)).*/\1/p" "$ROOT/packaging/debian/changelog"
 }
 
+release_rustflags() {
+  local flags=()
+  if [[ -n "${RUSTFLAGS:-}" ]]; then
+    flags+=("$RUSTFLAGS")
+  fi
+  flags+=("--remap-path-prefix=$ROOT=codexbar-linux")
+  if [[ -n "${HOME:-}" ]]; then
+    flags+=("--remap-path-prefix=$HOME=home")
+  fi
+  local cargo_home="${CARGO_HOME:-}"
+  if [[ -z "$cargo_home" && -n "${HOME:-}" ]]; then
+    cargo_home="$HOME/.cargo"
+  fi
+  if [[ -n "$cargo_home" ]]; then
+    flags+=("--remap-path-prefix=$cargo_home=cargo-home")
+  fi
+  local rustup_home="${RUSTUP_HOME:-}"
+  if [[ -z "$rustup_home" && -n "${HOME:-}" ]]; then
+    rustup_home="$HOME/.rustup"
+  fi
+  if [[ -n "$rustup_home" ]]; then
+    flags+=("--remap-path-prefix=$rustup_home=rustup-home")
+  fi
+  printf '%s\n' "${flags[*]}"
+}
+
+validate_no_build_path_leaks() {
+  local binary="$1"
+  local leaks="" cargo_home rustup_home
+  cargo_home="${CARGO_HOME:-}"
+  if [[ -z "$cargo_home" && -n "${HOME:-}" ]]; then
+    cargo_home="$HOME/.cargo"
+  fi
+  rustup_home="${RUSTUP_HOME:-}"
+  if [[ -z "$rustup_home" && -n "${HOME:-}" ]]; then
+    rustup_home="$HOME/.rustup"
+  fi
+
+  for marker in "$ROOT" "$BUILD_ROOT" "$PKG_ROOT" "$cargo_home" "$rustup_home" "${HOME:-}"; do
+    if [[ -z "$marker" ]]; then
+      continue
+    fi
+    leaks="$(strings -a "$binary" | LC_ALL=C grep -F "$marker" || true)"
+    if [[ -n "$leaks" ]]; then
+      break
+    fi
+  done
+  if [[ -z "$leaks" ]]; then
+    leaks="$(strings -a "$binary" | LC_ALL=C grep -E '/Users/|/private/var/|target/debian|daemon/target/release' || true)"
+  fi
+  if [[ -n "$leaks" ]]; then
+    echo "Packaged daemon contains build-host path strings; release build path remapping failed." >&2
+    printf '%s\n' "$leaks" | sed -n '1,20p' >&2
+    exit 1
+  fi
+}
+
 check_inputs() {
   require_tool cargo
   require_tool dpkg
@@ -80,6 +137,8 @@ check_inputs() {
   require_tool mktemp
   require_tool python3
   require_tool sed
+  require_tool strip
+  require_tool strings
 
   require_file "daemon/Cargo.toml"
   require_file "packaging/debian/changelog"
@@ -183,6 +242,8 @@ stage_package() {
   esac
 
   install -Dm755 "$ROOT/daemon/target/release/codexbar-linuxd" "$PKG_ROOT/usr/bin/codexbar-linuxd"
+  strip --strip-unneeded "$PKG_ROOT/usr/bin/codexbar-linuxd"
+  validate_no_build_path_leaks "$PKG_ROOT/usr/bin/codexbar-linuxd"
   install -Dm644 "$ROOT/packaging/dbus/org.codexbar.Linux1.service" \
     "$PKG_ROOT/usr/share/dbus-1/services/org.codexbar.Linux1.service"
   install -Dm644 "$ROOT/packaging/systemd/codexbar-linuxd.service" \
@@ -196,7 +257,7 @@ stage_package() {
   install -Dm644 "$ROOT/docs/gnome-smoke-test.md" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/gnome-smoke-test.md"
   install -Dm644 "$ROOT/docs/release-smoke-test.md" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/release-smoke-test.md"
   install -Dm644 "$ROOT/packaging/debian/copyright" "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/copyright"
-  gzip -cn "$ROOT/packaging/debian/changelog" > "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/changelog.Debian.gz"
+  gzip -cn9 "$ROOT/packaging/debian/changelog" > "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/changelog.Debian.gz"
   chmod 0644 "$PKG_ROOT/usr/share/doc/$PACKAGE_NAME/changelog.Debian.gz"
 
   install -d -m 0755 "$PKG_ROOT/DEBIAN"
@@ -221,7 +282,8 @@ VERSION="$(package_version)"
 ARCHITECTURE="$(dpkg --print-architecture)"
 DEB_PATH="$DIST_DIR/${PACKAGE_NAME}_${VERSION}_${ARCHITECTURE}.deb"
 
-cargo build --manifest-path "$ROOT/daemon/Cargo.toml" --release --locked
+RELEASE_RUSTFLAGS="$(release_rustflags)"
+env RUSTFLAGS="$RELEASE_RUSTFLAGS" cargo build --manifest-path "$ROOT/daemon/Cargo.toml" --release --locked
 stage_package "$VERSION"
 CHECK_HOME="$(mktemp -d "${TMPDIR:-/tmp}/codexbar-linuxd-package-check.XXXXXX")"
 cleanup_check_home() {

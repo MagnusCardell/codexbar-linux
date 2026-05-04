@@ -26,9 +26,10 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 05B packaging and release-install hardening**
+This repository is at **Task 05C package release-candidate validation**
 status, building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser
-cleanup, and Task 05A upstream-CLI-only hardening.
+cleanup, Task 05A upstream-CLI-only hardening, and Task 05B development package
+work.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -53,6 +54,9 @@ Present:
 - GSettings schema under `schemas/`.
 - User-scoped systemd/D-Bus activation files and a development Debian package
   path for v0.1 local release smoke testing.
+- Development package hardening that strips the packaged daemon, remaps private
+  build paths in release binaries, and rejects packaged daemon binaries that
+  retain exact private build-root, home, Cargo, Rustup, or staging paths.
 - Local install/uninstall bootstrap scripts that copy only runtime extension
   files, compile schemas strictly, and remove owned files while preserving user
   config/cache.
@@ -67,10 +71,11 @@ Out of production scope after Task 04R:
 - provider web fetches or dashboard scraping;
 - browser extension or localhost/TCP bridge.
 
-Not implemented after Task 05B:
+Not implemented after Task 05C:
 
 - Signed repository distribution, package upgrade matrix coverage, and recorded
-  package-install GNOME smoke evidence for Ubuntu 24.04/26.04 release sign-off.
+  root-backed package install/remove GNOME smoke evidence for Ubuntu
+  24.04/26.04 release sign-off.
 
 `TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
 reserved and unsupported. The daemon validates the request JSON and returns a
@@ -148,7 +153,7 @@ explicit user action.
 
 ## Development Debian package
 
-Task 05B chooses **Option A: development `.deb` package**. The package installs
+Task 05B chose **Option A: development `.deb` package**. The package installs
 system-owned files under `/usr/bin`, `/usr/share/dbus-1/services`,
 `/usr/lib/systemd/user`, `/usr/share/gnome-shell/extensions`, and
 `/usr/share/glib-2.0/schemas`. It does not enable the GNOME extension, start a
@@ -164,6 +169,11 @@ gnome-extensions enable codexbar-linux@codexbar.dev
 
 The user still controls extension enablement. On Wayland, a logout/login may be
 needed before GNOME Shell discovers newly installed system extension files.
+Task 05C validated the package build, contents, non-mutating apt dependency
+resolution, isolated D-Bus activation, missing-upstream-CLI degraded behavior,
+and release-mode live upstream-CLI D-Bus smoke. Real `sudo apt install/remove`
+and packaged GNOME panel/popover smoke still need to be recorded on the target
+Ubuntu GNOME host.
 
 ## Repository layout
 
