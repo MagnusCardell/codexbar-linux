@@ -66,7 +66,7 @@ Do not conflate the provider semantic source with the implementation data plane.
 
 `source` describes the provider-level semantic source:
 
-- `api` — provider API or upstream CLI API-derived result;
+- `api` — provider API, OAuth-backed provider result, or upstream CLI API-derived result;
 - `local` — local CLI/config/state result;
 - `web` — provider web/session result if reported by upstream provider semantics; not a local daemon web fetch;
 - `unknown` — source is unknown or unavailable.

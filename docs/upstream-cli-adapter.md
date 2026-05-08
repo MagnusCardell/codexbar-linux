@@ -74,6 +74,8 @@ The adapter normalizes upstream JSON into the frozen
 
 - upstream CLI sources such as `codex-cli`, `cli`, and `local` become semantic
   `source: "local"`;
+- upstream CLI sources such as `oauth` and `api` become semantic
+  `source: "api"`;
 - the implementation boundary is always `sourceAdapter: "upstream_cli"`;
 - usage meters preserve `usedPercent`, reset timestamps, and window minutes;
 - status output is optional and merged only into schema-supported status fields;
