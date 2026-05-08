@@ -30,7 +30,7 @@ Deliverables:
 - Rust daemon skeleton.
 - D-Bus service with `GetSnapshot`, `Refresh`, `GetDaemonInfo`.
 - CLI runner for `codexbar --format json --json-only --provider all`.
-- Cost runner for `codexbar cost --format json --json-only --provider all`.
+- Cost runner for `codexbar cost --format json --json-only --provider both`.
 - Cache read/write.
 - GJS Shell extension with merged mode and popover cards.
 - Manual refresh.

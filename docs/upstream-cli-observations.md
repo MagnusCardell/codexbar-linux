@@ -64,7 +64,7 @@ The full opted-in matrix is:
 - `codexbar config validate --format json --json-only`
 - `codexbar --format json --json-only --provider <provider> --source cli`
 - `codexbar usage --format json --json-only --provider <provider> --source cli`
-- `codexbar cost --format json --json-only --provider all`
+- `codexbar cost --format json --json-only --provider both`
 - `codexbar --format json --json-only --provider <provider> --source cli --status`
 - `codexbar --format json --json-only --provider all --source web`
 - `codexbar --format json --json-only --provider all --source auto`
@@ -105,7 +105,7 @@ The 2026-04-29 live capture also promoted reviewed fixtures for both
 `--source web` and `--source auto`; both exited 1 and emitted a single JSON
 array on stdout with the macOS-only web-support runtime error.
 
-The same live capture showed:
+The 2026-04-29 live capture used the older cost probe shape and showed:
 
 - `codexbar config validate --format json --json-only` exits 0 and emits `[]`.
 - `codexbar cost --format json --json-only --provider all` exits 0 and emits a

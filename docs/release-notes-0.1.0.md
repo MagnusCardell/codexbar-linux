@@ -40,7 +40,7 @@ through the daemon.
   and redacted diagnostics.
 - A configured upstream `codexbar` CLI can refresh targeted Codex usage/status
   through `sourceAdapter=upstream_cli`; cost is attempted with upstream
-  `codexbar cost --format json --json-only --provider all`.
+  `codexbar cost --format json --json-only --provider both`.
 - Normalized snapshots are cached locally for stale rendering. Raw provider
   payloads are not cached.
 - The package does not auto-enable the GNOME extension, start a system daemon,
@@ -87,7 +87,7 @@ Install upstream CodexBar CLI, then verify:
 ```bash
 codexbar --version
 codexbar --format json --json-only --provider codex --source cli
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 ```
 
 If `codexbar` is not on the packaged daemon's `PATH`, configure the systemd user

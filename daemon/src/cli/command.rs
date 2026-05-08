@@ -77,7 +77,7 @@ pub fn status(provider: &str) -> CommandSpec {
     }
 }
 
-pub fn cost_all() -> CommandSpec {
+pub fn cost_both() -> CommandSpec {
     CommandSpec {
         kind: CommandKind::Cost,
         args: vec![
@@ -86,7 +86,7 @@ pub fn cost_all() -> CommandSpec {
             "json".to_string(),
             "--json-only".to_string(),
             "--provider".to_string(),
-            "all".to_string(),
+            "both".to_string(),
         ],
         timeout: COST_TIMEOUT,
         max_stdout_bytes: STDOUT_LIMIT,
@@ -139,14 +139,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            cost_all().args,
+            cost_both().args,
             [
                 "cost",
                 "--format",
                 "json",
                 "--json-only",
                 "--provider",
-                "all"
+                "both"
             ]
         );
     }

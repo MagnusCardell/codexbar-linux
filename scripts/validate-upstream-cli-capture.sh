@@ -185,8 +185,8 @@ def check_cost_probe(entry: dict, argv: list[str]) -> None:
     if entry["command"] != "cost":
         return
     provider = option_value(argv, "--provider")
-    if provider != "all":
-        raise SystemExit(f"Cost capture must use --provider all for {entry['fixtureId']}")
+    if provider != "both":
+        raise SystemExit(f"Cost capture must use --provider both for {entry['fixtureId']}")
     if "--source" in argv:
         raise SystemExit(f"Cost capture must not include --source for {entry['fixtureId']}")
 

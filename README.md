@@ -82,7 +82,7 @@ Verify the upstream CLI before configuring GNOME:
 
 ```bash
 codexbar --format json --json-only --provider codex --source cli
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 ```
 
 If `codexbar` is not on your interactive shell `PATH`, use the extracted path:
@@ -278,10 +278,11 @@ The supported production data plane is upstream `codexbar` CLI plus local
 provider tooling.
 
 The first proven Linux usage/status provider is `codex` through the CLI source.
-Local cost summaries use:
+Current upstream cost output is a local Codex + Claude cost scan. CodexBar
+GNOME requests both supported local cost providers:
 
 ```bash
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 ```
 
 Other providers depend on what upstream CodexBar CLI supports on Linux through

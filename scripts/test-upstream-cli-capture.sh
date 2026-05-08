@@ -48,7 +48,7 @@ case "$*" in
     printf '{"identity":{"accountEmail":"opaque_nested","providerID":"nested_text_raw","accountOrganization":"Stream Org"}}\n'
     exit 2
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '[{"provider":"codex","totalCost":1.23,"authorization":"Bearer secret"}]\n'
     ;;
   *)
@@ -174,7 +174,7 @@ for expected in \
   "--version" \
   "--format json --json-only --provider all --source cli" \
   "usage --format json --json-only --provider all --source cli" \
-  "cost --format json --json-only --provider all" \
+  "cost --format json --json-only --provider both" \
   "--format json --json-only --provider all --source cli --status"
 do
   grep -Fx -- "$expected" "$LOG" >/dev/null || {
@@ -213,7 +213,7 @@ for expected in \
   "--format json --json-only --provider claude --source cli" \
   "usage --format json --json-only --provider claude --source cli" \
   "--format json --json-only --provider claude --source cli --status" \
-  "cost --format json --json-only --provider all"
+  "cost --format json --json-only --provider both"
 do
   grep -Fx -- "$expected" "$LOG" >/dev/null || {
     echo "missing targeted provider capture invocation: $expected" >&2
@@ -299,7 +299,7 @@ for expected in \
   "--format json --json-only --provider codex --source cli" \
   "usage --format json --json-only --provider codex --source cli" \
   "--format json --json-only --provider codex --source cli --status" \
-  "cost --format json --json-only --provider all"
+  "cost --format json --json-only --provider both"
 do
   grep -Fx -- "$expected" "$LOG" >/dev/null || {
     echo "missing targeted provider capture invocation: $expected" >&2
@@ -336,7 +336,7 @@ for fixture_id in [
     metadata = json.loads((manifest_path.parent / entry["metadataPath"]).read_text(encoding="utf-8"))
     if metadata["timeoutSeconds"] != 90:
         raise SystemExit(f"{fixture_id} timeoutSeconds was {metadata['timeoutSeconds']}, expected 90")
-if entries["cost_all"]["argv"] != ["codexbar", "cost", "--format", "json", "--json-only", "--provider", "all"]:
+if entries["cost_both"]["argv"] != ["codexbar", "cost", "--format", "json", "--json-only", "--provider", "both"]:
     raise SystemExit("targeted capture cost argv changed unexpectedly")
 PY
 if grep -R -E 'dev@example.com|nested@example.com|raw-response@example.com|acct_live_raw|nested_acct_raw|Secret Org|rawResponse|rawPayload|raw-response-token|raw-payload-token|/home/person|~/.local/share|auth\.json' "$TMP/provider-codex" >/dev/null; then
@@ -353,7 +353,7 @@ for expected in \
   "--format json --json-only --provider claude --source cli" \
   "usage --format json --json-only --provider claude --source cli" \
   "--format json --json-only --provider claude --source cli --status" \
-  "cost --format json --json-only --provider all"
+  "cost --format json --json-only --provider both"
 do
   grep -Fx -- "$expected" "$LOG" >/dev/null || {
     echo "missing multi-provider targeted invocation: $expected" >&2

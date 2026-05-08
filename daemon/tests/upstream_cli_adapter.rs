@@ -23,7 +23,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     cat <<'JSON'
 [{"provider":"codex","source":"local","updatedAt":"2026-04-29T19:32:13Z","sessionCostUSD":1.25,"last30DaysCostUSD":12.34,"totals":{"totalCost":12.34},"daily":[{"date":"2026-04-28","totalCost":5.0},{"date":"2026-04-29","totalCost":7.34}]}]
 JSON
@@ -109,7 +109,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -138,7 +138,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -170,7 +170,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -202,7 +202,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -285,7 +285,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -379,8 +379,8 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
     );
     assert!(
         log.lines()
-            .any(|line| line == "cost --format json --json-only --provider all"),
-        "cost command should use provider all without source: {log}"
+            .any(|line| line == "cost --format json --json-only --provider both"),
+        "cost command should use provider both without source: {log}"
     );
     assert!(
         !log.lines()
@@ -654,7 +654,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[]'
     exit 0
     ;;
@@ -724,7 +724,7 @@ case "$*" in
     printf '%s\n' 'CodexBar not-semver'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     sleep 1
     exit 0
     ;;
@@ -801,7 +801,7 @@ case "$*" in
     printf '%s\n' 'CodexBar local-build'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '{"providers":[{"provider":"codex","error":{"kind":"local_cost","message":"cost command unavailable for raw.user@example.com"}}]}'
     exit 0
     ;;
@@ -1032,7 +1032,7 @@ case "$*" in
     printf '%s\n' 'CodexBar test-1'
     exit 0
     ;;
-  "cost --format json --json-only --provider all")
+  "cost --format json --json-only --provider both")
     printf '%s\n' '[{{"provider":"codex","source":"local","updatedAt":"2026-04-29T19:32:13Z","sessionCostUSD":1.25,"last30DaysCostUSD":12.34,"totals":{{"totalCost":12.34}}}}]'
     exit 0
     ;;

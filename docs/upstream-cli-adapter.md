@@ -35,11 +35,11 @@ The usage subcommand shape remains available for fixtures and fallback testing:
 codexbar usage --format json --json-only --provider <provider> --source cli
 ```
 
-Cost uses the upstream all-provider cost command and deliberately omits
+Cost uses the upstream Codex + Claude local cost command and deliberately omits
 `--source`:
 
 ```bash
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 ```
 
 The adapter does not default usage/status to `--provider all` because the

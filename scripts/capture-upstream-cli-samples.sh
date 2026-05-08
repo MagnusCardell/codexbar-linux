@@ -46,7 +46,7 @@ Options:
   --providers LIST
       Comma-separated provider ids for usage/default/status success probes when
       --allow-provider-network is set. Defaults to all. The cost probe always
-      captures --provider all and intentionally does not receive --source.
+      captures --provider both and intentionally does not receive --source.
   --provider-source SOURCE
       Source for provider success probes when --allow-provider-network is set.
       Allowed values: cli, auto, web. Defaults to cli, which is the expected
@@ -580,7 +580,7 @@ if [[ "$ALLOW_PROVIDER_NETWORK" -eq 1 ]]; then
     run_capture "usage_${provider}_${PROVIDER_SOURCE}_subcommand" "usage" "usage" "usage_success" "$USAGE_TIMEOUT" usage --format json --json-only --provider "$provider" --source "$PROVIDER_SOURCE"
     run_capture "status_${provider}_${PROVIDER_SOURCE}" "status" "status" "usage_success" "$USAGE_TIMEOUT" --format json --json-only --provider "$provider" --source "$PROVIDER_SOURCE" --status
   done
-  run_capture "cost_all" "cost" "cost" "cost_success" "$COST_TIMEOUT" cost --format json --json-only --provider all
+  run_capture "cost_both" "cost" "cost" "cost_success" "$COST_TIMEOUT" cost --format json --json-only --provider both
 fi
 
 if [[ "$INCLUDE_ERROR_PROBES" -eq 1 ]]; then

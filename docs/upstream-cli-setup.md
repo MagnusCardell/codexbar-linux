@@ -41,7 +41,7 @@ codexbar --format json --json-only --provider codex --source cli
 Check local cost summaries:
 
 ```bash
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 ```
 
 If a provider reports that sign-in is required, authenticate the provider using

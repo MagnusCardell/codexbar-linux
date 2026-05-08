@@ -126,7 +126,7 @@ the command or smoke evidence used.
   `upstream_cli_not_executable` without exposing the raw path.
 - Upstream CLI available Codex refresh passes: with a configured upstream
   `codexbar`, targeted Codex usage/status refresh succeeds through
-  `sourceAdapter=upstream_cli`, cost is attempted through `provider all`, and no
+  `sourceAdapter=upstream_cli`, cost is attempted through `provider both`, and no
   raw stdout/stderr, identity, token, cookie, or local path crosses D-Bus/cache.
 - Daemon stop/restart recovery passes: stopping `codexbar-linuxd.service`
   renders a recoverable daemon-unavailable UI, and restarting the service lets

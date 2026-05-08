@@ -78,10 +78,12 @@ fn upstream_cli_live_provider_fixture_ids_are_targeted() {
             continue;
         }
         if fixture.command == "cost" {
-            assert_eq!(
-                option_value(&fixture.argv, "--provider"),
-                Some("all"),
-                "cost fixture {} must stay --provider all",
+            assert!(
+                matches!(
+                    option_value(&fixture.argv, "--provider"),
+                    Some("all" | "both")
+                ),
+                "cost fixture {} must use --provider all or both",
                 fixture.fixture_id
             );
             assert!(

@@ -84,7 +84,7 @@ The adapter invokes:
 ```bash
 codexbar --format json --json-only --provider <provider> --source cli
 codexbar --format json --json-only --provider <provider> --source cli --status
-codexbar cost --format json --json-only --provider all
+codexbar cost --format json --json-only --provider both
 codexbar config dump --pretty
 codexbar config validate --format json --json-only
 ```
@@ -96,8 +96,8 @@ source adapter `off`, or without CLI fallback are skipped, and an all-off config
 returns a schema-valid `noop` refresh instead of silently probing `codex`.
 Explicit `RefreshOptions.providers` remains a manual override. The adapter does
 not default usage/status to `--provider all`; all-provider usage/status probes
-are explicit only. Cost remains the upstream all-provider cost command and
-deliberately omits `--source`.
+are explicit only. Cost remains the upstream Codex + Claude local cost command
+and deliberately omits `--source`.
 
 All invocations require:
 

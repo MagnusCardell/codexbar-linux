@@ -228,8 +228,10 @@ def check_cost_probe(entry: dict, argv: list[str]) -> None:
     if entry["command"] != "cost" or entry.get("synthetic"):
         return
     provider = option_value(argv, "--provider")
-    if provider != "all":
-        raise SystemExit(f"Cost fixture must use --provider all for {entry['fixtureId']}")
+    if provider not in {"all", "both"}:
+        raise SystemExit(
+            f"Cost fixture must use --provider all or both for {entry['fixtureId']}"
+        )
     if "--source" in argv:
         raise SystemExit(f"Cost fixture must not include --source for {entry['fixtureId']}")
 

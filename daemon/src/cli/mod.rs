@@ -590,7 +590,7 @@ fn cost_spec(timeout: Duration) -> CommandSpec {
             "json".to_string(),
             "--json-only".to_string(),
             "--provider".to_string(),
-            "all".to_string(),
+            "both".to_string(),
         ],
         timeout,
         max_stdout_bytes: OUTPUT_LIMIT_BYTES,
