@@ -92,7 +92,7 @@ require_tool() {
   fi
 }
 
-for tool in bash busctl date dpkg-query gnome-extensions gnome-shell grep gsettings mkdir pgrep ps python3 sed systemctl tee; do
+for tool in bash busctl date dpkg-query gnome-extensions gnome-shell grep gsettings mkdir pgrep ps python3 sed systemctl tail tee; do
   require_tool "$tool"
 done
 
@@ -126,7 +126,11 @@ run_captured "gnome-shell-version" gnome-shell --version
 run_captured "os-release" python3 -c 'from pathlib import Path; print(Path("/etc/os-release").read_text(encoding="utf-8"), end="")'
 run_captured "session-type" bash -c 'printf "%s\n" "${XDG_SESSION_TYPE:-unknown}"'
 run_captured "gnome-shell-processes" pgrep -af gnome-shell
-latest_shell_pid="$(pgrep -n gnome-shell)"
+latest_shell_pid="$(pgrep -x gnome-shell | tail -n 1)"
+if [[ -z "$latest_shell_pid" ]]; then
+  echo "Could not find a running gnome-shell process with pgrep -x gnome-shell" >&2
+  exit 1
+fi
 run_captured "gnome-shell-latest-process" ps -o pid,lstart,cmd -p "$latest_shell_pid"
 run_captured "enabled-extensions" gsettings get org.gnome.shell enabled-extensions
 run_captured "gnome-extensions-info" gnome-extensions info "$EXTENSION_UUID"

@@ -162,7 +162,9 @@ pub fn validate_settings(settings: &Settings) -> AppResult<()> {
     if settings.schema_version != 1 {
         return Err(AppError::invalid_json());
     }
-    if !(30..=86400).contains(&settings.refresh.interval_seconds) {
+    if settings.refresh.interval_seconds != 0
+        && !(30..=86400).contains(&settings.refresh.interval_seconds)
+    {
         return Err(AppError::invalid_json());
     }
     for provider_id in settings.providers.keys() {

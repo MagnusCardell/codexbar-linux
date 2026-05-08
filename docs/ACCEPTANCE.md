@@ -96,13 +96,23 @@ the command or smoke evidence used.
   explicit user enablement, and a session restart when Wayland discovery
   requires it.
 - GNOME metadata/runtime matrix includes GNOME 50: `metadata.json` lists Shell
-  versions `46` through `50`, static validators assert both the GNOME 46 support
-  floor and GNOME 50 validation target, and Ubuntu 26.04/GNOME 50 live smoke is
-  recorded before final release sign-off.
+  versions `46` through `50`; `46` and `50` are the required validation
+  anchors, while `47`, `48`, and `49` are compatibility-declared intermediate
+  Shell versions. Static validators assert the GNOME 46 support floor and GNOME
+  50 validation target, and Ubuntu 26.04/GNOME 50 live smoke is recorded before
+  final release sign-off.
 - Daemon auto-refresh passes: startup refresh runs when daemon settings allow
-  it, scheduled refresh repeats on `refresh.intervalSeconds`, settings patches
-  reschedule the interval without daemon restart, and refresh failure clears the
-  active-refresh guard so manual Refresh can recover.
+  it, scheduled refresh repeats on `refresh.intervalSeconds`, `intervalSeconds:
+  0` disables scheduled interval refresh without changing startup refresh,
+  settings patches reschedule the interval without daemon restart, repeated
+  upstream CLI missing/timeout/parse/nonzero failures back off instead of
+  running every interval forever, and refresh failure clears the active-refresh
+  guard so manual Refresh can recover.
+- Provider off semantics pass: an empty provider config defaults empty-provider
+  refreshes to `codex`, but a non-empty config with every provider disabled,
+  set to source `off`, or without CLI fallback returns a schema-valid `noop`
+  refresh instead of silently probing `codex`; explicit
+  `RefreshOptions.providers` remains a manual override.
 - Preferences UX passes: v0.1 does not show inert login-start controls;
   preferences display daemon info, refresh interval, panel provider selection,
   and provider enable/source controls, and daemon-owned writes go through

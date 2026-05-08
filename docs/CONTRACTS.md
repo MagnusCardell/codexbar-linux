@@ -33,6 +33,17 @@ Daemon-owned settings include:
 - provider source adapter preference;
 - diagnostics verbosity.
 
+`refresh.intervalSeconds` defaults to 300 seconds. The value `0` means
+manual/off mode for scheduled interval refresh only; it does not disable
+startup refresh, which remains controlled by `refresh.startupRefresh`.
+
+Provider selection defaults empty-provider refreshes to `codex` only when the
+provider settings map is empty. Once the settings map is non-empty, disabled
+providers, providers whose preferred source adapter is `off`, and providers
+with CLI fallback disabled are excluded. If no configured provider remains, the
+daemon returns a schema-valid `noop` refresh with
+`refresh_no_enabled_providers` instead of silently refreshing `codex`.
+
 The v1 settings schema still contains browser-import and Linux-web fields for
 compatibility with the frozen contract. In the no-browser product scope those
 fields are deprecated, normalized off by the daemon, and must not trigger

@@ -254,6 +254,162 @@ async fn dbus_scheduler_runs_interval_refresh_when_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dbus_scheduler_interval_zero_disables_interval_loop_but_allows_startup() {
+    if !isolated_session_bus_available(
+        "dbus_scheduler_interval_zero_disables_interval_loop_but_allows_startup",
+    ) {
+        return;
+    }
+    let _guard = DBUS_TEST_LOCK.lock().await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_daemon_config(&tmp, true, 0);
+    let daemon = spawn_daemon_with_scheduler_controls(&tmp, None, false, Some(100), Some(1000));
+    let connection = zbus::Connection::session().await.expect("session bus");
+    let proxy = wait_for_proxy(&connection).await;
+    let mut finished_stream = proxy
+        .receive_signal("RefreshFinished")
+        .await
+        .expect("finished stream");
+
+    let finished_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
+        .await
+        .expect("startup RefreshFinished timeout")
+        .expect("startup RefreshFinished message");
+    let (_refresh_id, result_json): (String, String) =
+        finished_msg.body().deserialize().expect("finished body");
+    common::assert_schema("refresh-result.schema.json", &result_json);
+    let result: serde_json::Value = serde_json::from_str(&result_json).expect("result json");
+    assert_eq!(result["reason"], "startup");
+
+    let no_scheduled = timeout(Duration::from_millis(350), finished_stream.next()).await;
+    assert!(
+        no_scheduled.is_err(),
+        "intervalSeconds=0 must not run a scheduled interval refresh after startup"
+    );
+    drop(daemon);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dbus_scheduler_backs_off_repeated_upstream_cli_failures() {
+    if !isolated_session_bus_available("dbus_scheduler_backs_off_repeated_upstream_cli_failures") {
+        return;
+    }
+    let _guard = DBUS_TEST_LOCK.lock().await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_daemon_config(&tmp, false, 30);
+    let daemon = spawn_daemon_with_scheduler_controls(&tmp, None, false, Some(80), Some(10));
+    let connection = zbus::Connection::session().await.expect("session bus");
+    let proxy = wait_for_proxy(&connection).await;
+    let mut finished_stream = proxy
+        .receive_signal("RefreshFinished")
+        .await
+        .expect("finished stream");
+
+    let first_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
+        .await
+        .expect("first scheduled RefreshFinished timeout")
+        .expect("first scheduled RefreshFinished message");
+    let (_first_id, first_result_json): (String, String) =
+        first_msg.body().deserialize().expect("first finished body");
+    let first_result: serde_json::Value =
+        serde_json::from_str(&first_result_json).expect("first result json");
+    assert_eq!(first_result["reason"], "scheduled");
+    assert!(first_result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes")
+        .iter()
+        .any(|code| code == "upstream_cli_missing"));
+
+    let after_first = tokio::time::Instant::now();
+    let second_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
+        .await
+        .expect("second scheduled RefreshFinished timeout")
+        .expect("second scheduled RefreshFinished message");
+    let gap = after_first.elapsed();
+    assert!(
+        gap >= Duration::from_millis(120),
+        "second scheduled failure should be delayed by backoff, observed gap {gap:?}"
+    );
+    let (_second_id, second_result_json): (String, String) = second_msg
+        .body()
+        .deserialize()
+        .expect("second finished body");
+    common::assert_schema("refresh-result.schema.json", &second_result_json);
+
+    let no_immediate_third = timeout(Duration::from_millis(180), finished_stream.next()).await;
+    assert!(
+        no_immediate_third.is_err(),
+        "third repeated upstream CLI failure should not run at the base interval"
+    );
+    drop(daemon);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dbus_refresh_all_configured_providers_disabled_returns_noop() {
+    if !isolated_session_bus_available(
+        "dbus_refresh_all_configured_providers_disabled_returns_noop",
+    ) {
+        return;
+    }
+    let _guard = DBUS_TEST_LOCK.lock().await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_daemon_config_with_providers(
+        &tmp,
+        false,
+        0,
+        r#"{
+    "codex": {"enabled": false, "preferredSourceAdapter": "auto", "allowBrowserImport": false, "allowCliFallback": true},
+    "claude": {"enabled": true, "preferredSourceAdapter": "off", "allowBrowserImport": false, "allowCliFallback": true},
+    "gemini": {"enabled": true, "preferredSourceAdapter": "auto", "allowBrowserImport": false, "allowCliFallback": false}
+  }"#,
+    );
+    let daemon = spawn_daemon_with_scheduler_controls(&tmp, None, false, None, None);
+    let connection = zbus::Connection::session().await.expect("session bus");
+    let proxy = wait_for_proxy(&connection).await;
+    let mut finished_stream = proxy
+        .receive_signal("RefreshFinished")
+        .await
+        .expect("finished stream");
+
+    let refresh_id = call_string_no_autostart(
+        &proxy,
+        "Refresh",
+        &r#"{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing","sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":false}}"#,
+    )
+    .await
+    .expect("Refresh");
+    assert!(!refresh_id.is_empty());
+    let finished_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
+        .await
+        .expect("RefreshFinished timeout")
+        .expect("RefreshFinished message");
+    let (finished_id, result_json): (String, String) =
+        finished_msg.body().deserialize().expect("finished body");
+    assert_eq!(finished_id, refresh_id);
+    common::assert_schema("refresh-result.schema.json", &result_json);
+    let result: serde_json::Value = serde_json::from_str(&result_json).expect("result json");
+    assert_eq!(result["status"], "noop");
+    assert_eq!(result["providers"].as_array().unwrap().len(), 0);
+    assert!(result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes")
+        .iter()
+        .any(|code| code == "refresh_no_enabled_providers"));
+
+    let snapshot = call_string_no_autostart(&proxy, "GetSnapshot", &())
+        .await
+        .expect("GetSnapshot");
+    common::assert_schema("snapshot.schema.json", &snapshot);
+    let snapshot_value: serde_json::Value = serde_json::from_str(&snapshot).expect("snapshot json");
+    assert_eq!(snapshot_value["providers"].as_array().unwrap().len(), 0);
+    assert_eq!(snapshot_value["selectedProvider"], serde_json::Value::Null);
+    drop(daemon);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires dbus-run-session, CODEXBAR_LIVE=1, and CODEXBAR_CLI=/path/to/codexbar"]
 async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
     if !isolated_session_bus_available("live_dbus_upstream_cli_refresh_smoke_redacts_outputs") {
@@ -413,6 +569,15 @@ fn spawn_daemon_with_scheduler_controls(
 }
 
 fn write_daemon_config(tmp: &TempDir, startup_refresh: bool, interval_seconds: u64) {
+    write_daemon_config_with_providers(tmp, startup_refresh, interval_seconds, "{}");
+}
+
+fn write_daemon_config_with_providers(
+    tmp: &TempDir,
+    startup_refresh: bool,
+    interval_seconds: u64,
+    providers_json: &str,
+) {
     let config_dir = tmp.path().join("config").join("codexbar-linux");
     fs::create_dir_all(&config_dir).expect("config dir");
     let config = format!(
@@ -423,7 +588,7 @@ fn write_daemon_config(tmp: &TempDir, startup_refresh: bool, interval_seconds: u
     "startupRefresh": {startup_refresh},
     "allowStaleCacheFallback": true
   }},
-  "providers": {{}},
+  "providers": {providers_json},
   "browserImport": {{
     "enabled": false,
     "policy": "off",

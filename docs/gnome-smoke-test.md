@@ -29,7 +29,7 @@ echo "$XDG_SESSION_TYPE"
 echo "${XDG_DATA_HOME:-$HOME/.local/share}"
 echo "${XDG_CONFIG_HOME:-$HOME/.config}"
 pgrep -af gnome-shell
-ps -o pid,lstart,cmd -p "$(pgrep -n gnome-shell)"
+ps -o pid,lstart,cmd -p "$(pgrep -x gnome-shell | tail -n 1)"
 gsettings get org.gnome.shell enabled-extensions
 gnome-extensions info codexbar-linux@codexbar.dev
 ```
@@ -117,7 +117,7 @@ PY
 stat -c '%A %U:%G %n' "$EXT_DIR" "$EXT_DIR/metadata.json" "$EXT_DIR/extension.js"
 journalctl --user -u codexbar-linuxd.service --no-pager -n 80
 pgrep -af gnome-shell
-ps -o pid,lstart,cmd -p "$(pgrep -n gnome-shell)"
+ps -o pid,lstart,cmd -p "$(pgrep -x gnome-shell | tail -n 1)"
 ```
 
 Common discovery failures are a nested directory such as

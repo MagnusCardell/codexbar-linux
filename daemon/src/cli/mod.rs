@@ -486,6 +486,10 @@ pub fn target_providers(settings: &Settings, requested: &[String]) -> Vec<String
         return sanitize_provider_targets(requested);
     }
 
+    if settings.providers.is_empty() {
+        return vec![DEFAULT_PROVIDER.to_string()];
+    }
+
     let configured = settings
         .providers
         .iter()
@@ -496,21 +500,25 @@ pub fn target_providers(settings: &Settings, requested: &[String]) -> Vec<String
         })
         .map(|(provider, _settings)| provider.clone())
         .collect::<Vec<_>>();
-    sanitize_provider_targets(&configured)
+    sanitize_provider_targets_without_default(&configured)
 }
 
 fn sanitize_provider_targets(values: &[String]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut providers = values
-        .iter()
-        .filter(|value| is_safe_id(value))
-        .filter(|value| seen.insert((*value).to_string()))
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut providers = sanitize_provider_targets_without_default(values);
     if providers.is_empty() {
         providers.push(DEFAULT_PROVIDER.to_string());
     }
     providers
+}
+
+fn sanitize_provider_targets_without_default(values: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    values
+        .iter()
+        .filter(|value| is_safe_id(value))
+        .filter(|value| seen.insert((*value).to_string()))
+        .cloned()
+        .collect::<Vec<_>>()
 }
 
 fn upstream_info_from_resolution(

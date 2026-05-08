@@ -53,13 +53,19 @@ useful cached data.
 Provider targets are selected in this order:
 
 1. non-empty `RefreshOptions.providers`;
-2. enabled daemon settings with CLI fallback allowed;
-3. `codex`.
+2. enabled daemon settings with CLI fallback allowed and source adapter not `off`;
+3. `codex`, only when the daemon provider settings map is empty.
 
 `codex` is the first proven Linux provider in the promoted live usage/status
 fixtures. Browser import and Linux web adapters are unsupported compatibility
 surface and do not run. Web/auto upstream source paths remain upstream Linux
 limitations unless the upstream CLI itself supports them later.
+
+An empty provider settings map means "use the proven Linux default" and targets
+`codex`. A non-empty provider settings map is deliberate user configuration. If
+every configured provider is disabled, set to source `off`, or has CLI fallback
+disabled, the daemon returns a no-op refresh with
+`refresh_no_enabled_providers`; it does not silently re-enable `codex`.
 
 ## Normalization
 

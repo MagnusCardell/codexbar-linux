@@ -27,6 +27,9 @@ use crate::redact;
 use crate::{DBUS_INTERFACE, DBUS_NAME, DBUS_OBJECT_PATH};
 
 const STALE_CACHE_USED_MESSAGE: &str = "Showing cached usage data.";
+const NO_ENABLED_PROVIDERS_CODE: &str = "refresh_no_enabled_providers";
+const NO_ENABLED_PROVIDERS_MESSAGE: &str =
+    "No providers are enabled for automatic refresh; refresh was skipped.";
 
 pub struct App {
     paths: AppPaths,
@@ -386,7 +389,7 @@ impl App {
         let fixture_only = active.options.source_adapter_policy.allows_fixture()
             && !active.options.source_adapter_policy.allows_upstream_cli();
 
-        let (mut snapshot, mut diagnostics, mut diagnostic_codes) =
+        let (mut snapshot, mut diagnostics, mut diagnostic_codes, allow_stale_fallback) =
             if fixture_requested && !self.runtime.fixture_source_allowed() {
                 (
                     fixture_not_allowed_snapshot(refresh_id, &active.started_at, &finished_at)?,
@@ -395,12 +398,26 @@ impl App {
                         "capability_unimplemented".to_string(),
                         "fixture_not_allowed".to_string(),
                     ],
+                    true,
                 )
             } else if fixture_only {
                 (
                     fixtures::refreshed_snapshot(refresh_id, &active.started_at, &finished_at)?,
                     Vec::new(),
                     Vec::new(),
+                    true,
+                )
+            } else if provider_targets.is_empty() {
+                (
+                    no_enabled_providers_snapshot(
+                        refresh_id,
+                        &active.started_at,
+                        &finished_at,
+                        cli::resolve_info(&self.paths),
+                    ),
+                    vec![no_enabled_providers_diagnostic(&finished_at)],
+                    vec![NO_ENABLED_PROVIDERS_CODE.to_string()],
+                    false,
                 )
             } else if active.options.source_adapter_policy.allows_upstream_cli() {
                 let adapter = UpstreamCliAdapter::from_paths(&self.paths);
@@ -414,12 +431,18 @@ impl App {
                     })
                     .await?;
                 let diagnostic_codes = result_diagnostic_codes(&refresh.diagnostics);
-                (refresh.snapshot, refresh.diagnostics, diagnostic_codes)
+                (
+                    refresh.snapshot,
+                    refresh.diagnostics,
+                    diagnostic_codes,
+                    true,
+                )
             } else {
                 (
                     fixtures::unsupported_adapter_snapshot(&finished_at)?,
                     Vec::new(),
                     vec!["upstream_cli_excluded".to_string()],
+                    true,
                 )
             };
 
@@ -427,7 +450,8 @@ impl App {
             .providers
             .iter()
             .any(|provider| provider.state == crate::model::ProviderState::Ok);
-        if !live_had_success
+        if allow_stale_fallback
+            && !live_had_success
             && active
                 .options
                 .source_adapter_policy
@@ -706,6 +730,12 @@ fn refresh_status(
     {
         return RefreshStatus::Partial;
     }
+    if diagnostic_codes
+        .iter()
+        .any(|code| code == NO_ENABLED_PROVIDERS_CODE)
+    {
+        return RefreshStatus::Noop;
+    }
     let ok_count = snapshot
         .providers
         .iter()
@@ -739,6 +769,29 @@ fn provider_events(
         events.push((provider.provider.clone(), to_public_json(&event)?));
     }
     Ok(events)
+}
+
+fn no_enabled_providers_snapshot(
+    refresh_id: &str,
+    started_at: &str,
+    finished_at: &str,
+    upstream_cli: crate::model::UpstreamCliInfo,
+) -> Snapshot {
+    Snapshot {
+        schema_version: 1,
+        generated_at: finished_at.to_string(),
+        stale: false,
+        selected_provider: None,
+        daemon: crate::model::SnapshotDaemon {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            state: DaemonState::Ok,
+            last_refresh_id: Some(refresh_id.to_string()),
+            last_refresh_started_at: Some(started_at.to_string()),
+            last_refresh_finished_at: Some(finished_at.to_string()),
+            upstream_cli: Some(upstream_cli),
+        },
+        providers: Vec::new(),
+    }
 }
 
 fn fixture_requested(options: &RefreshOptions) -> bool {
@@ -845,6 +898,23 @@ fn diagnostic_event(
         safe_message: safe_message.to_string(),
         timestamp: timestamp.to_string(),
         provider,
+        source_adapter: None,
+        recoverable: true,
+        details: Default::default(),
+        redacted: EventRedaction {
+            applied: true,
+            classes: vec!["secrets".to_string(), "identity".to_string()],
+        },
+    }
+}
+
+fn no_enabled_providers_diagnostic(timestamp: &str) -> DiagnosticEvent {
+    DiagnosticEvent {
+        code: NO_ENABLED_PROVIDERS_CODE.to_string(),
+        severity: DiagnosticSeverity::Info,
+        safe_message: NO_ENABLED_PROVIDERS_MESSAGE.to_string(),
+        timestamp: timestamp.to_string(),
+        provider: None,
         source_adapter: None,
         recoverable: true,
         details: Default::default(),

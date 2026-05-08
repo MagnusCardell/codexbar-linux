@@ -48,8 +48,8 @@ Present:
 - Redacted upstream CLI fixture corpus under `daemon/fixtures/upstream-cli/`.
 - Local-only upstream CLI capture harness and fixture validator.
 - Production daemon upstream CLI adapter for targeted provider refresh.
-- Runtime refresh uses targeted usage/status probes and defaults to `codex` when no provider is configured or requested.
-- Daemon auto-refresh runs on startup when configured, repeats on the daemon-owned refresh interval, reschedules after `SetSettingsPatch`, and clears the active-refresh guard after failed refresh completion.
+- Runtime refresh uses targeted usage/status probes and defaults to `codex` only when no provider is configured or requested; a non-empty provider config with every provider disabled or set to `off` returns a no-op refresh instead of silently probing `codex`.
+- Daemon auto-refresh runs on startup when configured, repeats on the daemon-owned refresh interval, treats `intervalSeconds: 0` as manual/off for scheduled interval refresh, backs off repeated upstream CLI missing/timeout/parse/nonzero failures, reschedules after `SetSettingsPatch`, and clears the active-refresh guard after failed refresh completion.
 - Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
 - GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
 - Preferences UI for Shell presentation settings plus daemon info, refresh interval, panel provider selection, and provider enable/source controls backed by `SetSettingsPatch`; the reserved `start-daemon-on-login` key is hidden for v0.1.
@@ -105,7 +105,11 @@ The upstream CLI adapter does not default production usage/status refresh to
 `--provider all` because the promoted live Linux evidence timed out for those
 all-provider usage/status probes. The first proven Linux usage/status provider
 is `codex`; `all` remains explicit for usage/status and is used by default only
-for cost summaries.
+for cost summaries. If daemon provider settings are non-empty and all configured
+providers are disabled, set to source `off`, or have CLI fallback disabled,
+automatic and empty-provider manual refreshes return `noop` with
+`refresh_no_enabled_providers`; explicit `RefreshOptions.providers` still
+override settings for one-off manual probes.
 
 For upstream CLI installation, verification, and packaged daemon configuration,
 see [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md). For the

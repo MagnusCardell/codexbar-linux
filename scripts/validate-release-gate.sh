@@ -231,7 +231,9 @@ required_markers = {
     ],
     "docs/ACCEPTANCE.md": [
         "GNOME metadata/runtime matrix includes GNOME 50",
+        "compatibility-declared intermediate",
         "Daemon auto-refresh passes",
+        "Provider off semantics pass",
         "Preferences UX passes",
         "repository gate passed for HEAD",
         "The reserved start-on-login preference is not shown as an active v0.1 control.",

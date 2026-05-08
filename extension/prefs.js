@@ -32,7 +32,7 @@ const SOURCE_TITLES = ['Automatic', 'Upstream CLI', 'Off'];
 const DEFAULT_DAEMON_SETTINGS = {
     schemaVersion: 1,
     refresh: {
-        intervalSeconds: 120,
+        intervalSeconds: 300,
         startupRefresh: true,
         allowStaleCacheFallback: true,
     },
@@ -164,7 +164,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         group.add(this._upstreamCliRow);
 
         const intervalAdjustment = new Gtk.Adjustment({
-            lower: 30,
+            lower: 0,
             upper: 86400,
             step_increment: 30,
             page_increment: 300,
@@ -190,7 +190,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
 
         const intervalRow = new Adw.ActionRow({
             title: 'Refresh interval',
-            subtitle: 'Seconds',
+            subtitle: 'Seconds; 0 disables scheduled refresh',
         });
         intervalRow.add_suffix(this._refreshIntervalSpin);
         intervalRow.activatable_widget = this._refreshIntervalSpin;

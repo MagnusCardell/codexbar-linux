@@ -25,8 +25,13 @@ through the daemon.
   capabilities.
 - Manual Refresh remains available from the Shell UI and travels through the
   daemon D-Bus API.
-- The daemon can refresh on startup, repeat on the configured interval, and
-  reschedule after daemon settings change without restarting.
+- The daemon can refresh on startup, repeat on the configured 300-second
+  default interval, treat `intervalSeconds: 0` as manual/off for scheduled
+  interval refresh, back off repeated upstream CLI missing/timeout/parse/nonzero
+  failures, and reschedule after daemon settings change without restarting.
+- Empty provider settings default empty-provider refreshes to `codex`; non-empty
+  settings with every provider disabled, source `off`, or CLI fallback disabled
+  return a no-op refresh instead of silently probing `codex`.
 - Preferences show daemon info, refresh interval, panel provider selection, and
   provider enable/source controls backed by `SetSettingsPatch`. The reserved
   start-on-login control is hidden in v0.1 because daemon startup is D-Bus

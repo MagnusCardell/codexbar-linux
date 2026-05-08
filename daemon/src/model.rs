@@ -499,7 +499,7 @@ impl Default for Settings {
         Self {
             schema_version: 1,
             refresh: RefreshSettings {
-                interval_seconds: 120,
+                interval_seconds: 300,
                 startup_refresh: true,
                 allow_stale_cache_fallback: true,
             },

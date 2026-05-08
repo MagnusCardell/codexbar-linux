@@ -13,7 +13,7 @@
       "required": ["intervalSeconds", "startupRefresh"],
       "additionalProperties": false,
       "properties": {
-        "intervalSeconds": { "type": "integer", "minimum": 30, "maximum": 86400, "default": 120 },
+        "intervalSeconds": { "type": "integer", "minimum": 0, "maximum": 86400, "default": 300, "description": "Seconds between automatic refreshes. 0 disables scheduled interval refresh without changing startupRefresh." },
         "startupRefresh": { "type": "boolean", "default": true },
         "allowStaleCacheFallback": { "type": "boolean", "default": true }
       }

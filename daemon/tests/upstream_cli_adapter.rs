@@ -366,7 +366,7 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
     common::assert_public_json_safe(&provider_diagnostics_json);
     assert_no_warning_or_error_diagnostics(&provider_diagnostics_json);
 
-    let log = fs::read_to_string(&log_path).expect("command log");
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.lines()
             .any(|line| line == "--format json --json-only --provider codex --source cli"),
@@ -404,7 +404,7 @@ async fn app_refresh_uses_configured_provider_targets() {
     let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
     common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
 
-    let log = fs::read_to_string(&log_path).expect("command log");
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         log.lines()
             .any(|line| line == "--format json --json-only --provider claude --source cli"),
@@ -414,6 +414,42 @@ async fn app_refresh_uses_configured_provider_targets() {
         !log.lines()
             .any(|line| line == "--format json --json-only --provider codex --source cli"),
         "disabled default provider should not be targeted: {log}"
+    );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_all_configured_providers_disabled_noops_without_defaulting_to_codex() {
+    let (fake_tmp, binary, log_path) = fake_codexbar_recording();
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    app.set_settings_patch_json(
+        r#"{"schemaVersion":1,"providers":{"codex":{"enabled":false},"claude":{"enabled":true,"preferredSourceAdapter":"off"},"gemini":{"enabled":true,"allowCliFallback":false}}}"#,
+    )
+    .expect("settings patch");
+
+    let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(snapshot["providers"].as_array().unwrap().len(), 0);
+    assert_eq!(snapshot["selectedProvider"], serde_json::Value::Null);
+    assert_eq!(result["status"], "noop");
+    assert_eq!(result["providers"].as_array().unwrap().len(), 0);
+    assert!(result["diagnosticCodes"]
+        .as_array()
+        .expect("diagnostic codes")
+        .iter()
+        .any(|code| code == "refresh_no_enabled_providers"));
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.trim().is_empty(),
+        "all configured providers are off, so no upstream CLI command should run: {log}"
     );
     assert!(fake_tmp.path().is_dir());
 }

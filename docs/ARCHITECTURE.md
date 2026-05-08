@@ -89,11 +89,15 @@ codexbar config dump --pretty
 codexbar config validate --format json --json-only
 ```
 
-Usage/status refreshes default to the targeted `codex` provider unless daemon
-settings or `RefreshOptions.providers` select a different provider set. The
-adapter does not default usage/status to `--provider all`; all-provider
-usage/status probes are explicit only. Cost remains the upstream all-provider
-cost command and deliberately omits `--source`.
+Usage/status refreshes default to the targeted `codex` provider only when no
+provider settings are configured and `RefreshOptions.providers` is empty. A
+non-empty daemon provider config is authoritative: providers disabled, set to
+source adapter `off`, or without CLI fallback are skipped, and an all-off config
+returns a schema-valid `noop` refresh instead of silently probing `codex`.
+Explicit `RefreshOptions.providers` remains a manual override. The adapter does
+not default usage/status to `--provider all`; all-provider usage/status probes
+are explicit only. Cost remains the upstream all-provider cost command and
+deliberately omits `--source`.
 
 All invocations require:
 
@@ -201,8 +205,14 @@ Manual refresh bypasses normal interval throttling but still respects concurrenc
 
 The daemon scheduler starts after the D-Bus object is exported. It runs a
 startup refresh when `settings.refresh.startupRefresh` is true, then runs
-scheduled refreshes on `settings.refresh.intervalSeconds`. `SetSettingsPatch`
-wakes the scheduler so interval changes are applied without daemon restart.
+scheduled refreshes on `settings.refresh.intervalSeconds`. The default interval
+is 300 seconds; `intervalSeconds: 0` is manual/off mode for scheduled interval
+refresh and does not change `startupRefresh`. `SetSettingsPatch` wakes the
+scheduler so interval changes are applied without daemon restart. Repeated
+scheduled upstream CLI missing, timeout, parse, and nonzero-exit failures use a
+bounded exponential backoff so the daemon does not run a failing CLI every base
+interval forever. Manual D-Bus `Refresh` remains available while backoff is in
+effect.
 Refresh completion failures must clear the active-refresh guard and emit a
 schema-valid failed `RefreshFinished` result so a later manual Refresh can
 recover.
@@ -210,7 +220,9 @@ recover.
 ## GNOME compatibility rules
 
 - Target GNOME 46+ and keep Ubuntu 26.04/GNOME 50 in metadata/runtime
-  validation for the release gate.
+  validation for the release gate. Metadata lists GNOME Shell 46 through 50;
+  46 and 50 are validation anchors, while 47-49 are compatibility-declared
+  intermediate versions.
 - Use GNOME 45+ ESModule style.
 - Do not allocate Shell UI objects before `enable()`.
 - Destroy UI objects, disconnect signals, and remove timers in `disable()`.

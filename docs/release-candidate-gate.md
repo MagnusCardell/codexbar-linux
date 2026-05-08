@@ -96,7 +96,7 @@ the gate with a different installed package. Both final manifests must also
 carry `finalReleaseEvidence: true`; package-stage preflight and development
 GNOME manifests are rejected in final mode.
 The installed GNOME extension metadata must match the v0.1 package contract:
-UUID, settings schema, GNOME 46/50 shell-version entries, and extension metadata `version` must remain `1`.
+UUID, settings schema, GNOME 46/50 shell-version validation anchors, compatibility-declared GNOME 47-49 entries, and extension metadata `version` must remain `1`.
 The validator cross-checks GNOME runtime claims against the sidecars: the last
 captured payload in `gnome-shell-version.txt` must match the manifest shell
 version, the last payload in `session-type.txt` must match the manifest session

@@ -14,9 +14,23 @@ use codexbar_linuxd::model::{
 #[test]
 fn default_settings_validate() {
     let settings = Settings::default();
+    assert_eq!(settings.refresh.interval_seconds, 300);
     config::validate_settings(&settings).expect("default settings validate");
     let json = serde_json::to_string(&settings).expect("settings json");
     common::assert_schema("settings.schema.json", &json);
+}
+
+#[test]
+fn interval_zero_is_valid_manual_refresh_mode() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new(paths).expect("app");
+    let settings_json = app
+        .set_settings_patch_json(r#"{"schemaVersion":1,"refresh":{"intervalSeconds":0}}"#)
+        .expect("manual refresh mode patch");
+    common::assert_schema("settings.schema.json", &settings_json);
+    let settings: Settings = serde_json::from_str(&settings_json).expect("settings");
+    assert_eq!(settings.refresh.interval_seconds, 0);
+    assert!(settings.refresh.startup_refresh);
 }
 
 #[test]
@@ -125,7 +139,7 @@ fn browser_settings_are_compatibility_only_and_normalized_off() {
 #[test]
 fn invalid_patch_maps_to_internal_typed_errors() {
     let schema_error =
-        config::parse_settings_patch(r#"{"schemaVersion":1,"refresh":{"intervalSeconds":1}}"#)
+        config::parse_settings_patch(r#"{"schemaVersion":1,"refresh":{"intervalSeconds":29}}"#)
             .expect("patch parses before full settings validation");
     let err = config::apply_settings_patch(Settings::default(), schema_error)
         .expect_err("invalid interval");

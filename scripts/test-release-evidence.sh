@@ -69,9 +69,13 @@ No browser-cookie/web-fetch surface present
 Upstream CLI capture harness tests passed
 test dbus_scheduler_runs_startup_refresh_when_enabled ... ok
 test dbus_scheduler_runs_interval_refresh_when_enabled ... ok
+test dbus_scheduler_interval_zero_disables_interval_loop_but_allows_startup ... ok
+test dbus_scheduler_backs_off_repeated_upstream_cli_failures ... ok
+test dbus_refresh_all_configured_providers_disabled_returns_noop ... ok
 test settings_patch_advances_scheduler_revision ... ok
 test failed_refresh_can_be_unwedged_without_daemon_restart ... ok
 test app_refresh_uses_configured_provider_targets ... ok
+test app_refresh_all_configured_providers_disabled_noops_without_defaulting_to_codex ... ok
 test app_refresh_explicit_providers_override_settings ... ok
 test upstream_cli_required_live_matrix_is_present ... ok
 test result: ok.
