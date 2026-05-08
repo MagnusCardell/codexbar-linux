@@ -1,126 +1,296 @@
-# CodexBar GNOME / `codexbar-linux`
+# CodexBar GNOME
 
-CodexBar GNOME is a native Ubuntu/GNOME top-bar companion for upstream CodexBar.
+Native Ubuntu/GNOME top-bar usage monitoring for AI coding providers, powered
+by the upstream [CodexBar](https://github.com/steipete/CodexBar) CLI.
 
-It is intentionally split into:
+CodexBar GNOME installs a GNOME Shell extension and a user-scoped daemon. The
+extension renders the panel indicator and popover. The daemon talks to the
+upstream `codexbar` executable over local process calls, normalizes the result,
+caches a snapshot, and exposes it to GNOME Shell over D-Bus.
 
-1. a GNOME Shell extension for panel and popover UI;
-2. a user-scoped daemon for upstream CLI data collection, cache, refresh scheduling, and diagnostics;
-3. a D-Bus session API between the two;
-4. upstream `codexbar` CLI and local provider tooling as the production data plane.
+This is not Electron, Tauri, an AppIndicator tray menu, a browser extension, or
+a localhost web service.
 
-The product target is stock Ubuntu Desktop 24.04 LTS+ on GNOME 46+, Wayland-first, with Ubuntu 26.04 LTS/GNOME 50 compatibility as a release gate.
+## Status
 
-## Current architectural decision
+CodexBar GNOME v0.1.0 is a development `.deb` package for Ubuntu/GNOME users
+who are comfortable installing a local package and configuring the upstream
+CLI.
 
-This project is not an AppIndicator tray app and not a localhost HTTP service.
+Primary target:
 
-The MVP is:
+- Ubuntu Desktop 24.04 LTS
+- GNOME Shell 46+
+- Wayland-first desktop sessions
+- `systemd --user` and D-Bus session activation
 
-- GNOME Shell extension in GJS ESModules.
-- Preferences in `prefs.js` using GTK4/libadwaita only in the preferences process.
-- Rust daemon `codexbar-linuxd` using D-Bus session service `org.codexbar.Linux1`.
-- Local normalized cache for instant UI startup and stale rendering.
-- Upstream `codexbar` CLI calls for CLI/API/local providers and cost summaries.
-- No browser-cookie import, browser profile scanning, keyring access, provider dashboard scraping, browser extension, or localhost/TCP API.
+## What You Get
 
-## Current status
+- A native GNOME top-bar indicator.
+- A popover with provider cards, usage meters, stale/error states, daemon info,
+  diagnostics, and manual refresh.
+- Preferences for panel mode, refresh interval, provider visibility, and
+  provider source settings.
+- A user daemon, `codexbar-linuxd`, activated through the D-Bus session service
+  `org.codexbar.Linux1`.
+- Normalized local cache for fast startup and stale rendering.
+- Upstream `codexbar` CLI integration for Linux-supported CLI/API/local provider
+  data and local cost summaries.
 
-This repository is at **Task 05F/05K v0.1 scheduler and preferences UX** status,
-building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser cleanup,
-Task 05A upstream-CLI-only hardening, Task 05B development package work, Task
-05C package smoke validation, Task 05D upstream CLI UX polish, and Task 05E
-release-candidate cleanup.
-The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
+## Requirements
 
-Present:
+You need both pieces:
 
-- Rust crate `daemon/` named `codexbar-linuxd`.
-- Task 01 daemon runtime that owns the D-Bus session name `org.codexbar.Linux1`.
-- D-Bus methods for snapshots, refresh, diagnostics, daemon info, daemon settings patches, and a contract-reserved browser-import test method.
-- D-Bus refresh signals for started, provider changed, snapshot changed, and finished events.
-- Fixture refresh source for tests and explicit development mode; production
-  daemon refresh rejects explicit fixture selection unless
-  `CODEXBAR_LINUX_ALLOW_FIXTURE=1` is set.
-- Normalized snapshot cache at `${XDG_CACHE_HOME:-~/.cache}/codexbar-linux/snapshot.json`; no raw provider payloads are cached.
-- Daemon-owned settings at `${XDG_CONFIG_HOME:-~/.config}/codexbar-linux/config.json`.
-- Contract, schema-payload, cache, settings, redaction, browser-import no-op, and D-Bus runtime tests.
-- Redacted upstream CLI fixture corpus under `daemon/fixtures/upstream-cli/`.
-- Local-only upstream CLI capture harness and fixture validator.
-- Production daemon upstream CLI adapter for targeted provider refresh.
-- Runtime refresh uses targeted usage/status probes and defaults to `codex` only when no provider is configured or requested; a non-empty provider config with every provider disabled or set to `off` returns a no-op refresh instead of silently probing `codex`.
-- Daemon auto-refresh runs on startup when configured, repeats on the daemon-owned refresh interval, treats `intervalSeconds: 0` as manual/off for scheduled interval refresh, backs off repeated upstream CLI missing/timeout/parse/nonzero failures, reschedules after `SetSettingsPatch`, and clears the active-refresh guard after failed refresh completion.
-- Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
-- GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
-- Preferences UI for Shell presentation settings plus daemon info, refresh interval, panel provider selection, and provider enable/source controls backed by `SetSettingsPatch`; the reserved `start-daemon-on-login` key is hidden for v0.1.
-- GSettings schema under `schemas/`.
-- User-scoped systemd/D-Bus activation files and a development Debian package
-  path for v0.1 local release smoke testing.
-- Development package hardening that strips the packaged daemon, remaps private
-  build paths in release binaries, and rejects packaged daemon binaries that
-  retain exact private build-root, home, Cargo, Rustup, or staging paths.
-- Daemon/package version metadata aligned at `0.1.0` / `0.1.0-1`, with
-  `codexbar-linuxd --version`, quiet `codexbar-linuxd --check`, safe
-  `GetDaemonInfo.build` metadata, and package version consistency tests.
-- Minimal `codexbar-linuxd(1)` manual page installed by the development package.
-- Local install/uninstall bootstrap scripts that copy only runtime extension
-  files, compile schemas strictly, and remove owned files while preserving user
-  config/cache.
-- Validation scripts and GitHub Actions check workflow.
-- Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
-- Historical root-backed package install smoke evidence, including installed file
-  layout, `/usr/bin/codexbar-linuxd --check`, D-Bus activation,
-  missing-upstream-CLI degraded state, upstream-CLI refresh after
-  `CODEXBAR_CLI` systemd user environment setup, system extension discovery from
-  `/usr/share`, extension enablement, top-bar indicator, and popover refresh.
-- Upstream CLI UX state copy in `docs/upstream-cli-ux.md`.
-- Upstream CLI setup guidance in `docs/upstream-cli-setup.md`.
-- v0.1 release notes in `docs/release-notes-0.1.0.md`.
+1. **CodexBar GNOME** from this repository.
+2. **Upstream CodexBar CLI** from
+   [steipete/CodexBar](https://github.com/steipete/CodexBar).
 
-Out of production scope after Task 04R:
+The `.deb` package does not bundle upstream `codexbar`. If the UI says
+`upstream_cli_missing`, install upstream CodexBar CLI or point the daemon at its
+path with `CODEXBAR_CLI`.
 
-- browser-cookie access or import;
-- browser profile discovery or cookie database reads;
-- keyring, Secret Service, or session extraction;
-- provider web fetches or dashboard scraping;
-- browser extension or localhost/TCP bridge.
+## Quick Start
 
-Not implemented after Task 05E:
+### 1. Install Upstream CodexBar CLI
 
-- Signed repository distribution and package upgrade matrix coverage.
-- Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
-- Re-running `sudo apt remove codexbar-linux` and
-  `sudo apt purge codexbar-linux` after the final successful package-extension
-  smoke. Remove/purge was previously tested and both commands remain part of
-  the final release smoke gate.
-- Root-backed install/remove/purge smoke for the latest rebuilt `.deb`
-  candidate.
+Linuxbrew:
 
-`TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
-reserved and unsupported. The daemon validates the request JSON and returns a
-schema-valid `not_implemented` result without touching browser paths, profile
-stores, keyrings, cookies, or provider endpoints.
+```bash
+brew install steipete/tap/codexbar
+```
 
-The upstream CLI adapter does not default production usage/status refresh to
-`--provider all` because the promoted live Linux evidence timed out for those
-all-provider usage/status probes. The first proven Linux usage/status provider
-is `codex`; `all` remains explicit for usage/status and is used by default only
-for cost summaries. If daemon provider settings are non-empty and all configured
-providers are disabled, set to source `off`, or have CLI fallback disabled,
-automatic and empty-provider manual refreshes return `noop` with
-`refresh_no_enabled_providers`; explicit `RefreshOptions.providers` still
-override settings for one-off manual probes.
+Or download a Linux CLI tarball from upstream releases:
 
-For upstream CLI installation, verification, and packaged daemon configuration,
-see [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md). For the
-user-facing state/copy matrix used by daemon diagnostics and the Shell UI, see
-[Upstream CLI UX States](docs/upstream-cli-ux.md).
-For final tag preparation and the explicit blocked/unblocked release decision,
-see [Release Candidate Gate](docs/release-candidate-gate.md).
+```text
+https://github.com/steipete/CodexBar/releases
+```
 
-## Local checks
+Use the archive that matches your architecture, for example:
 
-Run the full bootstrap gate:
+- `CodexBarCLI-v<tag>-linux-x86_64.tar.gz`
+- `CodexBarCLI-v<tag>-linux-aarch64.tar.gz`
+
+Extract it somewhere stable, such as:
+
+```bash
+mkdir -p ~/.local/bin/codexbar-upstream
+tar -xzf CodexBarCLI-v<tag>-linux-x86_64.tar.gz -C ~/.local/bin/codexbar-upstream
+chmod +x ~/.local/bin/codexbar-upstream/codexbar
+```
+
+Verify the upstream CLI before configuring GNOME:
+
+```bash
+codexbar --format json --json-only --provider codex --source cli
+codexbar cost --format json --json-only --provider all
+```
+
+If `codexbar` is not on your interactive shell `PATH`, use the extracted path:
+
+```bash
+~/.local/bin/codexbar-upstream/codexbar --version
+```
+
+### 2. Install CodexBar GNOME
+
+From a downloaded `.deb`:
+
+```bash
+arch="$(dpkg --print-architecture)"
+sudo apt install "./codexbar-linux_0.1.0-1_${arch}.deb"
+systemctl --user daemon-reload
+```
+
+From this repository:
+
+```bash
+./scripts/build-deb.sh
+arch="$(dpkg --print-architecture)"
+cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
+sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+systemctl --user daemon-reload
+```
+
+### 3. Let the Daemon Find `codexbar`
+
+If you installed with Linuxbrew in one of the standard Linuxbrew locations, the
+daemon should find `codexbar` automatically.
+
+If the UI shows `upstream_cli_missing`, set the executable path for the systemd
+user manager and restart the daemon:
+
+```bash
+systemctl --user set-environment CODEXBAR_CLI=/absolute/path/to/codexbar
+systemctl --user restart codexbar-linuxd.service
+```
+
+For a persistent login environment, write the same absolute path to
+`~/.config/environment.d`:
+
+```bash
+mkdir -p ~/.config/environment.d
+env_file=~/.config/environment.d/codexbar-linux.conf
+printf '%s\n' 'CODEXBAR_CLI=/absolute/path/to/codexbar' > "$env_file"
+systemctl --user daemon-reload
+systemctl --user restart codexbar-linuxd.service
+```
+
+Do not use `~` inside `environment.d`; write the full path.
+
+### 4. Enable the GNOME Extension
+
+The package installs the extension, but it does not enable it for you.
+
+```bash
+gnome-extensions enable codexbar-linux@codexbar.dev
+gnome-extensions info codexbar-linux@codexbar.dev
+```
+
+On Wayland, log out and back in if GNOME Shell does not discover the system
+extension immediately after install.
+
+The packaged extension path should be:
+
+```text
+/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
+```
+
+If `gnome-extensions info` reports a path under `~/.local/share`, a development
+copy is shadowing the packaged extension.
+
+### 5. Verify the Daemon
+
+```bash
+busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 GetDaemonInfo
+journalctl --user -u codexbar-linuxd.service -n 100 --no-pager
+```
+
+Open the top-bar item and use Refresh. If provider authentication is missing,
+the UI should show a recoverable provider/auth state rather than
+`upstream_cli_missing`.
+
+## Troubleshooting
+
+### `upstream_cli_missing`
+
+The daemon could not find an executable named `codexbar`.
+
+Fix:
+
+```bash
+codexbar --version
+systemctl --user set-environment CODEXBAR_CLI=/absolute/path/to/codexbar
+systemctl --user restart codexbar-linuxd.service
+```
+
+If `codexbar --version` fails, install upstream CodexBar CLI first.
+
+### `upstream_cli_not_executable`
+
+The path exists, but it is not executable.
+
+Fix:
+
+```bash
+chmod +x /absolute/path/to/codexbar
+systemctl --user restart codexbar-linuxd.service
+```
+
+### Extension Does Not Appear
+
+Check discovery:
+
+```bash
+gnome-extensions list | grep codexbar
+gnome-extensions info codexbar-linux@codexbar.dev
+```
+
+On Wayland, log out and back in after installing system extension files.
+
+### Package Install Shows `_apt` Sandbox Warning
+
+Installing a local `.deb` from a private project directory can produce a
+non-fatal `_apt` sandbox warning. Copy the package to `/tmp` and install from
+there:
+
+```bash
+cp dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb /tmp/
+sudo apt install --reinstall /tmp/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
+```
+
+### Provider Shows Signed Out or Unavailable
+
+CodexBar GNOME does not own provider login. Authenticate through the provider's
+own CLI or upstream CodexBar setup, then rerun:
+
+```bash
+codexbar --format json --json-only --provider codex --source cli
+```
+
+## Privacy and Scope
+
+CodexBar GNOME intentionally does not:
+
+- read browser cookies;
+- scan browser profiles;
+- decrypt browser session material;
+- read desktop keyrings or Secret Service entries;
+- scrape provider dashboards;
+- install a browser extension;
+- expose a localhost or TCP API.
+
+The daemon caches normalized snapshots, cost summaries, timestamps, safe source
+metadata, and redacted diagnostics. Raw provider payloads and secrets are not
+cached.
+
+The retained `TestBrowserImport` D-Bus method is compatibility-only. It returns
+a schema-valid `not_implemented` result without touching browser paths,
+profiles, cookies, keyrings, or provider endpoints.
+
+## How It Works
+
+```text
+GNOME Shell extension
+        |
+        | D-Bus session API: org.codexbar.Linux1
+        v
+codexbar-linuxd user daemon
+        |
+        | local process invocation
+        v
+upstream codexbar CLI and local provider tooling
+```
+
+Important paths:
+
+```text
+~/.config/codexbar-linux/config.json
+~/.cache/codexbar-linux/snapshot.json
+/usr/bin/codexbar-linuxd
+/usr/share/dbus-1/services/org.codexbar.Linux1.service
+/usr/lib/systemd/user/codexbar-linuxd.service
+/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
+```
+
+## Supported Data Sources
+
+The supported production data plane is upstream `codexbar` CLI plus local
+provider tooling.
+
+The first proven Linux usage/status provider is `codex` through the CLI source.
+Local cost summaries use:
+
+```bash
+codexbar cost --format json --json-only --provider all
+```
+
+Other providers depend on what upstream CodexBar CLI supports on Linux through
+CLI, API, OAuth, or local tooling. Browser/web-only provider collection remains
+out of scope for CodexBar GNOME v0.1.
+
+## Build and Development
+
+Run the full repository check:
 
 ```bash
 ./scripts/check.sh
@@ -142,116 +312,49 @@ cargo clippy --manifest-path daemon/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path daemon/Cargo.toml
 ```
 
-Optional upstream CLI live smoke tests are ignored by default and are not part
-of `./scripts/check.sh` or CI:
+Build the development package:
+
+```bash
+./scripts/build-deb.sh
+```
+
+Run fixture-backed local development:
+
+```bash
+CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
+```
+
+Optional live upstream CLI tests are ignored by default:
 
 ```bash
 CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   cargo test --manifest-path daemon/Cargo.toml -- --ignored --test-threads=1
 ```
 
-Fixture-backed daemon refresh is disabled in production mode. For explicit local
-UI development against fixture snapshots, start the daemon with:
+## Docs
 
-```bash
-CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
-```
+- [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md)
+- [Release Notes 0.1.0](docs/release-notes-0.1.0.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Security](docs/SECURITY.md)
+- [Contracts](docs/CONTRACTS.md)
+- [Release Smoke Test](docs/release-smoke-test.md)
+- [GNOME Smoke Test](docs/gnome-smoke-test.md)
+- [Upstream CLI UX States](docs/upstream-cli-ux.md)
 
-## Manual GNOME smoke checks
+## Relationship to Upstream CodexBar
 
-Static checks cannot prove GNOME Shell lifecycle behavior. For Task 03 changes
-to extension runtime code, run the detailed [GNOME smoke checklist](docs/gnome-smoke-test.md)
-on GNOME 46+ and include Ubuntu 26.04/GNOME 50 metadata/runtime validation for release candidates. For release packaging, run both paths in
-[Release Smoke Test](docs/release-smoke-test.md):
+CodexBar GNOME is a native Linux/GNOME companion for upstream CodexBar. It
+preserves upstream provider semantics where Linux CLI/local sources make that
+possible, but it does not fork the provider framework into browser scraping or
+keyring/session extraction on Linux.
 
-```bash
-./scripts/install-local.sh
-gnome-extensions enable codexbar-linux@codexbar.dev
-gnome-extensions info codexbar-linux@codexbar.dev
-gnome-extensions disable codexbar-linux@codexbar.dev
-gnome-extensions enable codexbar-linux@codexbar.dev
-./scripts/uninstall-local.sh
-```
-
-On Wayland, log out and back in after installing extension files if GNOME Shell
-does not discover the extension immediately. During the smoke, confirm that the
-panel item appears in merged mode, the popover opens, manual refresh reaches
-D-Bus, disabling removes the panel item, and re-enabling does not create duplicate
-panel items or timers. Install scripts and package hooks must not enable the
-extension automatically; the `gnome-extensions enable` command above is the
-explicit user action.
-
-## Development Debian package
-
-Task 05B chose **Option A: development `.deb` package**. The package installs
-system-owned files under `/usr/bin`, `/usr/share/dbus-1/services`,
-`/usr/lib/systemd/user`, `/usr/share/gnome-shell/extensions`, and
-`/usr/share/glib-2.0/schemas`. It does not enable the GNOME extension, start a
-system daemon, install any TCP listener, or require a live GNOME session or
-upstream `codexbar` CLI during package build.
-
-```bash
-./scripts/build-deb.sh
-sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
-systemctl --user daemon-reload
-gnome-extensions enable codexbar-linux@codexbar.dev
-```
-
-The user still controls extension enablement. On Wayland, a logout/login may be
-needed before GNOME Shell discovers newly installed system extension files.
-Task 05C validated the package build, contents, non-mutating apt dependency
-resolution, isolated D-Bus activation, missing-upstream-CLI degraded behavior,
-and release-mode live upstream-CLI D-Bus smoke. Task 05C.1 recorded
-root-backed `sudo apt install`, installed file layout,
-`/usr/bin/codexbar-linuxd --check`, D-Bus activation, missing-upstream-CLI
-degraded behavior, upstream-CLI refresh after setting `CODEXBAR_CLI` in the
-systemd user environment, system extension discovery after logout/login,
-extension enablement, top-bar indicator appearance, and popover refresh.
-
-If `apt` prints a non-fatal `_apt` sandbox warning while installing a local
-`.deb` from the project directory, copy the package to `/tmp` and install from
-there as documented in [Release Smoke Test](docs/release-smoke-test.md). Package
-UI smoke is valid only when `gnome-extensions info codexbar-linux@codexbar.dev`
-reports `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev`; a
-`~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev` path means a
-development extension is shadowing the package.
-
-## Repository layout
+Upstream project:
 
 ```text
-.
-├── AGENTS.md                         # Repo-wide Codex instructions
-├── .codex/
-│   ├── config.toml                   # Codex project defaults
-│   └── agents/                       # Project-scoped custom Codex agents
-├── daemon/                           # Rust daemon crate
-├── extension/                        # GNOME Shell extension vertical slice
-├── schemas/                          # GSettings schema for Shell UI preferences
-├── spec/
-│   ├── dbus-org.codexbar.Linux1.xml
-│   ├── snapshot.schema.json
-│   ├── settings.schema.json
-│   └── *.schema.json
-├── docs/
-│   ├── PRD.md
-│   ├── ARCHITECTURE.md
-│   ├── SECURITY.md
-│   ├── ACCEPTANCE.md
-│   ├── ROADMAP.md
-│   ├── SOURCES.md
-│   └── adr/
-├── tasks/                            # Codex-ready implementation tasks
-└── prompts/                          # Dispatch/review prompts for agents
+https://github.com/steipete/CodexBar
 ```
 
-## Phase gates
+## License
 
-- **P0 — Research and contract freeze:** verify upstream CLI behavior on Linux, freeze snapshot schema, D-Bus XML, daemon cache contract, and UI state model.
-- **P1 — Vertical slice:** daemon invokes upstream CLI, caches normalized data, D-Bus returns snapshot, Shell extension renders panel + popover from fixture/live snapshot.
-- **P2 — Packaging and release hardening:** native prefs, systemd user unit, D-Bus activation, `.deb` dev package, smoke test scripts, install/uninstall polish.
-- **P3 — Upstream CLI/provider polish:** improve upstream CLI normalization, provider diagnostics, local cost/usage display, and stale/error UX where upstream data is available.
-- **P4 — Polish and hardening:** GNOME 46/50 matrix, Wayland validation, accessibility, stale/auth/error UI, threat-model review.
-
-## Development stance
-
-Agents must preserve upstream CodexBar semantics unless a Linux-specific constraint forces a divergence. Divergences must be recorded as ADRs or in `docs/ARCHITECTURE.md`.
+See [LICENSE](LICENSE).
