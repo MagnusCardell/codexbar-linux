@@ -14,6 +14,11 @@ import {
     RESET_TIME_FORMATS,
     THEMES,
 } from './src/constants.js';
+import {
+    SUPPORTED_PROVIDERS,
+    buildProviderSettingsPatch,
+    effectiveProviderSettings,
+} from './src/providerSettings.js';
 
 const STRING_REPLY = GLib.VariantType.new('(s)');
 const PANEL_MODE_VALUES = PANEL_MODES;
@@ -22,11 +27,7 @@ const THEME_VALUES = THEMES;
 const PANEL_MODE_TITLES = ['Merged meters', 'Provider detail', 'Minimal icon'];
 const RESET_TIME_FORMAT_TITLES = ['Countdown', 'Absolute time', 'Both'];
 const THEME_TITLES = ['System', 'Compact', 'High contrast'];
-const PROVIDERS = [
-    {id: 'codex', title: 'Codex'},
-    {id: 'claude', title: 'Claude'},
-    {id: 'gemini', title: 'Gemini'},
-];
+const PROVIDERS = SUPPORTED_PROVIDERS;
 const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];
 const SOURCE_TITLES = ['Automatic', 'Upstream CLI', 'Off'];
 const REFRESH_INTERVAL_VALUES = [0, 60, 120, 300, 900, 1800];
@@ -105,6 +106,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         this._refreshIntervalModel = null;
         this._refreshIntervalCustomSeconds = null;
         this._providerRows = new Map();
+        this._daemonSettings = DEFAULT_DAEMON_SETTINGS;
         this._applyingDaemonSettings = false;
 
         const page = new Adw.PreferencesPage({
@@ -222,14 +224,10 @@ export default class CodexBarPreferences extends ExtensionPreferences {
                 if (this._applyingDaemonSettings)
                     return;
                 const preferredSourceAdapter = SOURCE_VALUES[dropdown.selected] ?? SOURCE_VALUES[0];
-                this._setDaemonPatch({
-                    schemaVersion: 1,
-                    providers: {
-                        [provider.id]: {
-                            preferredSourceAdapter,
-                        },
-                    },
-                });
+                this._setDaemonPatch(buildProviderSettingsPatch(this._daemonSettings, {
+                    providerId: provider.id,
+                    preferredSourceAdapter,
+                }));
             });
 
             const enabled = new Gtk.Switch({
@@ -239,14 +237,10 @@ export default class CodexBarPreferences extends ExtensionPreferences {
             enabled.connect('notify::active', toggle => {
                 if (this._applyingDaemonSettings)
                     return;
-                this._setDaemonPatch({
-                    schemaVersion: 1,
-                    providers: {
-                        [provider.id]: {
-                            enabled: toggle.get_active(),
-                        },
-                    },
-                });
+                this._setDaemonPatch(buildProviderSettingsPatch(this._daemonSettings, {
+                    providerId: provider.id,
+                    enabled: toggle.get_active(),
+                }));
             });
 
             row.add_suffix(source);
@@ -316,7 +310,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
                 this._upstreamCliRow.subtitle = upstreamCli.diagnosticCode ?? 'Unavailable';
         }
 
-        if (snapshot?.selectedProvider)
+        if (snapshot?.selectedProvider && PROVIDERS.some(provider => provider.id === snapshot.selectedProvider))
             this.getSettings().set_string('selected-provider', snapshot.selectedProvider);
     }
 
@@ -350,22 +344,21 @@ export default class CodexBarPreferences extends ExtensionPreferences {
 
     _applyDaemonSettings(settings) {
         const daemonSettings = settings ?? DEFAULT_DAEMON_SETTINGS;
+        this._daemonSettings = daemonSettings;
         this._applyingDaemonSettings = true;
         try {
             const interval = daemonSettings.refresh?.intervalSeconds
                 ?? DEFAULT_DAEMON_SETTINGS.refresh.intervalSeconds;
             this._setRefreshIntervalValue(interval);
 
+            const effectiveProviders = effectiveProviderSettings(daemonSettings);
             for (const provider of PROVIDERS) {
                 const row = this._providerRows.get(provider.id);
                 if (!row)
                     continue;
-                const providerSettings = daemonSettings.providers?.[provider.id] ?? {};
-                row.enabled.set_active(providerSettings.enabled ?? true);
-                const preferred = providerSettings.preferredSourceAdapter === 'linux_web'
-                    ? 'upstream_cli'
-                    : (providerSettings.preferredSourceAdapter ?? 'auto');
-                row.source.selected = Math.max(0, SOURCE_VALUES.indexOf(preferred));
+                const providerSettings = effectiveProviders[provider.id] ?? {};
+                row.enabled.set_active(providerSettings.enabled ?? false);
+                row.source.selected = Math.max(0, SOURCE_VALUES.indexOf(providerSettings.preferredSourceAdapter ?? 'auto'));
             }
         } finally {
             this._applyingDaemonSettings = false;

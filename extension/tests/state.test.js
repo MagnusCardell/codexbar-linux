@@ -3,6 +3,11 @@ import GLib from 'gi://GLib';
 
 import {MANUAL_REFRESH_OPTIONS} from '../src/constants.js';
 import {
+    SUPPORTED_PROVIDERS,
+    buildProviderSettingsPatch,
+    effectiveProviderSettings,
+} from '../src/providerSettings.js';
+import {
     applyProviderEventJson,
     applyRefreshFinishedJson,
     applySnapshotJson,
@@ -47,6 +52,7 @@ const FIXTURE_STATES = [
 
 function main() {
     assertManualRefreshOptions();
+    assertSupportedProviderSettingsDefaultsAndPatches();
     assertSnapshotFixturesRenderStates();
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
@@ -92,6 +98,52 @@ function assertManualRefreshOptions() {
     assertEqual(MANUAL_REFRESH_OPTIONS.busyBehavior, 'return_existing');
     assertEqual(MANUAL_REFRESH_OPTIONS.sourceAdapterPolicy.mode, 'only');
     assertArrayEqual(MANUAL_REFRESH_OPTIONS.sourceAdapterPolicy.adapters, ['upstream_cli']);
+}
+
+function assertSupportedProviderSettingsDefaultsAndPatches() {
+    assertArrayEqual(SUPPORTED_PROVIDERS.map(provider => provider.id), ['codex', 'claude']);
+
+    const empty = effectiveProviderSettings({providers: {}});
+    assertEqual(empty.codex.enabled, true);
+    assertEqual(empty.claude.enabled, false);
+    assertEqual(empty.codex.preferredSourceAdapter, 'auto');
+    assertEqual(empty.claude.preferredSourceAdapter, 'auto');
+
+    const codexOnly = effectiveProviderSettings({
+        providers: {
+            codex: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        },
+    });
+    assertEqual(codexOnly.codex.enabled, true);
+    assertEqual(codexOnly.claude.enabled, false);
+
+    const enableClaude = buildProviderSettingsPatch({providers: {}}, {
+        providerId: 'claude',
+        enabled: true,
+    });
+    assertEqual(enableClaude.providers.codex.enabled, true);
+    assertEqual(enableClaude.providers.claude.enabled, true);
+    assertEqual(enableClaude.providers.codex.allowCliFallback, true);
+    assertEqual(enableClaude.providers.claude.allowCliFallback, true);
+    assertEqual(Object.prototype.hasOwnProperty.call(enableClaude.providers, 'gemini'), false);
+
+    const disableCodex = buildProviderSettingsPatch({
+        providers: {
+            codex: {enabled: true, preferredSourceAdapter: 'upstream_cli', allowCliFallback: true},
+            claude: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        },
+    }, {
+        providerId: 'codex',
+        enabled: false,
+    });
+    assertEqual(disableCodex.providers.codex.enabled, false);
+    assertEqual(disableCodex.providers.claude.enabled, true);
+
+    const sourcePatch = buildProviderSettingsPatch({providers: {}}, {
+        providerId: 'claude',
+        preferredSourceAdapter: 'linux_web',
+    });
+    assertEqual(sourcePatch.providers.claude.preferredSourceAdapter, 'upstream_cli');
 }
 
 function assertSnapshotFixturesRenderStates() {
