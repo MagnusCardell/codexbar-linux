@@ -73,6 +73,12 @@ const STATE_META = {
         description: 'Refresh failed. Try Refresh again or open diagnostics.',
         iconName: 'dialog-error-symbolic',
     },
+    no_providers: {
+        label: STATE_LABELS.no_providers,
+        severity: 'warning',
+        description: 'Enable a provider in Preferences, then refresh.',
+        iconName: 'dialog-warning-symbolic',
+    },
     daemon_unavailable: {
         label: STATE_LABELS.daemon_unavailable,
         severity: 'error',
@@ -519,7 +525,7 @@ export function selectProvider(snapshot, selectedProvider = '') {
 export function deriveSnapshotState(snapshot) {
     const providers = Array.isArray(snapshot?.providers) ? snapshot.providers : [];
     if (providers.length === 0)
-        return 'loading';
+        return 'no_providers';
     if (snapshot?.stale)
         return 'stale';
     if (providers.some(provider => provider?.state === 'ok'))

@@ -51,6 +51,7 @@ function main() {
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
     assertViewModelUsesStateCopyMap();
+    assertEmptyProviderSnapshotShowsNoProviderCopy();
     assertViewModelBuildsProviderStripAndSelectedSurface();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
     assertStaleCacheCopyIsCalm();
@@ -149,6 +150,8 @@ function assertViewModelUsesStateCopyMap() {
     assertEqual(stateMeta('parse_error').label, 'Provider data unreadable');
     assertEqual(stateMeta('timeout').label, 'Refresh timed out');
     assertEqual(stateMeta('error').label, 'Error');
+    assertEqual(stateMeta('no_providers').label, 'No providers enabled');
+    assertEqual(stateMeta('no_providers').description, 'Enable a provider in Preferences, then refresh.');
     assertEqual(stateMeta('daemon_unavailable').label, 'Daemon unavailable');
     assertEqual(view.panelStatus, 'Up to date');
     assertEqual(view.panelLabel, 'COD');
@@ -159,6 +162,26 @@ function assertViewModelUsesStateCopyMap() {
     assertEqual(view.titleAction.action, 'refresh');
     assertEqual(view.titleAction.reactive, true);
     assertEqual(view.footerStatus, 'Daemon running · Upstream CLI available · Cost unknown · Browser import unsupported · No web adapters');
+}
+
+function assertEmptyProviderSnapshotShowsNoProviderCopy() {
+    const snapshot = readJson('fixtures/snapshots/ok.json');
+    snapshot.providers = [];
+    snapshot.selectedProvider = null;
+
+    const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+
+    assertEqual(state.clientState, 'no_providers');
+    assertEqual(view.state, 'no_providers');
+    assertEqual(view.stateLabel, 'No providers enabled');
+    assertEqual(view.stateDescription, 'Enable a provider in Preferences, then refresh.');
+    assertEqual(view.panelStatus, 'No providers enabled');
+    assert(view.headerStatus.startsWith('No providers enabled · updated '), 'empty-provider header should use no-provider copy');
+    assertEqual(view.selectedProvider, null);
+    assertEqual(view.selectedProviderId, '');
+    assertEqual(view.providerRows.length, 0);
+    assertEqual(view.providerSelectorRows.length, 0);
 }
 
 function assertViewModelBuildsProviderStripAndSelectedSurface() {

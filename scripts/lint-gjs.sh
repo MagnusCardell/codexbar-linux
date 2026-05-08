@@ -245,7 +245,8 @@ for needle, reason in {
     "const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];": "offer supported provider source choices",
     "preferredSourceAdapter": "write provider source through SetSettingsPatch",
     "enabled: toggle.get_active()": "write provider enabled state through SetSettingsPatch",
-    "intervalSeconds: Math.round(spin.get_value())": "write refresh interval through SetSettingsPatch",
+    "intervalSeconds,": "write refresh interval through SetSettingsPatch",
+    "const REFRESH_INTERVAL_TITLES = ['Manual', '1m', '2m', '5m', '15m', '30m'];": "prefer refresh interval presets",
 }.items():
     if needle not in prefs_js:
         violations.append(f"prefs.js: missing prefs UX requirement to {reason}")

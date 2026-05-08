@@ -30,6 +30,7 @@ export const PROVIDER_STATES = [
 
 export const UI_STATES = [
     ...PROVIDER_STATES,
+    'no_providers',
     'daemon_unavailable',
 ];
 
@@ -44,6 +45,7 @@ export const STATE_LABELS = {
     parse_error: 'Could not read provider data',
     timeout: 'Provider timed out',
     error: 'Error',
+    no_providers: 'No providers enabled',
     daemon_unavailable: 'Daemon unavailable',
 };
 

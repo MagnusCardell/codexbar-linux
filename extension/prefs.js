@@ -29,6 +29,9 @@ const PROVIDERS = [
 ];
 const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];
 const SOURCE_TITLES = ['Automatic', 'Upstream CLI', 'Off'];
+const REFRESH_INTERVAL_VALUES = [0, 60, 120, 300, 900, 1800];
+const REFRESH_INTERVAL_TITLES = ['Manual', '1m', '2m', '5m', '15m', '30m'];
+const REFRESH_INTERVAL_CUSTOM_INDEX = REFRESH_INTERVAL_VALUES.length;
 const DEFAULT_DAEMON_SETTINGS = {
     schemaVersion: 1,
     refresh: {
@@ -98,7 +101,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         this._daemonStatusRow = null;
         this._daemonVersionRow = null;
         this._upstreamCliRow = null;
-        this._refreshIntervalSpin = null;
+        this._refreshIntervalRow = null;
+        this._refreshIntervalModel = null;
+        this._refreshIntervalCustomSeconds = null;
         this._providerRows = new Map();
         this._applyingDaemonSettings = false;
 
@@ -163,38 +168,33 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         });
         group.add(this._upstreamCliRow);
 
-        const intervalAdjustment = new Gtk.Adjustment({
-            lower: 0,
-            upper: 86400,
-            step_increment: 30,
-            page_increment: 300,
-            value: DEFAULT_DAEMON_SETTINGS.refresh.intervalSeconds,
+        this._refreshIntervalModel = new Gtk.StringList();
+        for (const title of REFRESH_INTERVAL_TITLES)
+            this._refreshIntervalModel.append(title);
+        this._refreshIntervalModel.append('Custom');
+
+        this._refreshIntervalRow = new Adw.ComboRow({
+            title: 'Refresh interval',
+            subtitle: 'Manual disables scheduled refresh',
+            model: this._refreshIntervalModel,
+            selected: refreshIntervalIndex(DEFAULT_DAEMON_SETTINGS.refresh.intervalSeconds),
         });
-        this._refreshIntervalSpin = new Gtk.SpinButton({
-            adjustment: intervalAdjustment,
-            climb_rate: 1,
-            digits: 0,
-            numeric: true,
-            valign: Gtk.Align.CENTER,
-        });
-        this._refreshIntervalSpin.connect('value-changed', spin => {
+        this._refreshIntervalRow.connect('notify::selected', row => {
             if (this._applyingDaemonSettings)
+                return;
+            const intervalSeconds = row.selected === REFRESH_INTERVAL_CUSTOM_INDEX
+                ? this._refreshIntervalCustomSeconds
+                : REFRESH_INTERVAL_VALUES[row.selected];
+            if (typeof intervalSeconds !== 'number')
                 return;
             this._setDaemonPatch({
                 schemaVersion: 1,
                 refresh: {
-                    intervalSeconds: Math.round(spin.get_value()),
+                    intervalSeconds,
                 },
             });
         });
-
-        const intervalRow = new Adw.ActionRow({
-            title: 'Refresh interval',
-            subtitle: 'Seconds; 0 disables scheduled refresh',
-        });
-        intervalRow.add_suffix(this._refreshIntervalSpin);
-        intervalRow.activatable_widget = this._refreshIntervalSpin;
-        group.add(intervalRow);
+        group.add(this._refreshIntervalRow);
 
         return group;
     }
@@ -354,7 +354,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         try {
             const interval = daemonSettings.refresh?.intervalSeconds
                 ?? DEFAULT_DAEMON_SETTINGS.refresh.intervalSeconds;
-            this._refreshIntervalSpin?.set_value(interval);
+            this._setRefreshIntervalValue(interval);
 
             for (const provider of PROVIDERS) {
                 const row = this._providerRows.get(provider.id);
@@ -372,6 +372,23 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         }
     }
 
+    _setRefreshIntervalValue(interval) {
+        const selected = refreshIntervalIndex(interval);
+        if (selected === REFRESH_INTERVAL_CUSTOM_INDEX) {
+            this._refreshIntervalCustomSeconds = interval;
+            this._refreshIntervalModel?.splice(
+                REFRESH_INTERVAL_CUSTOM_INDEX,
+                1,
+                [`Custom (${formatRefreshInterval(interval)})`]
+            );
+        } else {
+            this._refreshIntervalCustomSeconds = null;
+            this._refreshIntervalModel?.splice(REFRESH_INTERVAL_CUSTOM_INDEX, 1, ['Custom']);
+        }
+        if (this._refreshIntervalRow)
+            this._refreshIntervalRow.selected = selected;
+    }
+
     async _setDaemonPatch(patch) {
         if (this._daemonStatusRow)
             this._daemonStatusRow.subtitle = 'Saving settings';
@@ -385,4 +402,17 @@ export default class CodexBarPreferences extends ExtensionPreferences {
                 this._daemonStatusRow.subtitle = error?.message ?? 'Settings update failed';
         }
     }
+}
+
+function refreshIntervalIndex(interval) {
+    const index = REFRESH_INTERVAL_VALUES.indexOf(interval);
+    return index >= 0 ? index : REFRESH_INTERVAL_CUSTOM_INDEX;
+}
+
+function formatRefreshInterval(seconds) {
+    if (seconds === 0)
+        return 'Manual';
+    if (seconds % 60 === 0)
+        return `${seconds / 60}m`;
+    return `${seconds}s`;
 }

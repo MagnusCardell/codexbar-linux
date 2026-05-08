@@ -65,12 +65,14 @@
 .codexbar-state-unauthenticated .codexbar-panel-icon,
 .codexbar-state-cookie_rejected .codexbar-panel-icon,
 .codexbar-state-missing_dependency .codexbar-panel-icon,
+.codexbar-state-no_providers .codexbar-panel-icon,
 .codexbar-state-provider_unavailable .codexbar-panel-icon,
 .codexbar-state-timeout .codexbar-panel-icon,
 .codexbar-state-stale .codexbar-panel-status-dot,
 .codexbar-state-unauthenticated .codexbar-panel-status-dot,
 .codexbar-state-cookie_rejected .codexbar-panel-status-dot,
 .codexbar-state-missing_dependency .codexbar-panel-status-dot,
+.codexbar-state-no_providers .codexbar-panel-status-dot,
 .codexbar-state-provider_unavailable .codexbar-panel-status-dot,
 .codexbar-state-timeout .codexbar-panel-status-dot {
   color: #c9a227;

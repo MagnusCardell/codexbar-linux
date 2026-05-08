@@ -38,8 +38,8 @@
       "required": ["enabled", "policy", "profileIdAllowlist"],
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"], "default": "auto" },
+        "enabled": { "type": "boolean", "default": false },
+        "policy": { "type": "string", "enum": ["auto", "chromium_family", "firefox", "off"], "default": "off" },
         "profileIdAllowlist": {
           "type": "array",
           "items": {

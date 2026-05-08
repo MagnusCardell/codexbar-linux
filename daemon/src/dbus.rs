@@ -14,6 +14,7 @@ const REFRESH_STARTED_SIGNAL_DELAY: Duration = Duration::from_millis(25);
 const REFRESH_FINISH_WORK_DELAY: Duration = Duration::from_millis(120);
 const SETTINGS_INTERVAL_FALLBACK_SECONDS: u64 = 300;
 const SCHEDULER_BACKOFF_MAX_EXPONENT: u32 = 5;
+const SCHEDULER_BACKOFF_MAX_DELAY_SECONDS: u64 = 15 * 60;
 
 #[derive(Clone, Debug, Default)]
 struct RefreshCycleOutcome {
@@ -248,6 +249,7 @@ fn scheduler_interval(app: &App) -> Option<Duration> {
 fn scheduler_backoff_interval(base: Duration, consecutive_failures: u32) -> Duration {
     let exponent = consecutive_failures.min(SCHEDULER_BACKOFF_MAX_EXPONENT);
     base.saturating_mul(1u32 << exponent)
+        .min(Duration::from_secs(SCHEDULER_BACKOFF_MAX_DELAY_SECONDS))
 }
 
 fn scheduler_should_backoff(completion: &RefreshCompletion) -> bool {
@@ -256,6 +258,9 @@ fn scheduler_should_backoff(completion: &RefreshCompletion) -> bool {
     };
     if result.status == RefreshStatus::Noop {
         return false;
+    }
+    if result.status == RefreshStatus::Error {
+        return true;
     }
     result
         .diagnostic_codes
@@ -272,7 +277,8 @@ fn scheduler_should_backoff(completion: &RefreshCompletion) -> bool {
 fn scheduler_backoff_code(code: &str) -> bool {
     matches!(
         code,
-        "upstream_cli_missing"
+        "refresh_failed"
+            | "upstream_cli_missing"
             | "upstream_cli_not_executable"
             | "upstream_cli_timeout"
             | "upstream_cli_parse_error"
@@ -311,5 +317,52 @@ async fn wait_for_shutdown() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn completion_with_result(result_json: &str) -> RefreshCompletion {
+        RefreshCompletion {
+            refresh_id: "refresh-test".to_string(),
+            snapshot_json: "{}".to_string(),
+            result_json: result_json.to_string(),
+            provider_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn scheduler_backoff_is_capped_for_desktop_use() {
+        let base = Duration::from_secs(300);
+        assert_eq!(
+            scheduler_backoff_interval(base, 8),
+            Duration::from_secs(SCHEDULER_BACKOFF_MAX_DELAY_SECONDS)
+        );
+    }
+
+    #[test]
+    fn scheduler_backoff_treats_generic_error_status_as_failure() {
+        let completion = completion_with_result(
+            r#"{"schemaVersion":1,"refreshId":"refresh-test","status":"error","startedAt":"2026-05-08T12:00:00Z","finishedAt":"2026-05-08T12:00:01Z","durationMs":1000,"reason":"scheduled","providers":[],"cacheWritten":false,"snapshotGeneratedAt":null,"diagnosticCodes":[]}"#,
+        );
+        assert!(scheduler_should_backoff(&completion));
+    }
+
+    #[test]
+    fn scheduler_backoff_treats_refresh_failed_code_as_failure() {
+        let completion = completion_with_result(
+            r#"{"schemaVersion":1,"refreshId":"refresh-test","status":"partial","startedAt":"2026-05-08T12:00:00Z","finishedAt":"2026-05-08T12:00:01Z","durationMs":1000,"reason":"scheduled","providers":[],"cacheWritten":false,"snapshotGeneratedAt":null,"diagnosticCodes":["refresh_failed"]}"#,
+        );
+        assert!(scheduler_should_backoff(&completion));
+    }
+
+    #[test]
+    fn scheduler_backoff_does_not_treat_noop_as_failure() {
+        let completion = completion_with_result(
+            r#"{"schemaVersion":1,"refreshId":"refresh-test","status":"noop","startedAt":"2026-05-08T12:00:00Z","finishedAt":"2026-05-08T12:00:01Z","durationMs":1000,"reason":"scheduled","providers":[],"cacheWritten":false,"snapshotGeneratedAt":null,"diagnosticCodes":["refresh_failed"]}"#,
+        );
+        assert!(!scheduler_should_backoff(&completion));
     }
 }
