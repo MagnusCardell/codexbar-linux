@@ -292,7 +292,7 @@ mod tests {
     async fn runner_times_out_and_reaps_child() {
         let _guard = runner_test_lock().lock().await;
         let tmp = tempfile::tempdir().expect("tempdir");
-        let script = fake_executable(tmp.path(), "codexbar", "sleep 5");
+        let script = fake_executable(tmp.path(), "codexbar", "while :; do :; done");
         let mut timeout_spec = spec(Vec::new());
         timeout_spec.timeout = Duration::from_millis(50);
         let output = CommandRunner
