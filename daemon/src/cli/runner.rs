@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+const CHILD_KILL_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandKind {
     Version,
@@ -117,7 +119,16 @@ impl CommandRunner {
             Ok(Err(_)) => return Err(CommandRunError::Io),
             Err(_) => {
                 let _ = child.start_kill();
-                let status = child.wait().await.map_err(|_| CommandRunError::Io)?;
+                let status = match tokio::time::timeout(CHILD_KILL_WAIT_TIMEOUT, child.wait()).await
+                {
+                    Ok(Ok(status)) => status,
+                    Ok(Err(_)) => return Err(CommandRunError::Io),
+                    Err(_) => {
+                        stdout_handle.abort();
+                        stderr_handle.abort();
+                        return Err(CommandRunError::Io);
+                    }
+                };
                 (status, true)
             }
         };

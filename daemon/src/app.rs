@@ -479,7 +479,7 @@ impl App {
 
         let cache_written = live_had_success && self.cache.store(&snapshot).is_ok();
         if live_had_success && !cache_written {
-            diagnostic_codes.push("internal_error_redacted".to_string());
+            diagnostic_codes.push("cache_write_failed".to_string());
         }
 
         let status = refresh_status(&snapshot, cache_written, &diagnostic_codes);
@@ -795,12 +795,13 @@ fn no_enabled_providers_snapshot(
 }
 
 fn fixture_requested(options: &RefreshOptions) -> bool {
-    options
-        .source_adapter_policy
-        .adapters
-        .contains(&RefreshSourceAdapter::Fixture)
-        || (options.source_adapter_policy.allows_fixture()
-            && !options.source_adapter_policy.allows_upstream_cli())
+    let policy = &options.source_adapter_policy;
+    let fixture_allowed = policy.allows_fixture();
+    let fixture_explicitly_allowed =
+        fixture_allowed && policy.adapters.contains(&RefreshSourceAdapter::Fixture);
+    let fixture_is_only_usable_adapter = fixture_allowed && !policy.allows_upstream_cli();
+
+    fixture_explicitly_allowed || fixture_is_only_usable_adapter
 }
 
 fn fixture_not_allowed_snapshot(
