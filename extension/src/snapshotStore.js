@@ -1,5 +1,6 @@
 import {
     applyDaemonInfoJson,
+    applyDaemonSettingsJson,
     applyDiagnosticsJson,
     applyProviderEventJson,
     applyRefreshFinishedJson,
@@ -46,6 +47,10 @@ export class SnapshotStore {
 
     applyDaemonInfoJson(infoJson) {
         this._set(applyDaemonInfoJson(this._state, infoJson));
+    }
+
+    applyDaemonSettingsJson(settingsJson) {
+        this._set(applyDaemonSettingsJson(this._state, settingsJson));
     }
 
     applyProviderEventJson(providerId, eventJson) {

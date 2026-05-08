@@ -72,6 +72,15 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
         .expect("GetDiagnostics");
     common::assert_schema("diagnostics.schema.json", &diagnostics);
 
+    let initial_settings = call_string_no_autostart(&proxy, "GetSettings", &())
+        .await
+        .expect("GetSettings");
+    common::assert_schema("settings.schema.json", &initial_settings);
+
+    let mut settings_stream = proxy
+        .receive_signal("SettingsChanged")
+        .await
+        .expect("settings stream");
     let settings = call_string_no_autostart(
         &proxy,
         "SetSettingsPatch",
@@ -80,6 +89,12 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     .await
     .expect("SetSettingsPatch");
     common::assert_schema("settings.schema.json", &settings);
+    let settings_msg = timeout(SIGNAL_TIMEOUT, settings_stream.next())
+        .await
+        .expect("SettingsChanged timeout")
+        .expect("SettingsChanged message");
+    let changed_settings: String = settings_msg.body().deserialize().expect("settings body");
+    common::assert_schema("settings.schema.json", &changed_settings);
 
     let browser_result = call_string_no_autostart(
         &proxy,

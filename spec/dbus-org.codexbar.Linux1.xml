@@ -20,6 +20,10 @@
       <arg name="daemon_info_json" type="s" direction="out"/>
     </method>
 
+    <method name="GetSettings">
+      <arg name="settings_json" type="s" direction="out"/>
+    </method>
+
     <method name="SetSettingsPatch">
       <arg name="patch_json" type="s" direction="in"/>
       <arg name="settings_json" type="s" direction="out"/>
@@ -46,6 +50,10 @@
     <signal name="ProviderChanged">
       <arg name="provider_id" type="s"/>
       <arg name="provider_event_json" type="s"/>
+    </signal>
+
+    <signal name="SettingsChanged">
+      <arg name="settings_json" type="s"/>
     </signal>
   </interface>
 </node>

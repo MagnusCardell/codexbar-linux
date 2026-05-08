@@ -137,6 +137,11 @@
 
 .codexbar-provider-strip-item-dimmed {
   color: rgba(244, 244, 244, 0.52);
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+.codexbar-provider-strip-item-dimmed .codexbar-provider-strip-label {
+  color: rgba(244, 244, 244, 0.58);
 }
 
 .codexbar-provider-strip-item-content {
@@ -343,7 +348,6 @@
 }
 
 .codexbar-meter {
-  width: 330px;
   min-width: 330px;
   height: 6px;
   min-height: 6px;

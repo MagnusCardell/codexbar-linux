@@ -171,6 +171,7 @@ Methods:
 - `Refresh(options_json) -> refresh_id`
 - `GetDiagnostics(provider_id) -> diagnostics_json`
 - `GetDaemonInfo() -> daemon_info_json`
+- `GetSettings() -> settings_json`
 - `SetSettingsPatch(patch_json) -> settings_json`
 - `TestBrowserImport(options_json) -> result_json`
 
@@ -180,6 +181,7 @@ Signals:
 - `RefreshStarted(refresh_id)`
 - `RefreshFinished(refresh_id, result_json)`
 - `ProviderChanged(provider_id, provider_event_json)`
+- `SettingsChanged(settings_json)`
 
 See `spec/dbus-org.codexbar.Linux1.xml`.
 

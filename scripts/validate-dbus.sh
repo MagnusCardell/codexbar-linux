@@ -23,6 +23,7 @@ expected_methods = {
     "Refresh": [("options_json", "s", "in"), ("refresh_id", "s", "out")],
     "GetDiagnostics": [("provider_id", "s", "in"), ("diagnostics_json", "s", "out")],
     "GetDaemonInfo": [("daemon_info_json", "s", "out")],
+    "GetSettings": [("settings_json", "s", "out")],
     "SetSettingsPatch": [("patch_json", "s", "in"), ("settings_json", "s", "out")],
     "TestBrowserImport": [("options_json", "s", "in"), ("result_json", "s", "out")],
 }
@@ -31,6 +32,7 @@ expected_signals = {
     "RefreshStarted": [("refresh_id", "s")],
     "RefreshFinished": [("refresh_id", "s"), ("result_json", "s")],
     "ProviderChanged": [("provider_id", "s"), ("provider_event_json", "s")],
+    "SettingsChanged": [("settings_json", "s")],
 }
 
 methods = {node.attrib.get("name"): node for node in interface.findall("method")}

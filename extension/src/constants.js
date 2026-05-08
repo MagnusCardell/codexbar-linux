@@ -65,6 +65,7 @@ export const SIGNALS = {
     providerChanged: 'ProviderChanged',
     refreshStarted: 'RefreshStarted',
     refreshFinished: 'RefreshFinished',
+    settingsChanged: 'SettingsChanged',
 };
 
 export const MAX_PROVIDER_INDICATORS = 3;

@@ -66,8 +66,18 @@ impl CodexbarInterface {
         self.app.get_daemon_info_json()
     }
 
-    async fn set_settings_patch(&self, patch_json: &str) -> Result<String, AppError> {
-        self.app.set_settings_patch_json(patch_json)
+    async fn get_settings(&self) -> Result<String, AppError> {
+        self.app.get_settings_json()
+    }
+
+    async fn set_settings_patch(
+        &self,
+        patch_json: &str,
+        #[zbus(signal_context)] ctxt: zbus::object_server::SignalContext<'_>,
+    ) -> Result<String, AppError> {
+        let settings_json = self.app.set_settings_patch_json(patch_json)?;
+        let _ = Self::settings_changed(&ctxt, &settings_json).await;
+        Ok(settings_json)
     }
 
     async fn test_browser_import(&self, options_json: &str) -> Result<String, AppError> {
@@ -98,6 +108,12 @@ impl CodexbarInterface {
         ctxt: &zbus::object_server::SignalContext<'_>,
         provider_id: &str,
         provider_event_json: &str,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn settings_changed(
+        ctxt: &zbus::object_server::SignalContext<'_>,
+        settings_json: &str,
     ) -> zbus::Result<()>;
 }
 

@@ -22,6 +22,7 @@ Freeze v1 contracts before Task 01 implementation:
 - D-Bus error names are stable and documented.
 - Diagnostics are schema-backed and redaction-safe.
 - `SetSettingsPatch` uses a schema-backed partial update contract, not a free-form patch.
+- `GetSettings` and `SettingsChanged` expose the same redaction-safe daemon settings object so Shell UI can render provider settings state without reading daemon-owned files.
 - `TestBrowserImport` has a schema-backed input contract and returns a safe `not_implemented` result while the no-browser product scope is in force.
 - Cached stale snapshots are served through the daemon over D-Bus; production Shell code never reads cache files.
 - Cost data in snapshots is a bounded redacted summary, not an arbitrary upstream payload.

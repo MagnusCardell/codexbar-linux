@@ -71,9 +71,10 @@ export class CodexbarDbusClient {
         if (this._destroyed)
             return;
 
-        const [snapshotResult, daemonInfoResult] = await Promise.allSettled([
+        const [snapshotResult, daemonInfoResult, settingsResult] = await Promise.allSettled([
             this.getSnapshot(),
             this.getDaemonInfo(),
+            this.getSettings(),
         ]);
         if (this._destroyed)
             return;
@@ -85,6 +86,10 @@ export class CodexbarDbusClient {
                 this._emit('daemon-info', daemonInfoResult.value);
             else
                 Log.warn(daemonInfoResult.reason?.message ?? String(daemonInfoResult.reason));
+            if (settingsResult.status === 'fulfilled')
+                this._emit('settings', settingsResult.value);
+            else
+                Log.warn(settingsResult.reason?.message ?? String(settingsResult.reason));
             return;
         }
 
@@ -108,6 +113,10 @@ export class CodexbarDbusClient {
 
     getDaemonInfo() {
         return this._callString('GetDaemonInfo');
+    }
+
+    getSettings() {
+        return this._callString('GetSettings');
     }
 
     _subscribeSignals() {
@@ -134,6 +143,11 @@ export class CodexbarDbusClient {
             this.available = true;
             this._emit('refresh-finished', refreshId, resultJson);
             this.refreshSnapshot().catch(error => Log.warn(error.message));
+        });
+        this._signal('SettingsChanged', params => {
+            const [settingsJson] = params.deep_unpack();
+            this.available = true;
+            this._emit('settings', settingsJson);
         });
     }
 

@@ -49,7 +49,7 @@ compatibility with the frozen contract. In the no-browser product scope those
 fields are deprecated, normalized off by the daemon, and must not trigger
 browser profile scanning, keyring access, cookie reads, or provider web fetches.
 
-The preferences UI configures daemon refresh/provider settings through `SetSettingsPatch(patch_json)` after the daemon exists. It may read the documented config file path to populate controls before the daemon replies, but daemon-owned writes should prefer D-Bus so validation, permissions, scheduler reschedule, and redaction stay centralized.
+The Shell UI and preferences UI read daemon refresh/provider settings through `GetSettings()`. The preferences UI configures those settings through `SetSettingsPatch(patch_json)` after the daemon exists. It may read the documented config file path to populate controls before the daemon replies, but daemon-owned writes should prefer D-Bus so validation, permissions, scheduler reschedule, `SettingsChanged(settings_json)` emission, and redaction stay centralized.
 
 `SetSettingsPatch(patch_json)` accepts `spec/settings-patch.schema.json`. It is a partial update object, not an RFC 7396 merge patch:
 

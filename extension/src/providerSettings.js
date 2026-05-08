@@ -3,6 +3,26 @@ export const SUPPORTED_PROVIDERS = [
     {id: 'claude', title: 'Claude'},
 ];
 
+export const DEFAULT_DAEMON_SETTINGS = {
+    schemaVersion: 1,
+    refresh: {
+        intervalSeconds: 300,
+        startupRefresh: true,
+        allowStaleCacheFallback: true,
+    },
+    providers: {},
+    browserImport: {
+        enabled: false,
+        policy: 'off',
+        profileIdAllowlist: [],
+        domainAllowlistMode: 'provider_required_only',
+    },
+    diagnostics: {
+        verbosity: 'normal',
+        keepRedactedArtifacts: false,
+    },
+};
+
 const DEFAULT_PROVIDER_ID = 'codex';
 const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];
 

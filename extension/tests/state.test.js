@@ -8,6 +8,7 @@ import {
     effectiveProviderSettings,
 } from '../src/providerSettings.js';
 import {
+    applyDaemonSettingsJson,
     applyProviderEventJson,
     applyRefreshFinishedJson,
     applySnapshotJson,
@@ -53,6 +54,7 @@ const FIXTURE_STATES = [
 function main() {
     assertManualRefreshOptions();
     assertSupportedProviderSettingsDefaultsAndPatches();
+    assertDisabledProvidersFromSettingsStayVisible();
     assertSnapshotFixturesRenderStates();
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
@@ -146,6 +148,42 @@ function assertSupportedProviderSettingsDefaultsAndPatches() {
     assertEqual(sourcePatch.providers.claude.preferredSourceAdapter, 'upstream_cli');
 }
 
+function assertDisabledProvidersFromSettingsStayVisible() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const settings = providerSettings({
+        codex: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        claude: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
+    });
+    let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
+    state = applySnapshotJson(state, JSON.stringify(ok), 0);
+
+    const view = normalizeViewState(state, {panelMode: 'merged'});
+    const claude = view.providerSelectorRows.find(row => row.providerId === 'claude');
+    assertEqual(view.providerSelectorRows.length, 2);
+    assertEqual(claude.label, 'Claude');
+    assertEqual(claude.statusLabel, 'Disabled');
+    assertEqual(claude.disabled, true);
+    assertEqual(claude.dimmed, true);
+    assertEqual(claude.meter, null);
+
+    const selectedDisabled = normalizeViewState(state, {
+        selectedProvider: 'claude',
+        panelMode: 'merged',
+    });
+    assertEqual(selectedDisabled.selectedProviderId, 'claude');
+    assertEqual(selectedDisabled.selectedRow.disabled, true);
+    assertEqual(selectedDisabled.selectedRow.statusLabel, 'Disabled');
+    assertEqual(selectedDisabled.selectedRow.statusDescription, 'Provider disabled in settings.');
+    assertEqual(selectedDisabled.selectedRow.titleStatusText, 'Disabled');
+    assertEqual(selectedDisabled.selectedRow.planLabel, 'Off');
+    assertEqual(selectedDisabled.selectedRow.usageSections.length, 0);
+    assertArrayEqual(selectedDisabled.panel.meters, [null, null]);
+
+    const providerPanel = normalizeViewState(state, {panelMode: 'provider'});
+    assertEqual(providerPanel.panel.visibleProviders.length, 1);
+    assertEqual(providerPanel.panel.visibleProviders[0].providerId, 'codex');
+}
+
 function assertSnapshotFixturesRenderStates() {
     for (const stateName of FIXTURE_STATES) {
         const fixture = readJson(`fixtures/snapshots/${stateName}.json`);
@@ -220,8 +258,13 @@ function assertEmptyProviderSnapshotShowsNoProviderCopy() {
     const snapshot = readJson('fixtures/snapshots/ok.json');
     snapshot.providers = [];
     snapshot.selectedProvider = null;
+    const settings = providerSettings({
+        codex: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        claude: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
+    });
 
-    const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
+    state = applySnapshotJson(state, JSON.stringify(snapshot), 0);
     const view = normalizeViewState(state, {panelMode: 'merged'});
 
     assertEqual(state.clientState, 'no_providers');
@@ -230,14 +273,19 @@ function assertEmptyProviderSnapshotShowsNoProviderCopy() {
     assertEqual(view.stateDescription, 'Enable a provider in Preferences, then refresh.');
     assertEqual(view.panelStatus, 'No providers enabled');
     assert(view.headerStatus.startsWith('No providers enabled · updated '), 'empty-provider header should use no-provider copy');
-    assertEqual(view.selectedProvider, null);
-    assertEqual(view.selectedProviderId, '');
-    assertEqual(view.providerRows.length, 0);
-    assertEqual(view.providerSelectorRows.length, 0);
+    assertEqual(view.selectedProviderId, 'codex');
+    assertEqual(view.selectedRow.disabled, true);
+    assertEqual(view.providerRows.length, 2);
+    assertEqual(view.providerSelectorRows.length, 2);
+    assert(view.providerSelectorRows.every(row => row.disabled), 'empty-provider view should keep disabled provider cards visible');
 }
 
 function assertViewModelBuildsProviderStripAndSelectedSurface() {
     const snapshot = readJson('fixtures/snapshots/ok.json');
+    const settings = providerSettings({
+        codex: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        claude: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
+    });
     const claude = cloneProvider(snapshot.providers[0], {
         provider: 'claude',
         displayName: 'Claude',
@@ -263,7 +311,8 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     };
     snapshot.selectedProvider = 'claude';
 
-    const state = applySnapshotJson(createInitialState(0), JSON.stringify(snapshot), 0);
+    let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
+    state = applySnapshotJson(state, JSON.stringify(snapshot), 0);
     const view = normalizeViewState(state, {selectedProvider: 'claude', panelMode: 'merged'});
 
     assertEqual(view.selectedProviderId, 'claude');
@@ -1035,6 +1084,13 @@ function assertNormalViewLabelsSafe(labels, context) {
         assert(!/\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/.test(label), `${context} leaked a raw token: ${label}`);
         assert(!/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?(?:token|key)|token)\b\s*[:=]/i.test(label), `${context} leaked token-shaped copy: ${label}`);
     }
+}
+
+function providerSettings(providers) {
+    return {
+        schemaVersion: 1,
+        providers,
+    };
 }
 
 function readJson(relativePath) {

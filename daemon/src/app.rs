@@ -227,6 +227,11 @@ impl App {
         to_public_json(&self.daemon_info(&state))
     }
 
+    pub fn get_settings_json(&self) -> AppResult<String> {
+        let state = self.lock_state()?;
+        to_public_json(&state.settings)
+    }
+
     pub fn get_diagnostics_json(&self, provider_id: &str) -> AppResult<String> {
         let state = self.lock_state()?;
         let provider = if provider_id.is_empty() || provider_id == "global" {

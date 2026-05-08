@@ -34,6 +34,7 @@ const REQUIRED_METHODS: &[&str] = &[
     "Refresh",
     "GetDiagnostics",
     "GetDaemonInfo",
+    "GetSettings",
     "SetSettingsPatch",
     "TestBrowserImport",
 ];
@@ -43,6 +44,7 @@ const REQUIRED_SIGNALS: &[&str] = &[
     "RefreshStarted",
     "RefreshFinished",
     "ProviderChanged",
+    "SettingsChanged",
 ];
 const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
 
@@ -183,6 +185,10 @@ fn app_getters_return_schema_shaped_redacted_json() {
         serde_json::from_str(&app.get_diagnostics_json("").expect("diagnostics json")).unwrap();
     assert_eq!(diagnostics["schemaVersion"], 1);
     assert_eq!(diagnostics["redaction"]["applied"], true);
+
+    let settings: Settings =
+        serde_json::from_str(&app.get_settings_json().expect("settings json")).unwrap();
+    assert_eq!(settings.schema_version, 1);
 }
 
 #[test]

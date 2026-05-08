@@ -34,6 +34,7 @@ export default class CodexBarExtension extends Extension {
         this._clientSignals = [
             client.on('snapshot', current(snapshotJson => store.applySnapshotJson(snapshotJson))),
             client.on('daemon-info', current(infoJson => store.applyDaemonInfoJson(infoJson))),
+            client.on('settings', current(settingsJson => store.applyDaemonSettingsJson(settingsJson))),
             client.on('provider-changed', current((providerId, eventJson) => store.applyProviderEventJson(providerId, eventJson))),
             client.on('refresh-started', current(refreshId => store.applyRefreshStarted(refreshId))),
             client.on('refresh-finished', current((refreshId, resultJson) => store.applyRefreshFinishedJson(refreshId, resultJson))),

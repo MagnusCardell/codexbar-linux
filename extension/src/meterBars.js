@@ -61,6 +61,7 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
     const box = new St.BoxLayout({
         vertical: true,
         style_class: 'codexbar-provider-meters',
+        x_expand: true,
     });
 
     if (rows.length === 0) {
@@ -75,6 +76,7 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
         const row = new St.BoxLayout({
             vertical: true,
             style_class: 'codexbar-meter-row',
+            x_expand: true,
         });
 
         row.add_child(new St.Label({
@@ -109,14 +111,19 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
 export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = false} = {}) {
     const width = compact ? PANEL_METER_WIDTH : PROVIDER_METER_WIDTH;
     const height = compact ? PANEL_METER_HEIGHT : PROVIDER_METER_HEIGHT;
+    const safeTone = safeMeterTone(tone);
+
+    if (!compact)
+        return createResponsiveMeter(fillPercent, safeTone, width, height);
+
+    // Compact: pixel-precise fixed-width approach for the panel bar
     const fillWidth = fillWidthForPercent(fillPercent, width);
     const restWidth = Math.max(0, width - fillWidth);
-    const safeTone = safeMeterTone(tone);
 
     const track = new St.BoxLayout({
         vertical: false,
         style_class: meterClassNames(safeTone, {compact}),
-        x_expand: !compact,
+        x_expand: false,
         x_align: Clutter.ActorAlign.CENTER,
         y_align: Clutter.ActorAlign.CENTER,
         style: [
@@ -145,7 +152,6 @@ export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = 
                 `background-color: ${meterColor(safeTone)}`,
             ].join('; '),
         });
-
         fill.set_width(fillWidth);
         fill.set_height(height);
         track.add_child(fill);
@@ -163,12 +169,34 @@ export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = 
                 'background-color: transparent',
             ].join('; '),
         });
-
         rest.set_width(restWidth);
         rest.set_height(height);
         track.add_child(rest);
     }
 
+    return track;
+}
+
+function createResponsiveMeter(fillPercent, safeTone, minWidth, height) {
+    const fraction = meterFillFractionFromPercent(fillPercent);
+    const fillPct = fraction !== null ? Math.max(0, Math.min(100, Math.round(fraction * 100))) : 0;
+    const fillClr = meterColor(safeTone);
+    const emptyClr = 'rgba(255, 255, 255, 0.12)';
+
+    let bgStyle = '';
+    if (fillPct >= 100)
+        bgStyle = `background-color: ${fillClr};`;
+    else if (fillPct > 0)
+        bgStyle = `background-image: linear-gradient(to right, ${fillClr} ${fillPct}%, ${emptyClr} ${fillPct}%); background-color: ${emptyClr};`;
+
+    const track = new St.Widget({
+        style_class: meterClassNames(safeTone, {compact: false}),
+        x_expand: true,
+        x_align: Clutter.ActorAlign.CENTER,
+        y_align: Clutter.ActorAlign.CENTER,
+        style: `min-width: ${minWidth}px; height: ${height}px; min-height: ${height}px; max-height: ${height}px; ${bgStyle}`,
+    });
+    track.set_height(height);
     return track;
 }
 

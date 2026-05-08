@@ -87,6 +87,10 @@ class DaemonClient {
         return this.callString('GetSnapshot');
     }
 
+    getSettings() {
+        return this.callString('GetSettings');
+    }
+
     setSettingsPatch(patch) {
         return this.callString(
             'SetSettingsPatch',
@@ -285,12 +289,14 @@ export default class CodexBarPreferences extends ExtensionPreferences {
     async _loadDaemonState() {
         this._applyDaemonSettings(this._readDaemonSettings());
         try {
-            const [infoJson, snapshotJson] = await Promise.all([
+            const [infoJson, snapshotJson, settingsJson] = await Promise.all([
                 this._daemon.getDaemonInfo(),
                 this._daemon.getSnapshot(),
+                this._daemon.getSettings(),
             ]);
             const info = JSON.parse(infoJson);
             const snapshot = JSON.parse(snapshotJson);
+            this._applyDaemonSettings(JSON.parse(settingsJson));
             this._setDaemonInfo(info, snapshot);
         } catch (error) {
             this._setDaemonUnavailable(error);

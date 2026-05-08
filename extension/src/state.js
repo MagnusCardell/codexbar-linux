@@ -7,6 +7,11 @@ import {
     STATE_LABELS,
     THEMES,
 } from './constants.js';
+import {
+    DEFAULT_DAEMON_SETTINGS,
+    SUPPORTED_PROVIDERS,
+    effectiveProviderSettings,
+} from './providerSettings.js';
 
 export {PANEL_MODES, RESET_TIME_FORMATS, THEMES};
 
@@ -250,6 +255,7 @@ export function createInitialState(nowMs = Date.now()) {
         lastClientError: null,
         lastProviderEvent: null,
         daemonInfo: null,
+        daemonSettings: DEFAULT_DAEMON_SETTINGS,
         diagnostics: null,
     };
 }
@@ -340,6 +346,28 @@ export function applyDaemonInfoJson(state, infoJson, nowMs = Date.now()) {
         ...state,
         daemonInfo,
         lastClientError: null,
+    };
+}
+
+export function applyDaemonSettingsJson(state, settingsJson) {
+    if (typeof settingsJson !== 'string' || settingsJson.length === 0)
+        return applyDaemonSettings(state, DEFAULT_DAEMON_SETTINGS);
+
+    const parsed = parseJsonObject(settingsJson);
+    if (!parsed.ok)
+        return applyDaemonSettings(state, DEFAULT_DAEMON_SETTINGS);
+
+    return applyDaemonSettings(state, parsed.value);
+}
+
+export function applyDaemonSettings(state, settings) {
+    const daemonSettings = isDaemonSettingsPayload(settings)
+        ? settings
+        : DEFAULT_DAEMON_SETTINGS;
+
+    return {
+        ...state,
+        daemonSettings,
     };
 }
 
@@ -502,6 +530,7 @@ export function normalizeUiOptions(options = {}) {
         theme,
         selectedProvider: typeof options.selectedProvider === 'string' ? options.selectedProvider : '',
         startDaemonOnLogin: Boolean(options.startDaemonOnLogin),
+        daemonSettings: isDaemonSettingsPayload(options.daemonSettings) ? options.daemonSettings : null,
     };
 }
 
@@ -536,8 +565,15 @@ export function deriveSnapshotState(snapshot) {
 export function normalizeViewState(state, options = {}) {
     const uiOptions = normalizeUiOptions(options);
     const snapshot = state?.snapshot ?? createSyntheticSnapshot('loading');
-    const selectedProvider = selectProvider(snapshot, uiOptions.selectedProvider);
-    const providerRows = (Array.isArray(snapshot.providers) ? snapshot.providers : [])
+    const daemonSettings = uiOptions.daemonSettings
+        ?? state?.daemonSettings
+        ?? DEFAULT_DAEMON_SETTINGS;
+    const viewProviders = providersForSettings(snapshot, daemonSettings);
+    const selectedProvider = selectProvider({
+        ...snapshot,
+        providers: viewProviders,
+    }, uiOptions.selectedProvider);
+    const providerRows = viewProviders
         .map(provider => providerRow(provider, uiOptions));
     const selectedRow = selectedProvider ? providerRow(selectedProvider, uiOptions) : null;
     const viewState = state?.clientState ?? deriveSnapshotState(snapshot);
@@ -578,19 +614,171 @@ export function normalizeViewState(state, options = {}) {
     };
 }
 
+function providersForSettings(snapshot, daemonSettings = DEFAULT_DAEMON_SETTINGS) {
+    const snapshotProviders = Array.isArray(snapshot?.providers) ? snapshot.providers : [];
+    const effectiveProviders = effectiveProviderSettings(daemonSettings);
+    const rows = [];
+    const seen = new Set();
+
+    for (const providerInfo of settingsProviderInfos(daemonSettings)) {
+        const configured = settingsForProvider(daemonSettings, effectiveProviders, providerInfo.id);
+        const snapshotProvider = snapshotProviders.find(provider => provider?.provider === providerInfo.id);
+        if (snapshotProvider) {
+            rows.push(configured.enabled === false
+                ? disabledSnapshotProvider(snapshotProvider)
+                : snapshotProvider);
+        } else {
+            rows.push(configured.enabled === false
+                ? disabledProvider(providerInfo)
+                : pendingProvider(providerInfo));
+        }
+        seen.add(providerInfo.id);
+    }
+
+    for (const provider of snapshotProviders) {
+        if (!seen.has(provider?.provider))
+            rows.push(provider);
+    }
+
+    return rows;
+}
+
+function settingsProviderInfos(daemonSettings) {
+    const providerInfos = [];
+    const seen = new Set();
+    for (const provider of SUPPORTED_PROVIDERS) {
+        providerInfos.push(provider);
+        seen.add(provider.id);
+    }
+
+    if (plainObject(daemonSettings?.providers)) {
+        for (const providerId of Object.keys(daemonSettings.providers)) {
+            if (!seen.has(providerId) && /^[A-Za-z0-9_-]+$/.test(providerId)) {
+                providerInfos.push({
+                    id: providerId,
+                    title: titleFromProviderId(providerId),
+                });
+                seen.add(providerId);
+            }
+        }
+    }
+
+    return providerInfos;
+}
+
+function settingsForProvider(daemonSettings, effectiveProviders, providerId) {
+    if (Object.prototype.hasOwnProperty.call(effectiveProviders, providerId))
+        return effectiveProviders[providerId];
+
+    const configured = plainObject(daemonSettings?.providers?.[providerId])
+        ? daemonSettings.providers[providerId]
+        : {};
+    return {
+        enabled: typeof configured.enabled === 'boolean' ? configured.enabled : true,
+        preferredSourceAdapter: typeof configured.preferredSourceAdapter === 'string'
+            ? configured.preferredSourceAdapter
+            : 'auto',
+        allowBrowserImport: false,
+        allowCliFallback: typeof configured.allowCliFallback === 'boolean'
+            ? configured.allowCliFallback
+            : true,
+    };
+}
+
+function titleFromProviderId(providerId) {
+    return providerId
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function disabledSnapshotProvider(provider) {
+    return {
+        ...provider,
+        disabled: true,
+        status: {
+            ...(provider?.status ?? {}),
+            indicator: 'disabled',
+            description: disabledProviderMeta().description,
+        },
+        diagnosticsSummary: disabledProviderMeta().description,
+    };
+}
+
+function disabledProvider(providerInfo) {
+    return {
+        provider: providerInfo.id,
+        displayName: providerInfo.title,
+        version: null,
+        source: 'unknown',
+        sourceAdapter: 'none',
+        state: 'provider_unavailable',
+        updatedAt: null,
+        staleSince: null,
+        usage: {
+            primary: null,
+            secondary: null,
+            tertiary: null,
+        },
+        credits: null,
+        identity: null,
+        status: {
+            indicator: 'disabled',
+            description: disabledProviderMeta().description,
+            updatedAt: null,
+            url: null,
+        },
+        cost: null,
+        dashboardUrl: null,
+        diagnosticsSummary: disabledProviderMeta().description,
+        diagnosticCodes: ['provider_disabled_by_settings'],
+        disabled: true,
+    };
+}
+
+function pendingProvider(providerInfo) {
+    return {
+        provider: providerInfo.id,
+        displayName: providerInfo.title,
+        version: null,
+        source: 'unknown',
+        sourceAdapter: 'upstream_cli',
+        state: 'loading',
+        updatedAt: null,
+        staleSince: null,
+        usage: {
+            primary: null,
+            secondary: null,
+            tertiary: null,
+        },
+        credits: null,
+        identity: null,
+        status: {
+            indicator: 'loading',
+            description: stateMeta('loading').description,
+            updatedAt: null,
+            url: null,
+        },
+        cost: null,
+        dashboardUrl: null,
+        diagnosticsSummary: stateMeta('loading').description,
+        diagnosticCodes: [],
+    };
+}
+
 export function providerRow(provider, options = {}) {
+    const disabled = Boolean(provider?.disabled);
     const state = provider?.state ?? 'error';
-    const meta = stateMeta(state);
+    const meta = disabled ? disabledProviderMeta() : stateMeta(state);
     const displayName = safeDisplay(provider?.displayName || provider?.provider || 'Unknown provider');
     const providerId = safeDisplay(provider?.provider || '');
     const shortLabel = shortProviderLabel(displayName, providerId);
-    const identity = safeDisplay(providerIdentityText(provider));
+    const identity = disabled ? '' : safeDisplay(providerIdentityText(provider));
     const statusText = safeDisplay(providerStatusText(provider), meta.description);
-    const meters = providerMeters(provider);
+    const meters = disabled ? [] : providerMeters(provider);
     const meterRows = meters.map(meter => meterRow(meter, options.resetTimeFormat));
-    const costRows = costSummaryRows(provider?.cost);
-    const source = sourceLabel(provider?.source);
-    const adapter = adapterLabel(provider?.sourceAdapter);
+    const costRows = disabled ? [] : costSummaryRows(provider?.cost);
+    const source = disabled ? '' : sourceLabel(provider?.source);
+    const adapter = disabled ? '' : adapterLabel(provider?.sourceAdapter);
     const titleStatusText = providerTitleStatusText(provider, options);
     const planLabel = providerPlanLabel(provider, source, adapter);
 
@@ -619,6 +807,7 @@ export function providerRow(provider, options = {}) {
         usageSections: usageSectionRows(meterRows),
         costRows,
         diagnosticsSummary: safeDisplay(provider?.diagnosticsSummary || ''),
+        disabled,
     };
 }
 
@@ -631,7 +820,8 @@ export function providerSelectorRow(row, selectedProviderId = '') {
         state: row.state,
         severity: row.severity,
         selected: row.providerId === selectedProviderId,
-        dimmed: !['ok', 'stale'].includes(row.state),
+        dimmed: row.disabled || !['ok', 'stale'].includes(row.state),
+        disabled: row.disabled,
         statusLabel: row.statusLabel,
         meter: primaryMeter,
     };
@@ -651,7 +841,8 @@ export function usageSectionRows(meterRows) {
 export function panelViewModel(providerRows, selectedRow, viewState, stale, options = {}) {
     const mode = PANEL_MODES.includes(options.panelMode) ? options.panelMode : 'merged';
     const visibleLimit = MAX_PROVIDER_INDICATORS;
-    const visibleProviders = providerRows.slice(0, visibleLimit)
+    const activeProviderRows = providerRows.filter(row => !row.disabled);
+    const visibleProviders = activeProviderRows.slice(0, visibleLimit)
         .map(row => ({
             providerId: row.providerId,
             label: row.shortLabel,
@@ -669,9 +860,9 @@ export function panelViewModel(providerRows, selectedRow, viewState, stale, opti
         status: stateMeta(viewState).label,
         iconName: stateMeta(viewState).iconName,
         stale,
-        meters: panelMeters(selectedRow?.provider),
+        meters: selectedRow?.disabled ? [null, null] : panelMeters(selectedRow?.provider),
         visibleProviders,
-        overflowCount: Math.max(0, providerRows.length - visibleProviders.length),
+        overflowCount: Math.max(0, activeProviderRows.length - visibleProviders.length),
         compact: true,
         showText: false,
         meterCount: 2,
@@ -934,6 +1125,15 @@ export function stateMeta(state) {
     return STATE_META[state] ?? STATE_META.error;
 }
 
+function disabledProviderMeta() {
+    return {
+        label: 'Disabled',
+        severity: 'loading',
+        description: 'Provider disabled in settings.',
+        iconName: 'action-unavailable-symbolic',
+    };
+}
+
 function normalizeStateName(state) {
     return Object.prototype.hasOwnProperty.call(STATE_META, state) ? state : 'error';
 }
@@ -973,6 +1173,8 @@ export function adapterLabel(adapter) {
 export function providerStatusText(provider) {
     if (!provider)
         return 'No provider selected';
+    if (provider.disabled)
+        return disabledProviderMeta().description;
 
     const meta = stateMeta(provider.state);
     if (provider.state === 'ok')
@@ -996,6 +1198,9 @@ export function headerStatusText(state, stale, refreshing, generatedAt) {
 }
 
 export function providerTitleStatusText(provider, options = {}) {
+    if (provider?.disabled)
+        return disabledProviderMeta().label;
+
     const state = provider?.state ?? 'loading';
     const updated = provider?.updatedAt
         ? lowerInitial(formatUpdatedAt(provider.updatedAt, options.nowMs ?? Date.now()))
@@ -1534,6 +1739,41 @@ function isNullableDateTimeString(value) {
     return value === null || isDateTimeString(value);
 }
 
+function isDaemonSettingsPayload(settings) {
+    if (!plainObject(settings) || settings.schemaVersion !== 1 || hasForbiddenPublicData(settings))
+        return false;
+    if (!plainObject(settings.providers))
+        return false;
+
+    for (const [providerId, provider] of Object.entries(settings.providers)) {
+        if (!/^[A-Za-z0-9_-]+$/.test(providerId) || !plainObject(provider))
+            return false;
+        if (Object.prototype.hasOwnProperty.call(provider, 'enabled') && typeof provider.enabled !== 'boolean')
+            return false;
+        if (
+            Object.prototype.hasOwnProperty.call(provider, 'preferredSourceAdapter')
+            && !['auto', 'upstream_cli', 'linux_web', 'off'].includes(provider.preferredSourceAdapter)
+        )
+            return false;
+        if (
+            Object.prototype.hasOwnProperty.call(provider, 'allowCliFallback')
+            && typeof provider.allowCliFallback !== 'boolean'
+        )
+            return false;
+        if (
+            Object.prototype.hasOwnProperty.call(provider, 'allowBrowserImport')
+            && typeof provider.allowBrowserImport !== 'boolean'
+        )
+            return false;
+    }
+
+    return true;
+}
+
+function plainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function isSafeDiagnosticDetailValue(value) {
     return value === null || ['string', 'number', 'boolean'].includes(typeof value);
 }
@@ -1821,6 +2061,8 @@ function shortProviderLabel(displayName, providerId) {
 }
 
 function providerPlanLabel(provider, source, adapter) {
+    if (provider?.disabled)
+        return 'Off';
     if (provider?.source === 'local')
         return source;
     if (provider?.sourceAdapter === 'upstream_cli')
