@@ -9,7 +9,7 @@ It is intentionally split into:
 3. a D-Bus session API between the two;
 4. upstream `codexbar` CLI and local provider tooling as the production data plane.
 
-The product target is stock Ubuntu Desktop 24.04 LTS+ on GNOME 46+, Wayland-first, with Ubuntu 26.04 LTS compatibility as a release gate.
+The product target is stock Ubuntu Desktop 24.04 LTS+ on GNOME 46+, Wayland-first, with Ubuntu 26.04 LTS/GNOME 50 compatibility as a release gate.
 
 ## Current architectural decision
 
@@ -26,10 +26,11 @@ The MVP is:
 
 ## Current status
 
-This repository is at **Task 05E v0.1 release-candidate cleanup** status,
+This repository is at **Task 05F/05K v0.1 scheduler and preferences UX** status,
 building on the Task 03 GNOME Shell vertical slice, Task 04R no-browser cleanup,
 Task 05A upstream-CLI-only hardening, Task 05B development package work, Task
-05C package smoke validation, and Task 05D upstream CLI UX polish.
+05C package smoke validation, Task 05D upstream CLI UX polish, and Task 05E
+release-candidate cleanup.
 The implemented product surface is GNOME UI + user daemon + upstream CLI adapter.
 
 Present:
@@ -48,9 +49,10 @@ Present:
 - Local-only upstream CLI capture harness and fixture validator.
 - Production daemon upstream CLI adapter for targeted provider refresh.
 - Runtime refresh uses targeted usage/status probes and defaults to `codex` when no provider is configured or requested.
+- Daemon auto-refresh runs on startup when configured, repeats on the daemon-owned refresh interval, reschedules after `SetSettingsPatch`, and clears the active-refresh guard after failed refresh completion.
 - Cost refresh uses `codexbar cost --format json --json-only --provider all` without `--source`.
 - GNOME Shell extension vertical slice under `extension/`, with D-Bus-only data access, merged/provider/minimal panel modes, provider popover cards, manual refresh, diagnostics, and daemon info display.
-- Preferences UI that exposes only the five GSettings-owned UI keys from `docs/CONTRACTS.md`.
+- Preferences UI for Shell presentation settings plus daemon info, refresh interval, panel provider selection, and provider enable/source controls backed by `SetSettingsPatch`; the reserved `start-daemon-on-login` key is hidden for v0.1.
 - GSettings schema under `schemas/`.
 - User-scoped systemd/D-Bus activation files and a development Debian package
   path for v0.1 local release smoke testing.
@@ -66,7 +68,7 @@ Present:
   config/cache.
 - Validation scripts and GitHub Actions check workflow.
 - Recorded live GNOME smoke result in `docs/gnome-smoke-test.md`.
-- Recorded root-backed package install smoke evidence, including installed file
+- Historical root-backed package install smoke evidence, including installed file
   layout, `/usr/bin/codexbar-linuxd --check`, D-Bus activation,
   missing-upstream-CLI degraded state, upstream-CLI refresh after
   `CODEXBAR_CLI` systemd user environment setup, system extension discovery from
@@ -87,10 +89,12 @@ Not implemented after Task 05E:
 
 - Signed repository distribution and package upgrade matrix coverage.
 - Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
-- Re-running `sudo apt remove codexbar-linux` and optional
+- Re-running `sudo apt remove codexbar-linux` and
   `sudo apt purge codexbar-linux` after the final successful package-extension
-  smoke. Remove/purge was previously tested and remains part of the release
-  smoke gate.
+  smoke. Remove/purge was previously tested and both commands remain part of
+  the final release smoke gate.
+- Root-backed install/remove/purge smoke for the latest rebuilt `.deb`
+  candidate.
 
 `TestBrowserImport` remains in the D-Bus contract for compatibility, but it is
 reserved and unsupported. The daemon validates the request JSON and returns a
@@ -107,6 +111,8 @@ For upstream CLI installation, verification, and packaged daemon configuration,
 see [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md). For the
 user-facing state/copy matrix used by daemon diagnostics and the Shell UI, see
 [Upstream CLI UX States](docs/upstream-cli-ux.md).
+For final tag preparation and the explicit blocked/unblocked release decision,
+see [Release Candidate Gate](docs/release-candidate-gate.md).
 
 ## Local checks
 
@@ -151,7 +157,7 @@ CODEXBAR_LINUX_ALLOW_FIXTURE=1 cargo run --manifest-path daemon/Cargo.toml
 
 Static checks cannot prove GNOME Shell lifecycle behavior. For Task 03 changes
 to extension runtime code, run the detailed [GNOME smoke checklist](docs/gnome-smoke-test.md)
-on GNOME 46+. For release packaging, run both paths in
+on GNOME 46+ and include Ubuntu 26.04/GNOME 50 metadata/runtime validation for release candidates. For release packaging, run both paths in
 [Release Smoke Test](docs/release-smoke-test.md):
 
 ```bash

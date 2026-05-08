@@ -80,15 +80,17 @@ Use the frozen product-facing copy map:
 - Manual refresh sends the frozen Shell `MANUAL_REFRESH_OPTIONS` payload and
   must not invoke upstream `codexbar` directly. Changes to adapter policy are
   data-plane behavior and require contract/daemon review, not visual polish.
-- For Task 03.5, preferences remain GTK/libadwaita and use only existing
-  Shell UI/autostart GSettings keys. Future daemon-owned provider, browser,
-  refresh, or diagnostics settings belong behind the daemon D-Bus settings API
-  or the documented daemon config flow, not new Shell-owned GSettings keys.
+- Preferences remain GTK/libadwaita. Shell presentation settings may use
+  existing Shell-owned GSettings keys; daemon-owned refresh/provider settings
+  must go through the daemon D-Bus settings API or the documented daemon config
+  flow, not new Shell-owned GSettings keys.
 
 ## Non-Goals
 
 - No daemon, D-Bus XML, JSON schema, or P0A contract changes.
 - No browser import UI that implies implemented behavior.
 - No provider enablement, refresh interval, diagnostics verbosity, or source
-  adapter settings in GSettings.
+  adapter settings in Shell-owned GSettings.
+- No visible start-on-login control for v0.1; the schema key is reserved until
+  an implemented autostart path exists.
 - No macOS-only interactions or Quit behavior.

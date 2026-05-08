@@ -2,7 +2,7 @@
   "uuid": "codexbar-linux@codexbar.dev",
   "name": "CodexBar GNOME",
   "description": "Native GNOME top-bar companion for CodexBar daemon snapshots.",
-  "shell-version": ["46"],
+  "shell-version": ["46", "47", "48", "49", "50"],
   "settings-schema": "org.gnome.shell.extensions.codexbar-linux",
   "url": "https://codexbar.dev",
   "version": 1

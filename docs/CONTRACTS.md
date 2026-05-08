@@ -14,7 +14,7 @@ Required v1 keys:
 
 | Key | Type | Values | Owner |
 |---|---:|---|---|
-| `start-daemon-on-login` | boolean | `true` / `false` | preferences UI applies systemd-user/autostart policy |
+| `start-daemon-on-login` | boolean | `true` / `false` | reserved; hidden in v0.1 because D-Bus activation starts the daemon on demand |
 | `panel-mode` | string | `merged`, `provider`, `minimal` | Shell UI |
 | `reset-time-format` | string | `countdown`, `absolute`, `both` | Shell UI |
 | `theme` | string | `system`, `compact`, `high_contrast` | Shell UI |
@@ -38,7 +38,7 @@ compatibility with the frozen contract. In the no-browser product scope those
 fields are deprecated, normalized off by the daemon, and must not trigger
 browser profile scanning, keyring access, cookie reads, or provider web fetches.
 
-The preferences UI may configure daemon settings through `SetSettingsPatch(patch_json)` after the daemon exists. During local development it may also write the documented config file path, but production UX should prefer D-Bus so validation and redaction stay centralized.
+The preferences UI configures daemon refresh/provider settings through `SetSettingsPatch(patch_json)` after the daemon exists. It may read the documented config file path to populate controls before the daemon replies, but daemon-owned writes should prefer D-Bus so validation, permissions, scheduler reschedule, and redaction stay centralized.
 
 `SetSettingsPatch(patch_json)` accepts `spec/settings-patch.schema.json`. It is a partial update object, not an RFC 7396 merge patch:
 

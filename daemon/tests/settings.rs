@@ -3,10 +3,12 @@ mod common;
 use std::fs;
 
 use codexbar_linuxd::app::App;
+use codexbar_linuxd::app::RefreshStart;
 use codexbar_linuxd::config;
 use codexbar_linuxd::error::AppError;
 use codexbar_linuxd::model::{
-    BrowserImportPolicy, DiagnosticsVerbosity, PreferredSourceAdapter, Settings,
+    BrowserImportPolicy, DiagnosticsVerbosity, PreferredSourceAdapter, RefreshResult,
+    RefreshStatus, Settings,
 };
 
 #[test]
@@ -42,6 +44,61 @@ fn valid_patch_applies_persists_and_preserves_omitted_fields() {
     assert_eq!(
         settings.diagnostics.verbosity,
         DiagnosticsVerbosity::Verbose
+    );
+}
+
+#[tokio::test]
+async fn settings_patch_advances_scheduler_revision() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = App::new(paths).expect("app");
+    let observed = app.settings_revision();
+
+    app.set_settings_patch_json(r#"{"schemaVersion":1,"refresh":{"intervalSeconds":300}}"#)
+        .expect("settings patch");
+
+    let revision = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        app.wait_for_settings_change(observed),
+    )
+    .await
+    .expect("settings revision wake");
+    assert!(revision > observed);
+}
+
+#[tokio::test]
+async fn failed_refresh_can_be_unwedged_without_daemon_restart() {
+    let (_tmp, paths) = common::temp_paths();
+    let app = common::fixture_app(paths);
+    let start = app
+        .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
+        .expect("start refresh");
+    let RefreshStart::Started { refresh_id } = start else {
+        panic!("first refresh should start");
+    };
+
+    let failed = app
+        .fail_refresh(
+            &refresh_id,
+            "refresh_failed",
+            "Refresh failed; details were redacted.",
+        )
+        .expect("fail active refresh");
+    common::assert_schema("snapshot.schema.json", &failed.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &failed.result_json);
+    let result: RefreshResult = serde_json::from_str(&failed.result_json).expect("result json");
+    assert_eq!(result.status, RefreshStatus::Error);
+    assert_eq!(result.refresh_id, refresh_id);
+    assert!(result
+        .diagnostic_codes
+        .iter()
+        .any(|code| code == "refresh_failed"));
+
+    let next = app
+        .start_refresh(common::FIXTURE_REFRESH_OPTIONS_JSON)
+        .expect("second refresh starts after failure");
+    assert!(
+        matches!(next, RefreshStart::Started { .. }),
+        "refresh failure must clear the active refresh guard"
     );
 }
 

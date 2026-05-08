@@ -79,6 +79,14 @@ release-smoke documentation. No D-Bus XML, JSON schemas, provider behavior, or
 data plane were changed. The same remove/purge rerun, full Ubuntu 24.04/26.04
 matrix, signed repository, and upgrade gates remain open until recorded.
 
+Task 05F/05K status: the daemon now owns startup and interval auto-refresh
+scheduling. `SetSettingsPatch` updates wake the scheduler so interval changes
+take effect without daemon restart, and failed refresh completion paths clear
+the active-refresh guard so manual Refresh can recover. Preferences hide the
+reserved `start-daemon-on-login` key for v0.1 and expose daemon info, refresh
+interval, panel provider selection, and provider enable/source controls backed
+by daemon `SetSettingsPatch` writes.
+
 Exit criteria:
 
 - `.deb` installs daemon, service, extension, schema.
@@ -118,7 +126,7 @@ Deliverables:
 
 - Accessibility review.
 - High contrast and compact modes.
-- GNOME 46 and current 26.04 GNOME smoke matrix.
+- GNOME 46 through GNOME 50 smoke matrix, including Ubuntu 24.04 and 26.04.
 - Error-state polish.
 - Diagnostics export.
 - Security review.

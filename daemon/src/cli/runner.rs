@@ -205,6 +205,12 @@ mod tests {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
+
+    fn runner_test_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
 
     fn fake_executable(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
@@ -231,6 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_uses_exact_argv_and_separate_streams() {
+        let _guard = runner_test_lock().lock().await;
         let tmp = tempfile::tempdir().expect("tempdir");
         let argv_file = tmp.path().join("argv.txt");
         let script = fake_executable(
@@ -259,6 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_excludes_secret_and_proxy_environment() {
+        let _guard = runner_test_lock().lock().await;
         let tmp = tempfile::tempdir().expect("tempdir");
         let script = fake_executable(
             tmp.path(),
@@ -273,11 +281,16 @@ mod tests {
             .run(&script, &spec(Vec::new()))
             .await
             .expect("run");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("GITHUB_TOKEN");
+        std::env::remove_var("HTTP_PROXY");
+        std::env::remove_var("COOKIE");
         assert!(output.stdout.is_empty(), "secret env leaked to child");
     }
 
     #[tokio::test]
     async fn runner_times_out_and_reaps_child() {
+        let _guard = runner_test_lock().lock().await;
         let tmp = tempfile::tempdir().expect("tempdir");
         let script = fake_executable(tmp.path(), "codexbar", "sleep 5");
         let mut timeout_spec = spec(Vec::new());
@@ -291,6 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_truncates_stdout_and_stderr_independently() {
+        let _guard = runner_test_lock().lock().await;
         let tmp = tempfile::tempdir().expect("tempdir");
         let script = fake_executable(
             tmp.path(),

@@ -46,10 +46,11 @@
 ### F. Preferences
 
 - General preferences save and apply.
-- Panel mode, reset time format, theme, selected provider, and start-on-login
-  preferences save and apply.
-- Provider enablement/source configuration remains daemon-owned and is not
-  exposed as unsupported UI.
+- Panel mode, reset time format, theme, and selected provider preferences save
+  and apply.
+- The reserved start-on-login preference is not shown as an active v0.1 control.
+- Daemon-owned refresh interval and provider enablement/source configuration
+  save through `SetSettingsPatch`; they are not stored in Shell-owned GSettings.
 - Reserved browser import test reports unsupported/no-op behavior.
 - Diagnostics page shows daemon status, redacted CLI/config/cache path labels,
   CLI version when available, and D-Bus service.
@@ -88,10 +89,24 @@ the command or smoke evidence used.
   systemd user unit, system GNOME extension path, GSettings schema,
   `codexbar-linuxd(1)` manual page, and release smoke docs.
 - Full repository gate passes: `./scripts/check.sh` completes successfully on
-  Ubuntu 24.04 or newer.
+  Ubuntu 24.04 or newer and the final completion audit is given the saved log
+  whose `repository gate passed for HEAD ...` marker matches the audited
+  commit.
 - Live GNOME 46+ Wayland smoke passes after `./scripts/install-local.sh`, an
   explicit user enablement, and a session restart when Wayland discovery
   requires it.
+- GNOME metadata/runtime matrix includes GNOME 50: `metadata.json` lists Shell
+  versions `46` through `50`, static validators assert both the GNOME 46 support
+  floor and GNOME 50 validation target, and Ubuntu 26.04/GNOME 50 live smoke is
+  recorded before final release sign-off.
+- Daemon auto-refresh passes: startup refresh runs when daemon settings allow
+  it, scheduled refresh repeats on `refresh.intervalSeconds`, settings patches
+  reschedule the interval without daemon restart, and refresh failure clears the
+  active-refresh guard so manual Refresh can recover.
+- Preferences UX passes: v0.1 does not show inert login-start controls;
+  preferences display daemon info, refresh interval, panel provider selection,
+  and provider enable/source controls, and daemon-owned writes go through
+  `SetSettingsPatch`.
 - Upstream CLI missing degraded UI passes: with no resolvable `codexbar`, manual
   refresh remains available, provider state is `missing_dependency`, and
   diagnostics are copyable and redacted.
@@ -130,10 +145,10 @@ the command or smoke evidence used.
 - Task 05C package candidate validation records whether the package was tested
   through real `sudo apt install/remove/purge` or only through non-mutating
   package inspection and `apt-get -s install`. A candidate remains blocked from
-  release sign-off until the real root-backed install/remove path is recorded on
-  the target Ubuntu GNOME host. If remove/purge was not rerun after the final
-  successful package-extension smoke, it remains a required release-smoke gate
-  even when package install and UI evidence have passed.
+  release sign-off until the real root-backed install/remove/purge path is
+  recorded on the target Ubuntu GNOME host. If remove/purge was not rerun after
+  the final successful package-extension smoke, it remains a required
+  release-smoke gate even when package install and UI evidence have passed.
 - A non-fatal `_apt` sandbox warning during `sudo apt install ./dist/*.deb` is
   not a package failure when the install succeeds; it indicates the local `.deb`
   path was inaccessible to the `_apt` sandbox user. The reproducible package

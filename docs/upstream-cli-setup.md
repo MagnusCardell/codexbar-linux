@@ -49,6 +49,11 @@ the provider's own CLI or upstream CodexBar setup flow, then rerun the command.
 
 ## Configure Packaged Daemon
 
+v0.1 does not parse or migrate upstream CodexBar config files. The daemon only
+discovers the upstream CLI executable through `CODEXBAR_CLI` or its service
+environment `PATH`; provider authentication and provider-specific config remain
+owned by upstream CodexBar and the provider CLIs.
+
 When the `.deb` package is installed, set the CLI path in the systemd user
 manager environment and restart the user service:
 

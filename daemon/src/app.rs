@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use tokio::sync::Notify;
+
 use crate::cache::{stale_mutated, CacheLoad, SnapshotCache};
 use crate::cli::{self, CliRefreshRequest, UpstreamCliAdapter};
 use crate::clock::{duration_ms, now_rfc3339, Clock};
@@ -33,6 +35,8 @@ pub struct App {
     cache: SnapshotCache,
     settings_store: SettingsStore,
     refresh_counter: AtomicU64,
+    settings_revision: AtomicU64,
+    settings_notify: Notify,
     state: Mutex<AppState>,
 }
 
@@ -192,6 +196,8 @@ impl App {
             cache,
             settings_store,
             refresh_counter: AtomicU64::new(1),
+            settings_revision: AtomicU64::new(1),
+            settings_notify: Notify::new(),
             state: Mutex::new(AppState {
                 snapshot,
                 settings,
@@ -254,18 +260,43 @@ impl App {
 
     pub fn set_settings_patch_json(&self, patch_json: &str) -> AppResult<String> {
         let patch = parse_settings_patch(patch_json)?;
-        let mut state = self.lock_state()?;
-        let next = apply_settings_patch(state.settings.clone(), patch)?;
-        self.settings_store.store(&next)?;
-        state.settings = next;
-        let now = now_rfc3339();
-        state.diagnostics.push(diagnostic_event(
-            "settings_written",
-            "Daemon settings patch applied",
-            &now,
-            None,
-        ));
-        to_public_json(&state.settings)
+        let settings_json = {
+            let mut state = self.lock_state()?;
+            let next = apply_settings_patch(state.settings.clone(), patch)?;
+            self.settings_store.store(&next)?;
+            state.settings = next;
+            let now = now_rfc3339();
+            state.diagnostics.push(diagnostic_event(
+                "settings_written",
+                "Daemon settings patch applied",
+                &now,
+                None,
+            ));
+            to_public_json(&state.settings)?
+        };
+        self.settings_revision.fetch_add(1, Ordering::AcqRel);
+        self.settings_notify.notify_waiters();
+        Ok(settings_json)
+    }
+
+    pub fn settings_snapshot(&self) -> AppResult<Settings> {
+        let state = self.lock_state()?;
+        Ok(state.settings.clone())
+    }
+
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision.load(Ordering::Acquire)
+    }
+
+    pub async fn wait_for_settings_change(&self, observed_revision: u64) -> u64 {
+        loop {
+            let notified = self.settings_notify.notified();
+            let current = self.settings_revision();
+            if current != observed_revision {
+                return current;
+            }
+            notified.await;
+        }
     }
 
     pub fn test_browser_import_json(&self, options_json: &str) -> AppResult<String> {
@@ -452,6 +483,92 @@ impl App {
             &finished_at,
             None,
         ));
+        let snapshot_json = to_public_json(&state.snapshot)?;
+        let result_json = to_public_json(&result)?;
+        Ok(RefreshCompletion {
+            refresh_id: refresh_id.to_string(),
+            snapshot_json,
+            result_json,
+            provider_events,
+        })
+    }
+
+    pub fn fail_refresh(
+        &self,
+        refresh_id: &str,
+        diagnostic_code: &str,
+        safe_message: &str,
+    ) -> AppResult<RefreshCompletion> {
+        let finished_at = now_rfc3339();
+        let mut state = self.lock_state()?;
+        let active = state
+            .active_refresh
+            .clone()
+            .ok_or_else(AppError::internal_redacted)?;
+        if active.id != refresh_id {
+            return Err(AppError::internal_redacted());
+        }
+
+        let has_usable_snapshot = state
+            .snapshot
+            .providers
+            .iter()
+            .any(|provider| provider.state.is_usable_for_stale_cache());
+        let mut snapshot = if has_usable_snapshot {
+            stale_mutated(state.snapshot.clone(), &finished_at)
+        } else {
+            let mut snapshot = state.snapshot.clone();
+            snapshot.daemon.state = DaemonState::Error;
+            for provider in &mut snapshot.providers {
+                if provider.state == crate::model::ProviderState::Loading {
+                    provider.state = crate::model::ProviderState::Error;
+                    provider.source_adapter = SourceAdapter::None;
+                    provider.diagnostics_summary = Some(safe_message.to_string());
+                    if !provider
+                        .diagnostic_codes
+                        .iter()
+                        .any(|code| code == diagnostic_code)
+                    {
+                        provider.diagnostic_codes.push(diagnostic_code.to_string());
+                    }
+                    if let Some(status) = provider.status.as_mut() {
+                        status.indicator = Some("error".to_string());
+                        status.description = Some(safe_message.to_string());
+                        status.updated_at = Some(finished_at.clone());
+                    }
+                }
+            }
+            snapshot
+        };
+        snapshot.daemon.last_refresh_id = Some(refresh_id.to_string());
+        snapshot.daemon.last_refresh_started_at = Some(active.started_at.clone());
+        snapshot.daemon.last_refresh_finished_at = Some(finished_at.clone());
+
+        state.snapshot = snapshot;
+        state.active_refresh = None;
+        state.diagnostics.push(DiagnosticEvent {
+            code: diagnostic_code.to_string(),
+            severity: DiagnosticSeverity::Error,
+            safe_message: safe_message.to_string(),
+            timestamp: finished_at.clone(),
+            provider: None,
+            source_adapter: None,
+            recoverable: true,
+            details: Default::default(),
+            redacted: EventRedaction {
+                applied: true,
+                classes: vec!["secrets".to_string(), "identity".to_string()],
+            },
+        });
+        let result = refresh_result(
+            &state.snapshot,
+            &active,
+            &finished_at,
+            false,
+            RefreshStatus::Error,
+            vec![diagnostic_code.to_string()],
+        );
+        let provider_events = provider_events(&state.snapshot, refresh_id, &finished_at)?;
         let snapshot_json = to_public_json(&state.snapshot)?;
         let result_json = to_public_json(&result)?;
         Ok(RefreshCompletion {

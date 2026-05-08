@@ -199,9 +199,18 @@ Auto mode resolves only to the supported upstream CLI/local path in production. 
 
 Manual refresh bypasses normal interval throttling but still respects concurrency limits.
 
+The daemon scheduler starts after the D-Bus object is exported. It runs a
+startup refresh when `settings.refresh.startupRefresh` is true, then runs
+scheduled refreshes on `settings.refresh.intervalSeconds`. `SetSettingsPatch`
+wakes the scheduler so interval changes are applied without daemon restart.
+Refresh completion failures must clear the active-refresh guard and emit a
+schema-valid failed `RefreshFinished` result so a later manual Refresh can
+recover.
+
 ## GNOME compatibility rules
 
-- Target GNOME 46+.
+- Target GNOME 46+ and keep Ubuntu 26.04/GNOME 50 in metadata/runtime
+  validation for the release gate.
 - Use GNOME 45+ ESModule style.
 - Do not allocate Shell UI objects before `enable()`.
 - Destroy UI objects, disconnect signals, and remove timers in `disable()`.

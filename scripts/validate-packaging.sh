@@ -155,12 +155,14 @@ if "extension/* " in debian_install or "extension/tests" in debian_install or "t
 release_smoke = (root / "docs/release-smoke-test.md").read_text(encoding="utf-8")
 release_smoke_requirements = {
     "apt sandbox warning note": "`apt` may print a non-fatal `_apt` sandbox warning",
-    "architecture-neutral /tmp apt install command": "sudo apt install \"/tmp/codexbar-linux_0.1.0-1_${arch}.deb\"",
+    "architecture-neutral /tmp apt reinstall command": "sudo apt install --reinstall \"/tmp/codexbar-linux_0.1.0-1_${arch}.deb\"",
     "packaged daemon check": "/usr/bin/codexbar-linuxd --check",
     "system extension accepted path": "Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
     "user-local shadowing path": "Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
     "package remove gate": "sudo apt remove codexbar-linux",
     "package purge gate": "sudo apt purge codexbar-linux",
+    "local repository gate log": "--local-gate-log",
+    "saved check log marker": "saved `./scripts/check.sh` log",
     "CODEXBAR_CLI systemd user environment smoke": "CODEXBAR_CLI` in the systemd user environment",
     "recorded apt install success": "Real `sudo apt install ./dist/codexbar-linux_0.1.0-1_amd64.deb` succeeded",
     "recorded D-Bus activation pass": "D-Bus activation passed from the installed service files",
@@ -273,8 +275,12 @@ if metadata.get("uuid") != "codexbar-linux@codexbar.dev":
     raise SystemExit("extension metadata UUID must match install path")
 if metadata.get("settings-schema") != "org.gnome.shell.extensions.codexbar-linux":
     raise SystemExit("extension metadata settings schema must match packaged schema")
+if metadata.get("version") != 1:
+    raise SystemExit("extension metadata version must be 1 for the v0.1 package")
 if "46" not in metadata.get("shell-version", []):
     raise SystemExit("extension metadata must include GNOME Shell 46 support")
+if "50" not in metadata.get("shell-version", []):
+    raise SystemExit("extension metadata must include GNOME Shell 50 validation target")
 schema = ET.parse(root / "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml")
 schema_ids = {node.attrib.get("id") for node in schema.findall(".//schema")}
 if metadata.get("settings-schema") not in schema_ids:

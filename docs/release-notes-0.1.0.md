@@ -9,7 +9,8 @@ through the daemon.
 
 - Primary verified target: Ubuntu Desktop 24.04 LTS with GNOME Shell 46 on
   Wayland.
-- Ubuntu 26.04 LTS compatibility remains a release gate before final sign-off.
+- Ubuntu 26.04 LTS/GNOME 50 compatibility remains a release gate before final
+  sign-off.
 - The package architecture follows `dpkg --print-architecture`; current recorded
   smoke evidence used `amd64`.
 
@@ -24,6 +25,12 @@ through the daemon.
   capabilities.
 - Manual Refresh remains available from the Shell UI and travels through the
   daemon D-Bus API.
+- The daemon can refresh on startup, repeat on the configured interval, and
+  reschedule after daemon settings change without restarting.
+- Preferences show daemon info, refresh interval, panel provider selection, and
+  provider enable/source controls backed by `SetSettingsPatch`. The reserved
+  start-on-login control is hidden in v0.1 because daemon startup is D-Bus
+  activation based.
 - Missing or broken upstream CLI states degrade safely with setup-oriented copy
   and redacted diagnostics.
 - A configured upstream `codexbar` CLI can refresh targeted Codex usage/status
@@ -48,9 +55,12 @@ appear for project-local paths:
 ```bash
 arch="$(dpkg --print-architecture)"
 cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sudo apt install "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
 systemctl --user daemon-reload
 ```
+
+`--reinstall` keeps final smoke tied to the copied candidate artifact when the
+same package version is already installed.
 
 Enable the extension explicitly:
 
@@ -108,10 +118,12 @@ empty `prerm` maintainer script, and keeps no-browser/package guards active.
 
 - This is a development `.deb`, not a signed apt repository distribution.
 - Package upgrade testing is not complete.
-- Full Ubuntu 24.04/26.04 GNOME matrix coverage is not complete.
-- Real `sudo apt remove codexbar-linux` and optional `sudo apt purge
-  codexbar-linux` were previously tested, but must be rerun after the final
-  successful package-extension smoke before final release sign-off.
+- Full Ubuntu 24.04/26.04 GNOME matrix coverage is not complete; the final
+  matrix must explicitly record Ubuntu 26.04/GNOME 50 metadata/runtime
+  validation.
+- Real `sudo apt remove codexbar-linux` and `sudo apt purge codexbar-linux`
+  were previously tested, but both must be rerun after the final successful
+  package-extension smoke before final release sign-off.
 - Upstream CLI usage/status defaults to targeted `codex`; all-provider
   usage/status probes remain explicit because promoted Linux evidence timed out
   for all-provider usage/status.

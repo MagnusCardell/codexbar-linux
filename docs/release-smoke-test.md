@@ -7,7 +7,8 @@ a live desktop session.
 
 ## Preconditions
 
-- Ubuntu Desktop 24.04 LTS or newer with GNOME Shell 46+.
+- Ubuntu Desktop 24.04 LTS or newer with GNOME Shell 46+. Final sign-off must
+  include the Ubuntu 26.04/GNOME 50 target.
 - Current checkout passes `./scripts/validate-packaging.sh` and
   `./scripts/validate-no-browser-web-surface.sh`.
 - Do not copy raw provider output, diagnostics, cache files, screenshots, local
@@ -78,6 +79,82 @@ dpkg-deb --field dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
 dpkg-deb --contents dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
 ```
 
+The root-backed package gate can also be run as one reproducible helper:
+
+```bash
+scripts/package-root-smoke.sh --purge
+```
+
+On automation hosts where sudo credentials are already cached, add
+`--noninteractive-sudo` so missing credentials fail quickly instead of
+prompting. The equivalent environment override is
+`CODEXBAR_LINUX_PACKAGE_SMOKE_SUDO_NONINTERACTIVE=1`.
+
+```bash
+scripts/package-root-smoke.sh --purge --noninteractive-sudo
+```
+
+The helper copies the selected candidate to `/tmp`, runs `sudo -v` or
+`sudo -n -v` and `apt install --reinstall`, records checksum and
+byte-for-byte comparison sidecars for the copied candidate, verifies the
+installed daemon, D-Bus activation, system extension path, manual refresh,
+diagnostics, daemon restart, and then removes the package unless
+`--keep-installed` is passed.
+For final release evidence, run it with `--purge`; only the install/remove/purge
+path writes package-root `evidence.json` with `finalReleaseEvidence: true`.
+
+On a host without sudo, the candidate can still be copied to `/tmp` and
+inspected without installing it:
+
+```bash
+scripts/package-root-smoke.sh --stage-only
+```
+
+This staging mode verifies the package fields, checksum, byte-for-byte `/tmp`
+copy, and required package-owned paths. It writes `evidence.json` with
+`smokeType: package-stage` and `finalReleaseEvidence: false`; the final release
+validator rejects that manifest as root-backed package evidence. It is useful
+preflight evidence only and does not satisfy the final install/remove/purge
+gate.
+
+If any package smoke command fails or is interrupted before the successful end
+of the chosen mode, the helper writes `incomplete.txt` with
+`final-release-evidence: false`. A directory with `incomplete.txt` and no
+`evidence.json` is only a failure record; it is not release evidence.
+
+After final package-root and GNOME matrix smoke runs produce their
+`evidence.json` manifests, validate them from the release checkout with explicit
+paths. Do not rely on "latest" discovery. The completion audit hashes the
+current `dist/` candidate and its `/tmp` copy and requires both to match the
+package-root evidence `candidateSha256`. It also requires the package-root
+manifest `candidate` and `tmpCandidate` paths to match the current `dist/`
+artifact and `/tmp` copy, so old package evidence cannot satisfy the latest
+`.deb` gate. It reports complete only from a clean git working tree and a saved `./scripts/check.sh` log whose final success marker matches the current `HEAD`,
+so commit the final release notes and evidence references, run the repository
+gate, and then pass that log to the final audit:
+
+The final validator treats release-critical manifest booleans as evidence
+claims. Package-root evidence is rejected if install-from-`/tmp`, sudo, system
+extension path, manual refresh, diagnostics redaction, or daemon restart claims
+are false. GNOME matrix evidence is rejected if GNOME 50 metadata, extension metadata `version: 1`, enabled extension, manual refresh, diagnostics
+redaction, daemon restart, Ubuntu version, Wayland, or package-path verification
+claims are false.
+
+```bash
+mkdir -p target/release-smoke
+check_log="target/release-smoke/check-$(date -u +%Y%m%dT%H%M%SZ).log"
+./scripts/check.sh 2>&1 | tee "$check_log"
+
+scripts/validate-release-evidence.sh \
+  --package-root target/release-smoke/package-root-YYYYMMDDTHHMMSSZ/evidence.json \
+  --gnome-matrix target/release-smoke/gnome-matrix-YYYYMMDDTHHMMSSZ/evidence.json
+
+scripts/release-completion-audit.sh \
+  --package-root target/release-smoke/package-root-YYYYMMDDTHHMMSSZ/evidence.json \
+  --gnome-matrix target/release-smoke/gnome-matrix-YYYYMMDDTHHMMSSZ/evidence.json \
+  --local-gate-log "$check_log"
+```
+
 The package contents must include:
 
 - `/usr/bin/codexbar-linuxd`
@@ -93,7 +170,10 @@ project-local paths:
 ```bash
 arch="$(dpkg --print-architecture)"
 cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sudo apt install "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sha256sum "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+cmp "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sudo -v
+sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
 systemctl --user daemon-reload
 test -x /usr/bin/codexbar-linuxd
 /usr/bin/codexbar-linuxd --version
@@ -118,6 +198,10 @@ the package to `/tmp`; the project-local fallback is:
 ```bash
 sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
 ```
+
+`--reinstall` is required for final candidate smoke when the same package
+version is already installed; otherwise `apt` can leave the previously installed
+artifact in place.
 
 If the system-wide extension is not listed immediately on Wayland, log out and
 back in, then repeat `gnome-extensions list`. The package must not enable the
@@ -179,6 +263,11 @@ Pass conditions:
   current `upstream_cli` data.
 - Manual refresh, diagnostics copy, daemon stop/restart, and panel/popover
   recovery match the local install behavior.
+- `scripts/package-root-smoke.sh --purge` writes package-root `evidence.json`
+  with `finalReleaseEvidence: true`.
+- `scripts/package-root-smoke.sh --purge --noninteractive-sudo` is acceptable
+  when sudo credentials are already cached; it uses `sudo -n` and fails as
+  incomplete release evidence instead of prompting.
 - `./scripts/validate-no-browser-web-surface.sh` still passes after the package
   build and before release sign-off.
 
@@ -190,15 +279,17 @@ sudo apt remove codexbar-linux
 systemctl --user daemon-reload
 ```
 
-Optional purge gate:
+Final release purge gate:
 
 ```bash
 sudo apt purge codexbar-linux
 systemctl --user daemon-reload
 ```
 
-After removal, confirm package-owned files under `/usr/bin`, `/usr/share`, and
-`/usr/lib/systemd/user` are gone. User config/cache remains preserved unless a
+After remove and purge, confirm package-owned files under `/usr/bin`,
+`/usr/share`, and `/usr/lib/systemd/user` are gone. Final v0.1 evidence is not
+valid unless the package smoke records both `sudo apt remove` and
+`sudo apt purge` sidecar logs. User config/cache remains preserved unless a
 future explicit purge policy documents otherwise.
 
 ## Recorded Task 05C/05C.1 Candidate Result
@@ -256,7 +347,7 @@ Sanitized result:
 - Popover refresh worked.
 - Browser-cookie, browser-profile, keyring, provider web-fetch,
   browser-extension, and localhost/TCP scope remained removed.
-- Real `sudo apt remove` and optional `sudo apt purge` were previously tested
+- Real `sudo apt remove` and `sudo apt purge` were previously tested
   during package candidate validation, but were not rerun after the final
   successful package-extension smoke. They remain part of the release smoke gate
   and must be rerun before final release sign-off.
@@ -265,10 +356,14 @@ Sanitized result:
 
 Known limitations before v0.1 release sign-off:
 
-- Re-run `sudo apt remove codexbar-linux` and optional
+- Re-run `sudo apt remove codexbar-linux` and
   `sudo apt purge codexbar-linux` after the final successful package-extension
   smoke, and verify package-owned files are removed.
-- Repeat the package smoke on the full target Ubuntu 24.04/26.04 GNOME matrix.
+- Repeat the package smoke on the full target Ubuntu 24.04/26.04 GNOME matrix,
+  explicitly recording Ubuntu 26.04/GNOME 50 metadata/runtime validation.
+- Confirm the final GNOME 50 run of `scripts/gnome-matrix-smoke.sh
+  --require-shell 50 --require-ubuntu 26.04 --require-package-path
+  --require-wayland` writes `evidence.json` with `finalReleaseEvidence: true`.
 - Continue to reject any package UI smoke where
   `gnome-extensions info codexbar-linux@codexbar.dev` reports a user-local
   `~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev` path.

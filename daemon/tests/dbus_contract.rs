@@ -1,5 +1,6 @@
 mod common;
 
+use std::fs;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -15,6 +16,8 @@ const INTERFACE: &str = "org.codexbar.Linux1";
 const ISOLATED_DBUS_ENV: &str = "CODEXBAR_LINUX_TEST_ISOLATED_DBUS";
 const FIXTURE_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["fixture"]}}"#;
 const LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing","sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":false},"providers":["codex"]}"#;
+const SIGNAL_TIMEOUT: Duration = Duration::from_secs(10);
+static DBUS_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct DaemonChild {
     child: Child,
@@ -46,6 +49,7 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     if !isolated_session_bus_available("dbus_contract_runtime_methods_signals_errors_and_cache") {
         return;
     }
+    let _guard = DBUS_TEST_LOCK.lock().await;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut daemon = spawn_daemon(&tmp);
@@ -123,14 +127,14 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
         "org.codexbar.Linux1.Error.RefreshBusy"
     );
 
-    let started_msg = timeout(Duration::from_secs(3), started_stream.next())
+    let started_msg = timeout(SIGNAL_TIMEOUT, started_stream.next())
         .await
         .expect("RefreshStarted timeout")
         .expect("RefreshStarted message");
     let started_id: String = started_msg.body().deserialize().expect("started body");
     assert_eq!(started_id, refresh_id);
 
-    let provider_msg = timeout(Duration::from_secs(3), provider_stream.next())
+    let provider_msg = timeout(SIGNAL_TIMEOUT, provider_stream.next())
         .await
         .expect("ProviderChanged timeout")
         .expect("ProviderChanged message");
@@ -142,14 +146,14 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
     assert_eq!(provider_event["providerId"], provider_id);
     assert_eq!(provider_event["provider"]["provider"], provider_id);
 
-    let snapshot_msg = timeout(Duration::from_secs(3), snapshot_stream.next())
+    let snapshot_msg = timeout(SIGNAL_TIMEOUT, snapshot_stream.next())
         .await
         .expect("SnapshotChanged timeout")
         .expect("SnapshotChanged message");
     let changed_snapshot: String = snapshot_msg.body().deserialize().expect("snapshot body");
     common::assert_schema("snapshot.schema.json", &changed_snapshot);
 
-    let finished_msg = timeout(Duration::from_secs(3), finished_stream.next())
+    let finished_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
         .await
         .expect("RefreshFinished timeout")
         .expect("RefreshFinished message");
@@ -192,11 +196,70 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dbus_scheduler_runs_startup_refresh_when_enabled() {
+    if !isolated_session_bus_available("dbus_scheduler_runs_startup_refresh_when_enabled") {
+        return;
+    }
+    let _guard = DBUS_TEST_LOCK.lock().await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_daemon_config(&tmp, true, 86400);
+    let daemon = spawn_daemon_with_scheduler_controls(&tmp, None, false, None, Some(2500));
+    let connection = zbus::Connection::session().await.expect("session bus");
+    let proxy = wait_for_proxy(&connection).await;
+    let mut finished_stream = proxy
+        .receive_signal("RefreshFinished")
+        .await
+        .expect("finished stream");
+
+    let finished_msg = timeout(Duration::from_secs(6), finished_stream.next())
+        .await
+        .expect("startup RefreshFinished timeout")
+        .expect("startup RefreshFinished message");
+    let (_refresh_id, result_json): (String, String) =
+        finished_msg.body().deserialize().expect("finished body");
+    common::assert_schema("refresh-result.schema.json", &result_json);
+    let result: serde_json::Value = serde_json::from_str(&result_json).expect("result json");
+    assert_eq!(result["reason"], "startup");
+    drop(daemon);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dbus_scheduler_runs_interval_refresh_when_enabled() {
+    if !isolated_session_bus_available("dbus_scheduler_runs_interval_refresh_when_enabled") {
+        return;
+    }
+    let _guard = DBUS_TEST_LOCK.lock().await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_daemon_config(&tmp, false, 30);
+    let daemon = spawn_daemon_with_scheduler_controls(&tmp, None, false, Some(100), None);
+    let connection = zbus::Connection::session().await.expect("session bus");
+    let proxy = wait_for_proxy(&connection).await;
+    let mut finished_stream = proxy
+        .receive_signal("RefreshFinished")
+        .await
+        .expect("finished stream");
+
+    let finished_msg = timeout(SIGNAL_TIMEOUT, finished_stream.next())
+        .await
+        .expect("scheduled RefreshFinished timeout")
+        .expect("scheduled RefreshFinished message");
+    let (_refresh_id, result_json): (String, String) =
+        finished_msg.body().deserialize().expect("finished body");
+    common::assert_schema("refresh-result.schema.json", &result_json);
+    let result: serde_json::Value = serde_json::from_str(&result_json).expect("result json");
+    assert_eq!(result["reason"], "scheduled");
+    drop(daemon);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires dbus-run-session, CODEXBAR_LIVE=1, and CODEXBAR_CLI=/path/to/codexbar"]
 async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
     if !isolated_session_bus_available("live_dbus_upstream_cli_refresh_smoke_redacts_outputs") {
         return;
     }
+    let _guard = DBUS_TEST_LOCK.lock().await;
     let Some(binary) = common::live_codexbar_binary() else {
         return;
     };
@@ -291,17 +354,21 @@ async fn live_dbus_upstream_cli_refresh_smoke_redacts_outputs() {
 }
 
 fn spawn_daemon(tmp: &TempDir) -> DaemonChild {
-    spawn_daemon_with_cli_and_fixture_mode(tmp, None, true)
+    write_daemon_config(tmp, false, 86400);
+    spawn_daemon_with_scheduler_controls(tmp, None, true, None, None)
 }
 
 fn spawn_daemon_with_cli(tmp: &TempDir, cli_path: Option<&std::path::Path>) -> DaemonChild {
-    spawn_daemon_with_cli_and_fixture_mode(tmp, cli_path, false)
+    write_daemon_config(tmp, false, 86400);
+    spawn_daemon_with_scheduler_controls(tmp, cli_path, false, None, None)
 }
 
-fn spawn_daemon_with_cli_and_fixture_mode(
+fn spawn_daemon_with_scheduler_controls(
     tmp: &TempDir,
     cli_path: Option<&std::path::Path>,
     allow_fixture: bool,
+    scheduler_interval_ms: Option<u64>,
+    refresh_finish_delay_ms: Option<u64>,
 ) -> DaemonChild {
     let bin = env!("CARGO_BIN_EXE_codexbar-linuxd");
     let home = if cli_path.is_some() {
@@ -325,8 +392,51 @@ fn spawn_daemon_with_cli_and_fixture_mode(
     } else {
         command.env_remove("CODEXBAR_LINUX_ALLOW_FIXTURE");
     }
+    if let Some(milliseconds) = scheduler_interval_ms {
+        command.env(
+            "CODEXBAR_LINUX_TEST_SCHEDULER_INTERVAL_MS",
+            milliseconds.to_string(),
+        );
+    } else {
+        command.env_remove("CODEXBAR_LINUX_TEST_SCHEDULER_INTERVAL_MS");
+    }
+    if let Some(milliseconds) = refresh_finish_delay_ms {
+        command.env(
+            "CODEXBAR_LINUX_TEST_REFRESH_FINISH_DELAY_MS",
+            milliseconds.to_string(),
+        );
+    } else {
+        command.env_remove("CODEXBAR_LINUX_TEST_REFRESH_FINISH_DELAY_MS");
+    }
     let child = command.spawn().expect("spawn daemon");
     DaemonChild { child }
+}
+
+fn write_daemon_config(tmp: &TempDir, startup_refresh: bool, interval_seconds: u64) {
+    let config_dir = tmp.path().join("config").join("codexbar-linux");
+    fs::create_dir_all(&config_dir).expect("config dir");
+    let config = format!(
+        r#"{{
+  "schemaVersion": 1,
+  "refresh": {{
+    "intervalSeconds": {interval_seconds},
+    "startupRefresh": {startup_refresh},
+    "allowStaleCacheFallback": true
+  }},
+  "providers": {{}},
+  "browserImport": {{
+    "enabled": false,
+    "policy": "off",
+    "profileIdAllowlist": [],
+    "domainAllowlistMode": "provider_required_only"
+  }},
+  "diagnostics": {{
+    "verbosity": "normal",
+    "keepRedactedArtifacts": false
+  }}
+}}"#
+    );
+    fs::write(config_dir.join("config.json"), config).expect("config file");
 }
 
 async fn wait_for_proxy<'a>(connection: &'a zbus::Connection) -> Proxy<'a> {

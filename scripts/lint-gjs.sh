@@ -54,6 +54,8 @@ if not isinstance(shell_versions, list) or not shell_versions:
     raise SystemExit("metadata.json shell-version must be a non-empty list")
 if "46" not in shell_versions:
     raise SystemExit("metadata.json shell-version must include GNOME 46 support floor")
+if "50" not in shell_versions:
+    raise SystemExit("metadata.json shell-version must include GNOME 50 validation target")
 if any(not isinstance(version, str) or not version.isdigit() for version in shell_versions):
     raise SystemExit("metadata.json shell-version entries must be numeric strings")
 if not schema_path.is_file():
@@ -224,6 +226,36 @@ for needle, reason in {
 }.items():
     if needle not in state_js:
         violations.append(f"src/state.js: missing validation for {reason}")
+
+prefs_js = (root / "prefs.js").read_text(encoding="utf-8")
+schema_text = (root.parent / "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml").read_text(encoding="utf-8")
+for forbidden, reason in {
+    "start-daemon-on-login": "reserved login-start key must not be exposed in prefs UI",
+    "startDaemonOnLogin": "reserved login-start key must not be exposed in prefs UI",
+}.items():
+    if forbidden in prefs_js:
+        violations.append(f"prefs.js: {reason}")
+for needle, reason in {
+    "'GetDaemonInfo'": "display daemon info from D-Bus",
+    "'GetSnapshot'": "load selected provider state from D-Bus snapshot",
+    "'SetSettingsPatch'": "write daemon-owned settings through D-Bus",
+    "title: 'Refresh interval'": "expose refresh interval control",
+    "title: 'Upstream CLI'": "display upstream CLI availability",
+    "title: 'Providers'": "expose provider settings group",
+    "const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];": "offer supported provider source choices",
+    "preferredSourceAdapter": "write provider source through SetSettingsPatch",
+    "enabled: toggle.get_active()": "write provider enabled state through SetSettingsPatch",
+    "intervalSeconds: Math.round(spin.get_value())": "write refresh interval through SetSettingsPatch",
+}.items():
+    if needle not in prefs_js:
+        violations.append(f"prefs.js: missing prefs UX requirement to {reason}")
+for needle, reason in {
+    '<key name="start-daemon-on-login" type="b">': "retain reserved login-start schema key",
+    "Reserved for future login-start policy": "document reserved login-start policy",
+    "preferences UI hides this key": "document hidden v0.1 login-start control",
+}.items():
+    if needle not in schema_text:
+        violations.append(f"schema: missing marker to {reason}")
 
 stylesheet = (root / "stylesheet.css").read_text(encoding="utf-8")
 lower_stylesheet = stylesheet.lower()

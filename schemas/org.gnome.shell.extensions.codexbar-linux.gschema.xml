@@ -4,7 +4,7 @@
     <key name="start-daemon-on-login" type="b">
       <default>true</default>
       <summary>Start daemon on login</summary>
-      <description>Whether preferences should configure the user-scoped daemon to start on login. Task 00 does not apply systemd policy.</description>
+      <description>Reserved for future login-start policy. The v0.1 preferences UI hides this key because the package uses D-Bus activation and does not enable a login service automatically.</description>
     </key>
     <key name="panel-mode" type="s">
       <choices>

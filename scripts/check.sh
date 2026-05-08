@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/scripts/validate-schemas.sh"
 "$ROOT/scripts/validate-gsettings.sh"
 "$ROOT/scripts/validate-packaging.sh"
+"$ROOT/scripts/validate-release-gate.sh"
+"$ROOT/scripts/test-release-evidence.sh"
 "$ROOT/scripts/validate-no-browser-web-surface.sh"
 "$ROOT/scripts/test-fixtures.sh"
 "$ROOT/scripts/validate-upstream-cli-fixtures.sh"
@@ -34,3 +36,6 @@ env \
   dbus-run-session -- cargo test --manifest-path "$ROOT/daemon/Cargo.toml" dbus_contract
 
 "$ROOT/scripts/lint-gjs.sh"
+
+head="$(git -C "$ROOT" rev-parse HEAD)"
+echo "repository gate passed for HEAD $head"

@@ -7,6 +7,18 @@ development install script.
 For v0.1 release sign-off, also run the local development and Debian package
 paths in `docs/release-smoke-test.md`.
 
+For the Ubuntu 26.04/GNOME 50 package runtime gate, the command-line evidence
+helper is:
+
+```bash
+scripts/gnome-matrix-smoke.sh --require-shell 50 --require-ubuntu 26.04 --require-package-path --require-wayland --pause-for-ui
+```
+
+The helper records Ubuntu `/etc/os-release`, GNOME Shell version, session type,
+extension path, installed package metadata, extension metadata, D-Bus
+activation, manual refresh, diagnostics redaction scan, and daemon stop/restart
+evidence under `target/release-smoke/`.
+
 ## Record Environment
 
 Capture these values in the test notes:
@@ -98,7 +110,9 @@ from pathlib import Path
 metadata = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 assert metadata["uuid"] == "codexbar-linux@codexbar.dev"
 assert "46" in metadata["shell-version"]
+assert "50" in metadata["shell-version"]
 assert metadata["settings-schema"] == "org.gnome.shell.extensions.codexbar-linux"
+assert metadata["version"] == 1
 PY
 stat -c '%A %U:%G %n' "$EXT_DIR" "$EXT_DIR/metadata.json" "$EXT_DIR/extension.js"
 journalctl --user -u codexbar-linuxd.service --no-pager -n 80

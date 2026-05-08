@@ -120,8 +120,12 @@ if metadata.get("uuid") != expected_uuid:
         "Installed metadata.json uuid does not match extension directory: "
         f"{metadata.get('uuid')!r} != {expected_uuid!r}"
     )
+if metadata.get("version") != 1:
+    raise SystemExit("Installed metadata.json version must be 1 for the v0.1 package")
 if "46" not in metadata.get("shell-version", []):
     raise SystemExit("Installed metadata.json must include GNOME Shell 46 support")
+if "50" not in metadata.get("shell-version", []):
+    raise SystemExit("Installed metadata.json must include GNOME Shell 50 validation target")
 PY
 reload_user_systemd
 

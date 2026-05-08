@@ -199,8 +199,12 @@ if metadata.get("uuid") != expected_uuid:
     raise SystemExit("extension metadata UUID does not match package extension path")
 if metadata.get("settings-schema") != expected_schema:
     raise SystemExit("extension metadata settings-schema does not match packaged schema")
+if metadata.get("version") != 1:
+    raise SystemExit("extension metadata version must be 1 for the v0.1 package")
 if "46" not in metadata.get("shell-version", []):
     raise SystemExit("extension metadata must include GNOME Shell 46 support")
+if "50" not in metadata.get("shell-version", []):
+    raise SystemExit("extension metadata must include GNOME Shell 50 validation target")
 schema = ET.parse(root / "schemas" / f"{expected_schema}.gschema.xml")
 ids = {node.attrib.get("id") for node in schema.findall(".//schema")}
 if expected_schema not in ids:
