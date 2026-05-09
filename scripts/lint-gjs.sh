@@ -389,6 +389,13 @@ if any(path != "src/actions.js" for path in launch_users):
 actions_js = (root / "src/actions.js").read_text(encoding="utf-8")
 if "src/actions.js" in launch_users and ("const safe = safeUrl(url);" not in actions_js or "launch_default_for_uri(safe" not in actions_js):
     violations.append("src/actions.js: URI launches must pass through safeUrl()")
+for needle, reason in {
+    "const maybePromise = this._openSettings();": "capture the async openPreferences() result",
+    "typeof maybePromise.catch === 'function'": "catch rejected openPreferences() promises",
+    "Log.warn(error?.message ?? String(error));": "log rejected openPreferences() promises without throwing in Shell",
+}.items():
+    if needle not in actions_js:
+        violations.append(f"src/actions.js: Settings action must {reason}")
 
 if violations:
     raise SystemExit("\n".join(violations))

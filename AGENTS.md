@@ -30,8 +30,6 @@ Build `codexbar-linux`: a native Ubuntu/GNOME top-bar companion for upstream Cod
 - `spec/`: D-Bus, snapshot, settings, diagnostics schemas. Treat these as contracts.
 - `docs/`: product, architecture, security, roadmap, ADRs.
 - `tasks/`: implementation tickets intended for agents.
-- `prompts/`: repeatable dispatch and review prompts.
-- `.codex/agents/`: custom agent definitions.
 
 ## Build, lint, and test commands
 
@@ -96,15 +94,3 @@ Before implementing Task 01 or Task 03, read `docs/CONTRACTS.md`, `docs/adr/0005
 - Do not add browser-cookie, browser-profile, keyring, provider web-fetch, browser-extension, or localhost-bridge behavior without a future ADR that explicitly reverses the no-browser decision.
 - Do not implement provider-specific scraping in Shell UI. Shell UI remains D-Bus-only for product data.
 - Do not create a localhost API unless a future ADR explicitly approves it as opt-in.
-
-## Agent orchestration
-
-Use specialized agents for parallel work:
-
-- `architecture_guardian`: contract review, ADRs, architecture consistency.
-- `daemon_engineer`: Rust daemon, scheduler, cache, D-Bus server.
-- `gnome_shell_engineer`: GJS Shell extension, panel indicator, popover.
-- `packaging_ci_engineer`: Debian package, systemd user unit, CI, local install scripts.
-- `qa_security_reviewer`: threat model, redaction, tests, GNOME compatibility review.
-
-When running broad work, ask Codex to spawn agents explicitly, wait for all results, then consolidate into a single plan or patch set.

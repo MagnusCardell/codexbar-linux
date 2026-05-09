@@ -1,6 +1,7 @@
 import St from 'gi://St';
 
 import {MANUAL_REFRESH_OPTIONS, SETTINGS_KEYS} from './constants.js';
+import * as Log from './logger.js';
 import {diagnosticsCopyText} from './state.js';
 
 export class ShellActions {
@@ -57,9 +58,15 @@ export class ShellActions {
         if (!this.canOpenSettings)
             return false;
         try {
-            this._openSettings();
+            const maybePromise = this._openSettings();
+            if (maybePromise && typeof maybePromise.catch === 'function') {
+                maybePromise.catch(error => {
+                    Log.warn(error?.message ?? String(error));
+                });
+            }
             return true;
-        } catch (_error) {
+        } catch (error) {
+            Log.warn(error?.message ?? String(error));
             return false;
         }
     }
