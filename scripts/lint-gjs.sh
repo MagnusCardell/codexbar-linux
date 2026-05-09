@@ -227,6 +227,22 @@ for needle, reason in {
     if needle not in state_js:
         violations.append(f"src/state.js: missing validation for {reason}")
 
+meter_bars_js = (root / "src/meterBars.js").read_text(encoding="utf-8")
+for forbidden in ("linear-gradient", "background-image:"):
+    if forbidden in meter_bars_js:
+        violations.append(f"src/meterBars.js: meter fills must not use CSS {forbidden}")
+for needle, reason in {
+    "const fillWidth = fillWidthForPercent(fillPercent, width);": "compute a deterministic pixel fill width",
+    "const restWidth = Math.max(0, width - fillWidth);": "compute an explicit rest width",
+    "new St.BoxLayout({": "render meters as a track actor",
+    "style_class: meterFillClassNames(safeTone),": "use stable fill classes for tone styling",
+    "`background-color: ${meterColor(safeTone)}`": "set the fill color directly for GNOME Shell CSS",
+    "track.add_child(fill);": "attach an explicit fill child",
+    "track.add_child(rest);": "attach an explicit rest child",
+}.items():
+    if needle not in meter_bars_js:
+        violations.append(f"src/meterBars.js: meter rendering must {reason}")
+
 prefs_js = (root / "prefs.js").read_text(encoding="utf-8")
 schema_text = (root.parent / "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml").read_text(encoding="utf-8")
 for forbidden, reason in {

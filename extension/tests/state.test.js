@@ -30,6 +30,7 @@ import {
     panelContentClassNames,
     panelMeters,
     panelProviderItemClassNames,
+    providerMeters,
     refreshButtonLabel,
     safeUrl,
     selectProvider,
@@ -72,6 +73,7 @@ function main() {
     assertViewModelKeepsSemanticSourceSeparateFromAdapter();
     assertMeterRowsClampAndCostSummariesRender();
     assertMeterFractionsAreClampedAndProportional();
+    assertProviderMeterViewModelPreservesVisualFillFractions();
     assertMeterCssClassNamesMatchStylesheet();
     assertSnapshotRejectsSchemaDrift();
     assertFooterStatusIncludesCostCapability();
@@ -638,6 +640,14 @@ function assertMeterRowsClampAndCostSummariesRender() {
 }
 
 function assertMeterFractionsAreClampedAndProportional() {
+    const empty = meterRow({remainingPercent: 0, usedPercent: 100, label: 'Session'}, 'countdown', 0);
+    assertEqual(empty.fillPercent, 0);
+    assertEqual(empty.fillFraction, 0);
+
+    const smallRemaining = meterRow({remainingPercent: 13, usedPercent: 87, label: 'Session'}, 'countdown', 0);
+    assertEqual(smallRemaining.fillPercent, 13);
+    assertEqual(smallRemaining.fillFraction, 0.13);
+
     const highRemaining = meterRow({remainingPercent: 97, usedPercent: 3, label: 'Session'}, 'countdown', 0);
     assertEqual(highRemaining.fillPercent, 97);
     assertEqual(highRemaining.fillFraction, 0.97);
@@ -651,13 +661,53 @@ function assertMeterFractionsAreClampedAndProportional() {
     assertEqual(usedOnly.fillPercent, 75);
     assertEqual(usedOnly.fillFraction, 0.75);
 
+    const full = meterRow({remainingPercent: 100, usedPercent: 0, label: 'Session'}, 'countdown', 0);
+    assertEqual(full.fillPercent, 100);
+    assertEqual(full.fillFraction, 1);
+
+    const nullPercent = meterRow({remainingPercent: null, usedPercent: null, label: 'Session'}, 'countdown', 0);
+    assertEqual(nullPercent.fillPercent, null);
+    assertEqual(nullPercent.fillFraction, null);
+
     assertEqual(meterFillFraction({remainingPercent: 120}), 1);
     assertEqual(meterFillFraction({usedPercent: 150}), 0);
     assertEqual(meterFillFraction({remainingPercent: -4}), 0);
     assertEqual(meterFillFraction(null), null);
+    assertEqual(meterFillFractionFromPercent(0), 0);
+    assertEqual(meterFillFractionFromPercent(13), 0.13);
     assertEqual(meterFillFractionFromPercent(58), 0.58);
     assertEqual(meterFillFractionFromPercent(57), 0.57);
+    assertEqual(meterFillFractionFromPercent(65), 0.65);
+    assertEqual(meterFillFractionFromPercent(97), 0.97);
+    assertEqual(meterFillFractionFromPercent(100), 1);
+    assertEqual(meterFillFractionFromPercent(null), null);
     assertEqual(meterFillFractionFromPercent(Number.POSITIVE_INFINITY), null);
+}
+
+function assertProviderMeterViewModelPreservesVisualFillFractions() {
+    const provider = {
+        usage: {
+            primary: {remainingPercent: 13, usedPercent: 87, windowMinutes: 300, resetsAt: null, label: 'Session'},
+            secondary: {remainingPercent: 57, usedPercent: 43, windowMinutes: 10080, resetsAt: null, label: 'Weekly'},
+            tertiary: {remainingPercent: 65, usedPercent: 35, windowMinutes: 1440, resetsAt: null, label: 'Daily'},
+        },
+        credits: {
+            remaining: 97,
+            remainingPercent: 97,
+            updatedAt: '2026-05-09T00:00:00Z',
+            unit: 'credits',
+        },
+    };
+
+    const providerRows = providerMeters(provider).map(meter => meterRow(meter, 'countdown', 0));
+    assertArrayEqual(providerRows.map(row => row.label), ['Session', 'Weekly', 'Daily', 'Credits']);
+    assertArrayEqual(providerRows.map(row => row.fillPercent), [13, 57, 65, 97]);
+    assertArrayEqual(providerRows.map(row => row.fillFraction), [0.13, 0.57, 0.65, 0.97]);
+
+    const panelRows = panelMeters(provider).map(meter => meterRow(meter, 'countdown', 0));
+    assertArrayEqual(panelRows.map(row => row.label), ['Session', 'Weekly']);
+    assertArrayEqual(panelRows.map(row => row.fillPercent), [13, 57]);
+    assertArrayEqual(panelRows.map(row => row.fillFraction), [0.13, 0.57]);
 }
 
 function assertMeterCssClassNamesMatchStylesheet() {
