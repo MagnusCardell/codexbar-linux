@@ -63,6 +63,7 @@ function main() {
     assertEmptyProviderSnapshotShowsNoProviderCopy();
     assertViewModelBuildsProviderStripAndSelectedSurface();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
+    assertSecondaryActionsRemainFooterUtilities();
     assertStaleCacheCopyIsCalm();
     assertProviderFailureCopyIsSetupOriented();
     assertNormalUiLabelsRejectRawOperationalCopy();
@@ -395,6 +396,23 @@ function assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels() {
         view.selectedRow.usageSections.map(section => section.title),
         ['Session', 'Weekly', 'Credits'],
     );
+}
+
+function assertSecondaryActionsRemainFooterUtilities() {
+    const providerCard = readText('extension/src/providerCard.js');
+    const diagnosticsView = readText('extension/src/diagnosticsView.js');
+    const popover = readText('extension/src/popover.js');
+    const stylesheet = readText('extension/stylesheet.css');
+
+    assert(providerCard.includes('export function createSecondaryActionRow'), 'secondary actions should be exported as a footer utility row');
+    assert(popover.includes('createSecondaryActionRow(view, this._actions)'), 'secondary actions should render from the popover footer');
+    assert(!providerCard.includes('createActionSection'), 'secondary actions should not render as a primary provider action section');
+    assert(providerCard.includes("actionButton('Settings', () => actions.openSettings(), {utility: true})"), 'Settings should remain available as a utility action');
+    assert(diagnosticsView.includes("actionButton('Load diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId), {utility: true})"), 'Load diagnostics should remain available as a utility action');
+    assert(diagnosticsView.includes("actionButton('Copy diagnostics', () => actions.copyDiagnostics(activeDiagnostics.payload), {utility: true})"), 'Copy diagnostics should remain available as a utility action after diagnostics load');
+    assert(/\.codexbar-button-utility\s*\{[\s\S]*?font-size:\s*0\.78em;/.test(stylesheet), 'utility buttons should use smaller text');
+    assert(/\.codexbar-button-utility\s*\{[\s\S]*?color:\s*rgba\(240, 240, 240, 0\.60\);/.test(stylesheet), 'utility buttons should use muted text');
+    assert(/\.codexbar-utility-action-row\s*\{[\s\S]*?spacing:\s*4px;/.test(stylesheet), 'utility actions should remain compact');
 }
 
 function assertStaleCacheCopyIsCalm() {

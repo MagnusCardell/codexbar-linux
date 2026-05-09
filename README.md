@@ -24,11 +24,18 @@ Primary target:
 - Wayland-first desktop sessions
 - `systemd --user` and D-Bus session activation
 
+Release gates before v0.1.0 final:
+
+- Ubuntu 26.04 LTS/GNOME 50 compatibility as a release gate.
+- Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
+- Historical root-backed package install smoke evidence remains tracked for
+  release audit context.
+
 ## What You Get
 
 - A native GNOME top-bar indicator.
 - A popover with provider cards, usage meters, stale/error states, daemon info,
-  diagnostics, and manual refresh.
+  manual refresh, and compact diagnostics utilities.
 - Preferences for panel mode, refresh interval, provider visibility, and
   provider source settings.
 - A user daemon, `codexbar-linuxd`, activated through the D-Bus session service
@@ -36,6 +43,13 @@ Primary target:
 - Normalized local cache for fast startup and stale rendering.
 - Upstream `codexbar` CLI integration for Linux-supported CLI/API/local provider
   data and local cost summaries.
+
+## Screenshot Guidance
+
+README screenshots should show the default popover with diagnostics collapsed.
+Frame the provider selector, Session, Weekly, Credits, Cost, and Refresh as the
+primary product surface; keep Load diagnostics and Settings as small footer
+utilities, and do not use expanded diagnostics as the hero state.
 
 ## Requirements
 

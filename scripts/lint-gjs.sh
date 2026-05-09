@@ -344,11 +344,13 @@ for selector in (
     ".codexbar-severity-error",
     ".codexbar-usage-sections",
     ".codexbar-usage-section",
-    ".codexbar-action-section",
     ".codexbar-cost-section",
     ".codexbar-cost-row",
     ".codexbar-cost-label",
     ".codexbar-cost-value",
+    ".codexbar-button-utility",
+    ".codexbar-utility-action-row",
+    ".codexbar-utility-separator",
     ".codexbar-meter-fill",
     ".codexbar-meter-fill-ok",
     ".codexbar-meter-fill-warning",
@@ -367,7 +369,6 @@ for selector in (
     ".codexbar-diagnostic-detail",
     ".codexbar-diagnostic-line",
     ".codexbar-section-header",
-    ".codexbar-action-row",
     ".codexbar-menu-item",
 ):
     if selector not in stylesheet:

@@ -58,14 +58,14 @@ export function createDiagnosticsActionRow(diagnostics, actions, providerId = 'g
 
 export function createDiagnosticsButton(diagnostics, actions, providerId = 'global') {
     const diagnosticsProviderId = providerId || 'global';
-    return actionButton('Load diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId));
+    return actionButton('Load diagnostics', () => actions.loadDiagnostics(diagnosticsProviderId), {utility: true});
 }
 
 export function createDiagnosticsCopyButton(diagnostics, actions, providerId = 'global') {
     const activeDiagnostics = activeDiagnosticsForProvider(diagnostics, providerId);
     if (!activeDiagnostics?.payload)
         return null;
-    return actionButton('Copy diagnostics', () => actions.copyDiagnostics(activeDiagnostics.payload));
+    return actionButton('Copy diagnostics', () => actions.copyDiagnostics(activeDiagnostics.payload), {utility: true});
 }
 
 export function createDiagnosticsDetails(diagnostics, providerId = 'global') {
@@ -105,10 +105,10 @@ function activeDiagnosticsForProvider(diagnostics, providerId = 'global') {
     return diagnostics?.providerId === diagnosticsProviderId ? diagnostics : null;
 }
 
-function actionButton(label, callback) {
+function actionButton(label, callback, {utility = false} = {}) {
     const button = new St.Button({
         label,
-        style_class: 'codexbar-button codexbar-button-secondary',
+        style_class: `codexbar-button codexbar-button-secondary${utility ? ' codexbar-button-utility' : ''}`,
         can_focus: true,
         reactive: true,
         track_hover: true,

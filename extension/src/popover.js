@@ -3,6 +3,7 @@ import St from 'gi://St';
 import {
     createDivider,
     createProviderStrip,
+    createSecondaryActionRow,
     createSelectedProviderSurface,
 } from './providerCard.js';
 
@@ -32,9 +33,11 @@ export class CodexbarPopover {
 
     _footer(view) {
         const footer = new St.BoxLayout({
+            vertical: true,
             style_class: 'codexbar-footer',
             x_expand: true,
         });
+        footer.add_child(createSecondaryActionRow(view, this._actions));
         footer.add_child(new St.Label({
             text: view.footerStatus || 'Daemon status unavailable',
             style_class: 'codexbar-muted codexbar-small',

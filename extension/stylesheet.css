@@ -176,7 +176,6 @@
 
 .codexbar-selected-provider-heading,
 .codexbar-section-header,
-.codexbar-action-row,
 .codexbar-cost-row {
   spacing: 8px;
 }
@@ -263,7 +262,6 @@
   spacing: 14px;
 }
 
-.codexbar-action-section,
 .codexbar-provider-meters,
 .codexbar-cost-section {
   spacing: 7px;
@@ -292,10 +290,6 @@
 .codexbar-meter-detail-right {
   max-width: 140px;
   color: #a8adb5;
-}
-
-.codexbar-action-row {
-  spacing: 2px;
 }
 
 .codexbar-button {
@@ -329,6 +323,30 @@
 
 .codexbar-button-secondary {
   color: rgba(240, 240, 240, 0.86);
+}
+
+.codexbar-button-utility {
+  padding: 1px 2px;
+  border-radius: 4px;
+  color: rgba(240, 240, 240, 0.60);
+  font-size: 0.78em;
+  background-color: transparent;
+}
+
+.codexbar-button-utility:hover,
+.codexbar-button-utility:focus {
+  color: rgba(240, 240, 240, 0.88);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.codexbar-utility-action-row {
+  spacing: 4px;
+}
+
+.codexbar-utility-separator {
+  padding: 1px 0;
+  color: rgba(168, 173, 181, 0.46);
+  font-size: 0.78em;
 }
 
 .codexbar-menu-item {
@@ -432,7 +450,7 @@
 
 .codexbar-footer {
   padding: 0 1px;
-  spacing: 1px;
+  spacing: 3px;
   color: rgba(168, 173, 181, 0.78);
 }
 

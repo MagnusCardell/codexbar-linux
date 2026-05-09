@@ -58,9 +58,6 @@ export function createSelectedProviderSurface(row, view, actions) {
         surface.add_child(createCostSection(costRows));
     }
 
-    surface.add_child(createDivider());
-    surface.add_child(createActionSection(row, view, actions));
-
     return surface;
 }
 
@@ -185,29 +182,6 @@ function createUsageMeterSection(usageSection) {
     return box;
 }
 
-function createActionSection(row, view, actions) {
-    const section = new St.BoxLayout({
-        vertical: true,
-        style_class: 'codexbar-action-section',
-        x_expand: true,
-    });
-
-    const buttons = new St.BoxLayout({
-        vertical: true,
-        style_class: 'codexbar-action-row',
-        x_expand: true,
-    });
-    buttons.add_child(createDiagnosticsButton(view.diagnostics, actions, view.selectedProviderId));
-    const copyButton = createDiagnosticsCopyButton(view.diagnostics, actions, view.selectedProviderId);
-    if (copyButton)
-        buttons.add_child(copyButton);
-    if (actions?.canOpenSettings)
-        buttons.add_child(actionButton('Settings', () => actions.openSettings()));
-    section.add_child(buttons);
-
-    return section;
-}
-
 function createCostSection(costRows) {
     const box = new St.BoxLayout({
         vertical: true,
@@ -247,10 +221,40 @@ function sectionTitle(text) {
     return header;
 }
 
-function actionButton(label, callback, {primary = false, reactive = true} = {}) {
+export function createSecondaryActionRow(view, actions) {
+    const row = new St.BoxLayout({
+        style_class: 'codexbar-utility-action-row',
+        x_expand: true,
+    });
+    const buttons = [
+        createDiagnosticsButton(view.diagnostics, actions, view.selectedProviderId),
+    ];
+    const copyButton = createDiagnosticsCopyButton(view.diagnostics, actions, view.selectedProviderId);
+    if (copyButton)
+        buttons.push(copyButton);
+    if (actions?.canOpenSettings)
+        buttons.push(actionButton('Settings', () => actions.openSettings(), {utility: true}));
+
+    for (const button of buttons) {
+        if (row.get_n_children() > 0)
+            row.add_child(utilitySeparator());
+        row.add_child(button);
+    }
+
+    return row;
+}
+
+function utilitySeparator() {
+    return new St.Label({
+        text: '·',
+        style_class: 'codexbar-utility-separator',
+    });
+}
+
+function actionButton(label, callback, {primary = false, reactive = true, utility = false} = {}) {
     const button = new St.Button({
         label,
-        style_class: `codexbar-button ${primary ? 'codexbar-button-primary' : 'codexbar-button-secondary'}`,
+        style_class: `codexbar-button ${primary ? 'codexbar-button-primary' : 'codexbar-button-secondary'}${utility ? ' codexbar-button-utility' : ''}`,
         can_focus: true,
         reactive,
         track_hover: true,
