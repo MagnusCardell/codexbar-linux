@@ -31,6 +31,14 @@ Release gates before v0.1.0 final:
 - Historical root-backed package install smoke evidence remains tracked for
   release audit context.
 
+## What It Looks Like
+
+![CodexBar GNOME popover](docs/screenshots/main_popover.png)
+
+| Settings: daemon and refresh | Settings: providers |
+|---|---|
+| ![Settings daemon and refresh](docs/screenshots/settings1.png) | ![Settings providers](docs/screenshots/settings2.png) |
+
 ## What You Get
 
 - A native GNOME top-bar indicator.
@@ -43,13 +51,6 @@ Release gates before v0.1.0 final:
 - Normalized local cache for fast startup and stale rendering.
 - Upstream `codexbar` CLI integration for Linux-supported CLI/API/local provider
   data and local cost summaries.
-
-## Screenshot Guidance
-
-README screenshots should show the default popover with diagnostics collapsed.
-Frame the provider selector, Session, Weekly, Credits, Cost, and Refresh as the
-primary product surface; keep Load diagnostics and Settings as small footer
-utilities, and do not use expanded diagnostics as the hero state.
 
 ## Requirements
 
