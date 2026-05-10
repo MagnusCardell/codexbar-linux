@@ -569,6 +569,7 @@ export function normalizeViewState(state, options = {}) {
         ?? state?.daemonSettings
         ?? DEFAULT_DAEMON_SETTINGS;
     const viewProviders = providersForSettings(snapshot, daemonSettings);
+    const noProvidersEnabled = !hasRefreshEnabledProviders(daemonSettings);
     const selectedProvider = selectProvider({
         ...snapshot,
         providers: viewProviders,
@@ -576,7 +577,9 @@ export function normalizeViewState(state, options = {}) {
     const providerRows = viewProviders
         .map(provider => providerRow(provider, uiOptions));
     const selectedRow = selectedProvider ? providerRow(selectedProvider, uiOptions) : null;
-    const viewState = state?.clientState ?? deriveSnapshotState(snapshot);
+    const viewState = noProvidersEnabled
+        ? 'no_providers'
+        : (state?.clientState ?? deriveSnapshotState(snapshot));
     const viewMeta = stateMeta(viewState);
     const providerSelectorRows = providerRows
         .map(row => providerSelectorRow(row, selectedRow?.providerId ?? ''));
@@ -624,11 +627,11 @@ function providersForSettings(snapshot, daemonSettings = DEFAULT_DAEMON_SETTINGS
         const configured = settingsForProvider(daemonSettings, effectiveProviders, providerInfo.id);
         const snapshotProvider = snapshotProviders.find(provider => provider?.provider === providerInfo.id);
         if (snapshotProvider) {
-            rows.push(configured.enabled === false
+            rows.push(!providerRefreshEnabled(configured)
                 ? disabledSnapshotProvider(snapshotProvider)
                 : snapshotProvider);
         } else {
-            rows.push(configured.enabled === false
+            rows.push(!providerRefreshEnabled(configured)
                 ? disabledProvider(providerInfo)
                 : pendingProvider(providerInfo));
         }
@@ -641,6 +644,20 @@ function providersForSettings(snapshot, daemonSettings = DEFAULT_DAEMON_SETTINGS
     }
 
     return rows;
+}
+
+function hasRefreshEnabledProviders(daemonSettings) {
+    const effectiveProviders = effectiveProviderSettings(daemonSettings);
+    return settingsProviderInfos(daemonSettings)
+        .some(providerInfo => providerRefreshEnabled(
+            settingsForProvider(daemonSettings, effectiveProviders, providerInfo.id)
+        ));
+}
+
+function providerRefreshEnabled(settings) {
+    return settings?.enabled !== false
+        && settings?.allowCliFallback !== false
+        && settings?.preferredSourceAdapter !== 'off';
 }
 
 function settingsProviderInfos(daemonSettings) {

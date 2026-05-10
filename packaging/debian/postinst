@@ -9,16 +9,10 @@ compile_gsettings_schemas() {
     fi
 }
 
-reload_user_systemd_if_available() {
-    if command -v systemctl >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-        systemctl --user daemon-reload >/dev/null 2>&1 || true
-    fi
-}
-
 case "$1" in
     configure)
         compile_gsettings_schemas
-        reload_user_systemd_if_available
+        echo "codexbar-linux: run codexbar-linux-setup as the desktop user to verify D-Bus activation and enable the GNOME extension." >&2
         ;;
 esac
 

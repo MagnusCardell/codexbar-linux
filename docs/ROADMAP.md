@@ -87,6 +87,13 @@ reserved `start-daemon-on-login` key for v0.1 and expose daemon info, refresh
 interval, panel provider selection, and provider enable/source controls backed
 by daemon `SetSettingsPatch` writes.
 
+Task 05L status: first-install activation is assisted by the package-installed
+`codexbar-linux-setup` helper. Package maintainer scripts remain root-scoped and
+do not enable extensions or edit user homes; the user helper reloads the target
+user systemd manager, checks the daemon and D-Bus activation, detects user-local
+extension shadowing, and enables the extension only when GNOME Shell already
+discovers it. Codex and Claude are enabled by default through daemon settings.
+
 Exit criteria:
 
 - `.deb` installs daemon, service, extension, schema.

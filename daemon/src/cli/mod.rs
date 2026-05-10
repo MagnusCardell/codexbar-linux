@@ -19,6 +19,7 @@ use crate::model::{
     CostItem, CostSummary, Credits, DaemonState, DiagnosticEvent, DiagnosticSeverity,
     EventRedaction, Identity, Meter, Provider, ProviderState, ProviderStatus, SemanticSource,
     Settings, Snapshot, SnapshotDaemon, SourceAdapter, UpstreamCliInfo, Usage,
+    DEFAULT_PROVIDER_IDS,
 };
 use crate::paths::AppPaths;
 use crate::redact;
@@ -487,10 +488,13 @@ pub fn target_providers(settings: &Settings, requested: &[String]) -> Vec<String
     }
 
     if settings.providers.is_empty() {
-        return vec![DEFAULT_PROVIDER.to_string()];
+        return DEFAULT_PROVIDER_IDS
+            .iter()
+            .map(|provider| (*provider).to_string())
+            .collect();
     }
 
-    let configured = settings
+    let mut configured = settings
         .providers
         .iter()
         .filter(|(_provider, settings)| {
@@ -499,8 +503,15 @@ pub fn target_providers(settings: &Settings, requested: &[String]) -> Vec<String
                 && settings.preferred_source_adapter != crate::model::PreferredSourceAdapter::Off
         })
         .map(|(provider, _settings)| provider.clone())
-        .collect::<Vec<_>>();
-    sanitize_provider_targets_without_default(&configured)
+        .collect::<BTreeSet<_>>();
+    let mut ordered = Vec::new();
+    for provider in DEFAULT_PROVIDER_IDS {
+        if configured.remove(provider) {
+            ordered.push(provider.to_string());
+        }
+    }
+    ordered.extend(configured);
+    sanitize_provider_targets_without_default(&ordered)
 }
 
 fn sanitize_provider_targets(values: &[String]) -> Vec<String> {

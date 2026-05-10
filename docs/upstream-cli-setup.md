@@ -54,12 +54,21 @@ discovers the upstream CLI executable through `CODEXBAR_CLI` or its service
 environment `PATH`; provider authentication and provider-specific config remain
 owned by upstream CodexBar and the provider CLIs.
 
-When the `.deb` package is installed, set the CLI path in the systemd user
-manager environment and restart the user service:
+When the `.deb` package is installed, run the user setup helper from the desktop
+session. It reloads the user systemd manager, verifies daemon and D-Bus
+activation, and enables the GNOME extension when the running Shell already
+discovers it:
 
 ```bash
-systemctl --user set-environment CODEXBAR_CLI=/path/to/codexbar
-systemctl --user restart codexbar-linuxd.service
+codexbar-linux-setup
+```
+
+If the upstream CLI is not on the daemon's service `PATH`, pass an absolute path
+to the same helper. This sets the path in the systemd user manager environment
+and restarts the user service:
+
+```bash
+codexbar-linux-setup --codexbar-cli /path/to/codexbar
 ```
 
 Confirm D-Bus activation can see the configured daemon:

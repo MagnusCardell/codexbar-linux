@@ -239,6 +239,7 @@ grep -Fx "Version: $DEFAULT_VERSION" "$EVIDENCE_DIR/candidate-fields.txt" >/dev/
 grep -Fx "Architecture: $arch" "$EVIDENCE_DIR/candidate-fields.txt" >/dev/null
 for package_path in \
   "usr/bin/codexbar-linuxd" \
+  "usr/bin/codexbar-linux-setup" \
   "usr/share/dbus-1/services/org.codexbar.Linux1.service" \
   "usr/lib/systemd/user/codexbar-linuxd.service" \
   "usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml" \
@@ -302,6 +303,7 @@ grep -Fx "$PACKAGE_NAME	$DEFAULT_VERSION	$arch" "$EVIDENCE_DIR/installed-dpkg-qu
 run_captured "systemd-user-daemon-reload-after-install" systemctl --user daemon-reload
 
 assert_file /usr/bin/codexbar-linuxd
+assert_file /usr/bin/codexbar-linux-setup
 assert_file /usr/share/dbus-1/services/org.codexbar.Linux1.service
 assert_file /usr/lib/systemd/user/codexbar-linuxd.service
 assert_dir /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
@@ -311,6 +313,7 @@ assert_file /usr/share/man/man1/codexbar-linuxd.1.gz
 run_captured "installed-daemon-version" /usr/bin/codexbar-linuxd --version
 grep -Fx "codexbar-linuxd 0.1.0" "$EVIDENCE_DIR/installed-daemon-version.txt" >/dev/null
 run_captured "installed-daemon-check" /usr/bin/codexbar-linuxd --check
+run_captured "installed-setup-helper" /usr/bin/codexbar-linux-setup --dry-run --no-daemon-reload --codexbar-cli /tmp/codexbar
 run_captured "installed-dbus-service" grep -Fx "Exec=/usr/bin/codexbar-linuxd" /usr/share/dbus-1/services/org.codexbar.Linux1.service
 run_captured "installed-systemd-user-service" grep -Fx "ExecStart=/usr/bin/codexbar-linuxd" /usr/lib/systemd/user/codexbar-linuxd.service
 run_captured "daemon-info" busctl --user call "$DBUS_NAME" "$DBUS_PATH" "$DBUS_INTERFACE" GetDaemonInfo
@@ -325,7 +328,7 @@ grep -Ex "[[:space:]]*Path: /usr/share/gnome-shell/extensions/$EXTENSION_UUID" "
 
 run_captured "manual-refresh" \
   busctl --user call "$DBUS_NAME" "$DBUS_PATH" "$DBUS_INTERFACE" Refresh s \
-  '{"schemaVersion":1,"reason":"manual","force":true,"providers":["codex"],"busyBehavior":"return_existing"}'
+  '{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing"}'
 run_captured "global-diagnostics" \
   busctl --user call "$DBUS_NAME" "$DBUS_PATH" "$DBUS_INTERFACE" GetDiagnostics s global
 python3 - "$EVIDENCE_DIR/global-diagnostics.txt" <<'PY' >"$EVIDENCE_DIR/diagnostics-redaction-scan.txt"
@@ -372,12 +375,14 @@ else
   run_logged "apt-remove" "${sudo_args[@]}" apt remove -y "$PACKAGE_NAME"
   run_captured "systemd-user-daemon-reload-after-remove" systemctl --user daemon-reload
   run_captured "removed-daemon-absent" test ! -e /usr/bin/codexbar-linuxd
+  run_captured "removed-setup-helper-absent" test ! -e /usr/bin/codexbar-linux-setup
   run_captured "removed-dbus-service-absent" test ! -e /usr/share/dbus-1/services/org.codexbar.Linux1.service
   run_captured "removed-systemd-user-service-absent" test ! -e /usr/lib/systemd/user/codexbar-linuxd.service
   run_captured "removed-extension-dir-absent" test ! -e /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
   run_captured "removed-gsettings-schema-absent" test ! -e /usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml
   run_captured "removed-manpage-absent" test ! -e /usr/share/man/man1/codexbar-linuxd.1.gz
   assert_absent /usr/bin/codexbar-linuxd
+  assert_absent /usr/bin/codexbar-linux-setup
   assert_absent /usr/share/dbus-1/services/org.codexbar.Linux1.service
   assert_absent /usr/lib/systemd/user/codexbar-linuxd.service
   assert_absent /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev

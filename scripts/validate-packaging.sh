@@ -4,9 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 python3 - "$ROOT" <<'PY'
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 root = Path(sys.argv[1])
@@ -24,6 +26,7 @@ required = [
     "packaging/man/codexbar-linuxd.1",
     "scripts/install-local.sh",
     "scripts/uninstall-local.sh",
+    "scripts/codexbar-linux-setup",
     "scripts/build-deb.sh",
     "schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml",
     "extension/metadata.json",
@@ -128,9 +131,32 @@ for description, needle in local_uninstall_requirements.items():
     if needle not in uninstall_local:
         raise SystemExit(f"uninstall-local.sh missing {description}: {needle}")
 
+setup_helper = (root / "scripts/codexbar-linux-setup").read_text(encoding="utf-8")
+setup_requirements = {
+    "current-user root guard": "run this helper as the desktop user, not with sudo",
+    "user daemon reload": "systemctl --user daemon-reload",
+    "explicit CODEXBAR_CLI option": "--codexbar-cli",
+    "daemon binary check": "/usr/bin/codexbar-linuxd",
+    "D-Bus activation check": "busctl --user call",
+    "GNOME enable attempt": 'gnome-extensions enable "$EXTENSION_UUID"',
+    "GNOME activation copy": "GNOME activation is explicit user action",
+    "user-local shadowing detection": "user-local extension may shadow the package",
+    "package extension path": "Expected package extension path:",
+}
+for description, needle in setup_requirements.items():
+    if needle not in setup_helper:
+        raise SystemExit(f"codexbar-linux-setup missing {description}: {needle}")
+if "gsettings set org.gnome.shell enabled-extensions" in setup_helper:
+    raise SystemExit("codexbar-linux-setup must not write enabled-extensions through gsettings")
+if "sudo " in setup_helper:
+    raise SystemExit("codexbar-linux-setup must not ask the user to run sudo")
+if "mktemp" in setup_helper or "config.json" in setup_helper or "SetSettingsPatch" in setup_helper:
+    raise SystemExit("codexbar-linux-setup must not write daemon config directly")
+
 debian_install = (root / "packaging/debian/install").read_text(encoding="utf-8")
 expected_install_entries = [
     "daemon/target/release/codexbar-linuxd usr/bin/",
+    "scripts/codexbar-linux-setup usr/bin/",
     "packaging/dbus/org.codexbar.Linux1.service usr/share/dbus-1/services/",
     "packaging/systemd/codexbar-linuxd.service usr/lib/systemd/user/",
     "extension/metadata.json usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/",
@@ -163,6 +189,7 @@ release_smoke_requirements = {
     "package purge gate": "sudo apt purge codexbar-linux",
     "local repository gate log": "--local-gate-log",
     "saved check log marker": "saved `./scripts/check.sh` log",
+    "package setup helper": "codexbar-linux-setup",
     "CODEXBAR_CLI systemd user environment smoke": "CODEXBAR_CLI` in the systemd user environment",
     "recorded apt install success": "Real `sudo apt install ./dist/codexbar-linux_0.1.0-1_amd64.deb` succeeded",
     "recorded D-Bus activation pass": "D-Bus activation passed from the installed service files",
@@ -235,6 +262,24 @@ for rel in maintainer_scripts:
             raise SystemExit(f"{rel}:{line_no} must not operate on the system systemd manager")
     if "systemctl --user enable" in text or "systemctl --user start" in text:
         raise SystemExit(f"{rel} must not enable or start the user daemon automatically")
+    forbidden_user_home_markers = (
+        "$HOME",
+        "${HOME",
+        "/home/",
+        "~/",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "chown",
+        "runuser",
+        "sudo -u",
+        "su -",
+        "loginctl",
+        "/etc/skel",
+    )
+    for forbidden in forbidden_user_home_markers:
+        if forbidden in text:
+            raise SystemExit(f"{rel} must not modify arbitrary user home state: {forbidden}")
     for forbidden in ("browser", "cookie", "keyring", "localhost", "TcpListener", "reqwest"):
         if forbidden.lower() in text.lower():
             raise SystemExit(f"{rel} contains forbidden packaging-scope marker: {forbidden}")
@@ -242,13 +287,15 @@ if "glib-compile-schemas" not in (root / "packaging/debian/postinst").read_text(
     raise SystemExit("postinst must compile GSettings schemas when possible")
 if "glib-compile-schemas" not in (root / "packaging/debian/postrm").read_text(encoding="utf-8"):
     raise SystemExit("postrm must recompile GSettings schemas when possible")
-if "systemctl --user daemon-reload" not in (root / "packaging/debian/postinst").read_text(encoding="utf-8"):
-    raise SystemExit("postinst must tolerate user systemd daemon-reload when a user session exists")
-if "systemctl --user daemon-reload" not in (root / "packaging/debian/postrm").read_text(encoding="utf-8"):
-    raise SystemExit("postrm must tolerate user systemd daemon-reload when a user session exists")
+if "systemctl --user" in (root / "packaging/debian/postinst").read_text(encoding="utf-8"):
+    raise SystemExit("postinst must leave user-session daemon reload to codexbar-linux-setup")
+if "systemctl --user" in (root / "packaging/debian/postrm").read_text(encoding="utf-8"):
+    raise SystemExit("postrm must leave user-session daemon reload to codexbar-linux-setup")
 for rel in maintainer_scripts:
     if (root / rel).stat().st_mode & 0o111 == 0:
         raise SystemExit(f"{rel} must be executable in git/package staging")
+if (root / "scripts/codexbar-linux-setup").stat().st_mode & 0o111 == 0:
+    raise SystemExit("scripts/codexbar-linux-setup must be executable")
 
 man_page = (root / "packaging/man/codexbar-linuxd.1").read_text(encoding="utf-8")
 for needle in (
@@ -322,6 +369,7 @@ if "Task 08 packaging not implemented" in build_deb or "not implemented" in buil
     raise SystemExit("build-deb.sh must implement the v0.1 development package target")
 for needle in [
     "env RUSTFLAGS=\"$RELEASE_RUSTFLAGS\" cargo build --manifest-path \"$ROOT/daemon/Cargo.toml\" --release --locked",
+    "require_file \"scripts/codexbar-linux-setup\"",
     "--remap-path-prefix=$ROOT=codexbar-linux",
     "--remap-path-prefix=$HOME=home",
     "dpkg-deb --root-owner-group --build",
@@ -333,6 +381,7 @@ for needle in [
     "usr/share/gnome-shell/extensions/$EXTENSION_UUID",
     "usr/share/glib-2.0/schemas/$SCHEMA_ID.gschema.xml",
     "usr/share/man/man1/codexbar-linuxd.1.gz",
+    "usr/bin/codexbar-linux-setup",
     "usr/share/dbus-1/services/org.codexbar.Linux1.service",
     "usr/lib/systemd/user/codexbar-linuxd.service",
     "--check",
@@ -350,10 +399,34 @@ if completed.returncode != 0:
 if "package inputs valid" not in completed.stdout:
     raise SystemExit("build-deb.sh --check must report valid package inputs")
 
-for rel in ("scripts/install-local.sh", "scripts/uninstall-local.sh", "scripts/build-deb.sh"):
+for rel in ("scripts/install-local.sh", "scripts/uninstall-local.sh", "scripts/codexbar-linux-setup", "scripts/build-deb.sh"):
     completed = subprocess.run(["bash", "-n", str(root / rel)], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if completed.returncode != 0:
         raise SystemExit(f"{rel} failed bash -n:\n{completed.stderr}")
+setup_env = os.environ.copy()
+with tempfile.TemporaryDirectory(prefix="codexbar-setup-check.") as setup_home:
+    setup_home_path = Path(setup_home)
+    setup_env["XDG_CONFIG_HOME"] = str(setup_home_path / "config")
+    setup_env["XDG_DATA_HOME"] = str(setup_home_path / "data")
+    completed = subprocess.run(
+        [str(root / "scripts/codexbar-linux-setup"), "--dry-run", "--codexbar-cli", "/tmp/codexbar"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=setup_env,
+    )
+if completed.returncode != 0:
+    raise SystemExit(f"codexbar-linux-setup --dry-run failed:\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}")
+for needle in (
+    "DRY RUN: systemctl --user daemon-reload",
+    "DRY RUN: /usr/bin/codexbar-linuxd --check",
+    "DRY RUN: busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 GetDaemonInfo",
+    "Default daemon providers: codex and claude via upstream_cli",
+    "DRY RUN: gnome-extensions enable codexbar-linux@codexbar.dev",
+):
+    if needle not in completed.stdout:
+        raise SystemExit(f"codexbar-linux-setup --dry-run missing expected output: {needle}")
 for rel in maintainer_scripts:
     completed = subprocess.run(["sh", "-n", str(root / rel)], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if completed.returncode != 0:

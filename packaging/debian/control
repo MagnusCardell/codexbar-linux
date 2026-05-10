@@ -12,5 +12,6 @@ Depends: ${misc:Depends}, ${shlibs:Depends}, dbus-user-session | dbus-session-bu
 Description: Native GNOME companion for upstream CodexBar usage snapshots
  CodexBar GNOME installs a user-scoped Rust daemon, D-Bus session
  activation, a systemd user unit, GSettings schema, and GNOME Shell extension
- assets for the upstream-CLI-only CodexBar data path. It does not enable the
- extension automatically.
+ assets for the upstream-CLI-only CodexBar data path. It includes a user-run
+ setup helper for activation checks and does not enable the extension
+ automatically.

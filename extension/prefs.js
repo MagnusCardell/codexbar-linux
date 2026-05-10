@@ -15,6 +15,7 @@ import {
     THEMES,
 } from './src/constants.js';
 import {
+    DEFAULT_DAEMON_SETTINGS,
     SUPPORTED_PROVIDERS,
     buildProviderSettingsPatch,
     effectiveProviderSettings,
@@ -33,26 +34,6 @@ const SOURCE_TITLES = ['Automatic', 'Upstream CLI', 'Off'];
 const REFRESH_INTERVAL_VALUES = [0, 60, 120, 300, 900, 1800];
 const REFRESH_INTERVAL_TITLES = ['Manual', '1m', '2m', '5m', '15m', '30m'];
 const REFRESH_INTERVAL_CUSTOM_INDEX = REFRESH_INTERVAL_VALUES.length;
-const DEFAULT_DAEMON_SETTINGS = {
-    schemaVersion: 1,
-    refresh: {
-        intervalSeconds: 300,
-        startupRefresh: true,
-        allowStaleCacheFallback: true,
-    },
-    providers: {},
-    browserImport: {
-        enabled: false,
-        policy: 'off',
-        profileIdAllowlist: [],
-        domainAllowlistMode: 'provider_required_only',
-    },
-    diagnostics: {
-        verbosity: 'normal',
-        keepRedactedArtifacts: false,
-    },
-};
-
 class DaemonClient {
     callString(method, parameters = null) {
         return new Promise((resolve, reject) => {

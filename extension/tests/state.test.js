@@ -61,6 +61,7 @@ function main() {
     assertPanelMetersPreservePrimarySecondarySemantics();
     assertViewModelUsesStateCopyMap();
     assertEmptyProviderSnapshotShowsNoProviderCopy();
+    assertAllProviderSettingsOffShowsNoProviderCopy();
     assertViewModelBuildsProviderStripAndSelectedSurface();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
     assertSecondaryActionsRemainFooterUtilities();
@@ -110,7 +111,7 @@ function assertSupportedProviderSettingsDefaultsAndPatches() {
 
     const empty = effectiveProviderSettings({providers: {}});
     assertEqual(empty.codex.enabled, true);
-    assertEqual(empty.claude.enabled, false);
+    assertEqual(empty.claude.enabled, true);
     assertEqual(empty.codex.preferredSourceAdapter, 'auto');
     assertEqual(empty.claude.preferredSourceAdapter, 'auto');
 
@@ -149,6 +150,14 @@ function assertSupportedProviderSettingsDefaultsAndPatches() {
         preferredSourceAdapter: 'linux_web',
     });
     assertEqual(sourcePatch.providers.claude.preferredSourceAdapter, 'upstream_cli');
+
+    const offPatch = buildProviderSettingsPatch({providers: {}}, {
+        providerId: 'claude',
+        preferredSourceAdapter: 'off',
+    });
+    assertEqual(offPatch.providers.codex.enabled, true);
+    assertEqual(offPatch.providers.claude.enabled, true);
+    assertEqual(offPatch.providers.claude.preferredSourceAdapter, 'off');
 }
 
 function assertDisabledProvidersFromSettingsStayVisible() {
@@ -281,6 +290,25 @@ function assertEmptyProviderSnapshotShowsNoProviderCopy() {
     assertEqual(view.providerRows.length, 2);
     assertEqual(view.providerSelectorRows.length, 2);
     assert(view.providerSelectorRows.every(row => row.disabled), 'empty-provider view should keep disabled provider cards visible');
+}
+
+function assertAllProviderSettingsOffShowsNoProviderCopy() {
+    const ok = readJson('fixtures/snapshots/ok.json');
+    const settings = providerSettings({
+        codex: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        claude: {enabled: true, preferredSourceAdapter: 'off', allowCliFallback: true},
+    });
+
+    let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
+    state = applySnapshotJson(state, JSON.stringify(ok), 0);
+    const view = normalizeViewState(state, {panelMode: 'provider'});
+
+    assertEqual(view.state, 'no_providers');
+    assertEqual(view.stateLabel, 'No providers enabled');
+    assertEqual(view.selectedRow.disabled, true);
+    assertEqual(view.panel.visibleProviders.length, 0);
+    assertEqual(view.panel.overflowCount, 0);
+    assert(view.providerSelectorRows.every(row => row.disabled), 'all-off settings should disable visible provider rows');
 }
 
 function assertViewModelBuildsProviderStripAndSelectedSurface() {
@@ -498,7 +526,7 @@ function assertPanelViewModelBoundsProviderMode() {
     const fourProviderView = normalizeViewState(fourProviderState, {panelMode: 'provider'});
 
     assertEqual(fourProviderView.panel.visibleProviders.length, 3);
-    assertEqual(fourProviderView.panel.overflowCount, 1);
+    assertEqual(fourProviderView.panel.overflowCount, 2);
 
     const snapshot = readJson('fixtures/snapshots/ok.json');
     for (let index = 1; index <= 4; index++) {
@@ -517,7 +545,7 @@ function assertPanelViewModelBoundsProviderMode() {
 
     assertEqual(view.panel.mode, 'provider');
     assertEqual(view.panel.visibleProviders.length, 3);
-    assertEqual(view.panel.overflowCount, 2);
+    assertEqual(view.panel.overflowCount, 3);
 }
 
 function assertPanelViewModelStaysCompactProgressOnly() {

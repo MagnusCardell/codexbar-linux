@@ -321,7 +321,7 @@ esac
 }
 
 #[tokio::test]
-async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
+async fn app_refresh_with_upstream_cli_uses_default_codex_and_claude_targets() {
     let (fake_tmp, binary, log_path) = fake_codexbar_recording();
     let (_app_tmp, mut paths) = common::temp_paths();
     paths.upstream_cli_path = Some(binary);
@@ -352,9 +352,14 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
             .len(),
         0
     );
-    assert_eq!(snapshot["providers"][0]["provider"], "codex");
-    assert_eq!(snapshot["providers"][0]["sourceAdapter"], "upstream_cli");
-    assert_eq!(snapshot["providers"][0]["state"], "ok");
+    let snapshot_providers = snapshot["providers"].as_array().expect("providers");
+    assert_eq!(snapshot_providers.len(), 2);
+    assert_eq!(snapshot_providers[0]["provider"], "codex");
+    assert_eq!(snapshot_providers[0]["sourceAdapter"], "upstream_cli");
+    assert_eq!(snapshot_providers[0]["state"], "ok");
+    assert_eq!(snapshot_providers[1]["provider"], "claude");
+    assert_eq!(snapshot_providers[1]["sourceAdapter"], "upstream_cli");
+    assert_eq!(snapshot_providers[1]["state"], "ok");
     let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
     common::assert_schema("diagnostics.schema.json", &diagnostics_json);
     common::assert_public_json_safe(&diagnostics_json);
@@ -379,6 +384,16 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
     );
     assert!(
         log.lines()
+            .any(|line| line == "--format json --json-only --provider claude --source cli"),
+        "usage command should target claude: {log}"
+    );
+    assert!(
+        log.lines()
+            .any(|line| line == "--format json --json-only --provider claude --source cli --status"),
+        "status command should target claude: {log}"
+    );
+    assert!(
+        log.lines()
             .any(|line| line == "cost --format json --json-only --provider both"),
         "cost command should use provider both without source: {log}"
     );
@@ -387,6 +402,68 @@ async fn app_refresh_with_upstream_cli_uses_targeted_codex_default() {
             .any(|line| line.contains("--provider all --source cli")),
         "usage/status must not default to all-provider cli probes: {log}"
     );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_default_codex_success_and_claude_failure_is_partial() {
+    let (fake_tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider both")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *"--provider claude"*)
+    printf '%s\n' '{ "provider": "claude", "usage":'
+    exit 0
+    ;;
+  *)
+    cat <<'JSON'
+[{"provider":"codex","version":"0.125.0","source":"codex-cli","usage":{"primary":{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"secondary":{"usedPercent":19,"windowMinutes":10080,"resetsAt":"2026-05-05T06:15:41Z"},"updatedAt":"2026-04-29T19:32:11Z"}}]
+JSON
+    exit 0
+    ;;
+esac
+"#,
+    );
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+
+    let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let result: serde_json::Value =
+        serde_json::from_str(&completion.result_json).expect("result json");
+    assert_eq!(snapshot["daemon"]["state"], "degraded");
+    assert_eq!(result["status"], "partial");
+    let providers = snapshot["providers"].as_array().expect("providers");
+    let codex = providers
+        .iter()
+        .find(|provider| provider["provider"] == "codex")
+        .expect("codex provider");
+    let claude = providers
+        .iter()
+        .find(|provider| provider["provider"] == "claude")
+        .expect("claude provider");
+    assert_eq!(codex["state"], "ok");
+    assert_eq!(claude["state"], "parse_error");
+    assert_eq!(result["cacheWritten"], true);
+    let result_providers = result["providers"].as_array().expect("result providers");
+    assert!(result_providers
+        .iter()
+        .any(|provider| provider["provider"] == "codex" && provider["status"] == "ok"));
+    assert!(result_providers
+        .iter()
+        .any(|provider| provider["provider"] == "claude" && provider["status"] == "parse_error"));
     assert!(fake_tmp.path().is_dir());
 }
 
@@ -1027,6 +1104,12 @@ fn fake_codexbar_recording() -> (tempfile::TempDir, PathBuf, PathBuf) {
         r#"#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> '{}'
+provider=codex
+case "$*" in
+  *"--provider claude"*) provider=claude ;;
+  *"--provider gemini"*) provider=gemini ;;
+  *"--provider all"*) provider=all ;;
+esac
 case "$*" in
   "--version")
     printf '%s\n' 'CodexBar test-1'
@@ -1037,11 +1120,15 @@ case "$*" in
     exit 0
     ;;
   *"--status")
-    printf '%s\n' '[{{"provider":"codex","version":"0.125.0","source":"codex-cli","usage":{{"primary":{{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"}},"secondary":{{"usedPercent":19,"windowMinutes":10080,"resetsAt":"2026-05-05T06:15:41Z"}},"updatedAt":"2026-04-29T19:32:19Z","accountEmail":"raw.user@example.com","loginMethod":"prolite","identity":{{"providerID":"raw-provider-id","accountEmail":"raw.user@example.com","loginMethod":"prolite"}}}},"credits":{{"updatedAt":"2026-04-29T19:32:20Z","remaining":0}},"status":{{"updatedAt":"2026-04-27T15:52:49Z","indicator":"none","description":"All Systems Operational","url":"https://status.openai.com/"}}}}]'
+    cat <<JSON
+[{{"provider":"$provider","version":"0.125.0","source":"codex-cli","usage":{{"primary":{{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"}},"secondary":{{"usedPercent":19,"windowMinutes":10080,"resetsAt":"2026-05-05T06:15:41Z"}},"updatedAt":"2026-04-29T19:32:19Z"}},"credits":{{"updatedAt":"2026-04-29T19:32:20Z","remaining":0}},"status":{{"updatedAt":"2026-04-27T15:52:49Z","indicator":"none","description":"All Systems Operational","url":"https://status.openai.com/"}}}}]
+JSON
     exit 0
     ;;
   *)
-    printf '%s\n' '[{{"provider":"codex","version":"0.125.0","source":"codex-cli","usage":{{"primary":{{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"}},"secondary":{{"usedPercent":19,"windowMinutes":10080,"resetsAt":"2026-05-05T06:15:41Z"}},"updatedAt":"2026-04-29T19:32:11Z","accountEmail":"raw.user@example.com","loginMethod":"prolite","identity":{{"providerID":"raw-provider-id","accountEmail":"raw.user@example.com","loginMethod":"prolite"}}}},"credits":{{"events":[],"updatedAt":"2026-04-29T19:32:13Z","remaining":0}}}}]'
+    cat <<JSON
+[{{"provider":"$provider","version":"0.125.0","source":"codex-cli","usage":{{"primary":{{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"}},"secondary":{{"usedPercent":19,"windowMinutes":10080,"resetsAt":"2026-05-05T06:15:41Z"}},"updatedAt":"2026-04-29T19:32:11Z"}},"credits":{{"events":[],"updatedAt":"2026-04-29T19:32:13Z","remaining":0}}}}]
+JSON
     exit 0
     ;;
 esac

@@ -494,6 +494,8 @@ pub struct Settings {
     pub diagnostics: DiagnosticsSettings,
 }
 
+pub const DEFAULT_PROVIDER_IDS: [&str; 2] = ["codex", "claude"];
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -503,7 +505,7 @@ impl Default for Settings {
                 startup_refresh: true,
                 allow_stale_cache_fallback: true,
             },
-            providers: BTreeMap::new(),
+            providers: default_provider_settings(),
             browser_import: BrowserImportSettings {
                 enabled: false,
                 policy: BrowserImportPolicy::Off,
@@ -516,6 +518,13 @@ impl Default for Settings {
             },
         }
     }
+}
+
+pub fn default_provider_settings() -> BTreeMap<String, ProviderSettings> {
+    DEFAULT_PROVIDER_IDS
+        .into_iter()
+        .map(|provider| (provider.to_string(), ProviderSettings::default()))
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

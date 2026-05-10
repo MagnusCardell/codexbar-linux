@@ -61,12 +61,30 @@ gnome-extensions enable codexbar-linux@codexbar.dev
 gnome-extensions info codexbar-linux@codexbar.dev
 ```
 
+For an installed Debian package, run the user setup helper before the D-Bus and
+GNOME checks:
+
+```bash
+codexbar-linux-setup
+```
+
+The helper does not write daemon config directly. It reloads the user systemd
+manager, verifies the daemon binary and D-Bus activation, detects user-local
+extension shadowing, and attempts the `gnome-extensions enable` command only
+when GNOME Shell already discovers the packaged system extension.
+
 On Wayland, log out and back in after first installing or replacing extension
 files if GNOME Shell does not discover the extension immediately. A copied
 extension directory can be correct on disk while the running Shell process still
 has not rescanned user extensions. After logging back in, confirm the
 `gnome-shell` PID or start time changed before treating discovery as a live
 post-restart result.
+
+System-wide GNOME extensions live under
+`/usr/share/gnome-shell/extensions/<uuid>` and are disabled by default. System
+dconf defaults can enable extensions for future sessions/users, but they cannot
+reliably load a newly installed system extension into an already-running GNOME
+Shell session.
 
 ## Package Extension Path Sign-Off
 

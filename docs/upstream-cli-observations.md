@@ -126,10 +126,10 @@ document on stdout. The promoted stdout sidecars therefore use `.json`.
 The successful targeted payloads were JSON arrays containing one provider
 object. The status probe includes a `status` object; the two usage probes carry
 usage and credit fields without status. The Task 02B runtime adapter therefore
-selects provider targets from refresh options, then enabled daemon settings,
-then defaults to `codex`, the first proven Linux usage/status provider. It
-treats all-provider usage/status as an explicit requested probe or future
-optimization, not the default production path.
+selects provider targets from refresh options, then enabled daemon settings.
+The v0.1 built-in defaults target `codex` first, then `claude`; all-provider
+usage/status remains an explicit requested probe or future optimization, not
+the default production path.
 
 ## Usage JSON Shape Summary
 

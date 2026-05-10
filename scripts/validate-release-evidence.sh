@@ -254,6 +254,7 @@ def validate_package(path_value):
         "installed-dpkg-query.txt",
         "installed-daemon-version.txt",
         "installed-daemon-check.txt",
+        "installed-setup-helper.txt",
         "installed-dbus-service.txt",
         "installed-systemd-user-service.txt",
         "daemon-info.txt",
@@ -272,6 +273,7 @@ def validate_package(path_value):
         "apt-remove.txt",
         "systemd-user-daemon-reload-after-remove.txt",
         "removed-daemon-absent.txt",
+        "removed-setup-helper-absent.txt",
         "removed-dbus-service-absent.txt",
         "removed-systemd-user-service-absent.txt",
         "removed-extension-dir-absent.txt",
@@ -294,6 +296,7 @@ def validate_package(path_value):
         path,
         "candidate-contents.txt",
         "usr/bin/codexbar-linuxd",
+        "usr/bin/codexbar-linux-setup",
         "usr/share/dbus-1/services/org.codexbar.Linux1.service",
         "usr/lib/systemd/user/codexbar-linuxd.service",
         "usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml",
@@ -309,6 +312,7 @@ def validate_package(path_value):
     ))
     require_sibling_contains(path, "installed-daemon-version.txt", "codexbar-linuxd 0.1.0")
     require_sibling_contains(path, "installed-daemon-check.txt", "codexbar-linuxd --check")
+    require_sibling_contains(path, "installed-setup-helper.txt", "codexbar-linux-setup", "Default daemon providers: codex and claude via upstream_cli", "gnome-extensions enable")
     require_sibling_contains(path, "installed-dbus-service.txt", "Exec=/usr/bin/codexbar-linuxd")
     require_sibling_contains(path, "installed-systemd-user-service.txt", "ExecStart=/usr/bin/codexbar-linuxd")
     require_sibling_contains(path, "daemon-info.txt", "GetDaemonInfo")
@@ -328,6 +332,7 @@ def validate_package(path_value):
     require_sibling_contains(path, "apt-remove.txt", "apt remove -y codexbar-linux")
     require_sibling_contains(path, "systemd-user-daemon-reload-after-remove.txt", "systemctl --user daemon-reload")
     require_sibling_contains(path, "removed-daemon-absent.txt", "test", "/usr/bin/codexbar-linuxd")
+    require_sibling_contains(path, "removed-setup-helper-absent.txt", "test", "/usr/bin/codexbar-linux-setup")
     require_sibling_contains(path, "removed-dbus-service-absent.txt", "test", "/usr/share/dbus-1/services/org.codexbar.Linux1.service")
     require_sibling_contains(path, "removed-systemd-user-service-absent.txt", "test", "/usr/lib/systemd/user/codexbar-linuxd.service")
     require_sibling_contains(path, "removed-extension-dir-absent.txt", "test", "/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev")

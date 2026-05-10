@@ -61,8 +61,9 @@ fixtures. Browser import and Linux web adapters are unsupported compatibility
 surface and do not run. Web/auto upstream source paths remain upstream Linux
 limitations unless the upstream CLI itself supports them later.
 
-An empty provider settings map means "use the proven Linux default" and targets
-`codex`. A non-empty provider settings map is deliberate user configuration. If
+An empty legacy provider settings map is migrated to the v0.1 built-in default
+set and targets `codex`, then `claude`. A non-empty provider settings map is
+deliberate user configuration. If
 every configured provider is disabled, set to source `off`, or has CLI fallback
 disabled, the daemon returns a no-op refresh with
 `refresh_no_enabled_providers`; it does not silently re-enable `codex`.

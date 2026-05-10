@@ -16,9 +16,9 @@ through the daemon.
 
 ## What Works
 
-- Installs `codexbar-linuxd`, the D-Bus session activation file, the systemd
-  user unit, the GNOME Shell extension, the GSettings schema, documentation, and
-  the `codexbar-linuxd(1)` manual page.
+- Installs `codexbar-linuxd`, `codexbar-linux-setup`, the D-Bus session
+  activation file, the systemd user unit, the GNOME Shell extension, the
+  GSettings schema, documentation, and the `codexbar-linuxd(1)` manual page.
 - D-Bus activation starts the user daemon for `org.codexbar.Linux1`.
 - `GetDaemonInfo` reports daemon version `0.1.0`, safe build metadata where
   available, upstream CLI availability, redacted paths, and disabled browser/web
@@ -29,9 +29,10 @@ through the daemon.
   default interval, treat `intervalSeconds: 0` as manual/off for scheduled
   interval refresh, back off repeated upstream CLI missing/timeout/parse/nonzero
   failures, and reschedule after daemon settings change without restarting.
-- Empty provider settings default empty-provider refreshes to `codex`; non-empty
-  settings with every provider disabled, source `off`, or CLI fallback disabled
-  return a no-op refresh instead of silently probing `codex`.
+- Default provider settings enable Codex and Claude, with refresh targeting
+  ordered as `codex`, then `claude`; non-empty settings with every provider
+  disabled, source `off`, or CLI fallback disabled return a no-op refresh
+  instead of silently probing `codex`.
 - Preferences show daemon info, refresh interval, panel provider selection, and
   provider enable/source controls backed by `SetSettingsPatch`. The reserved
   start-on-login control is hidden in v0.1 because daemon startup is D-Bus
@@ -61,7 +62,7 @@ appear for project-local paths:
 arch="$(dpkg --print-architecture)"
 cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
 sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-systemctl --user daemon-reload
+codexbar-linux-setup
 ```
 
 `--reinstall` keeps final smoke tied to the copied candidate artifact when the
@@ -73,6 +74,11 @@ Enable the extension explicitly:
 gnome-extensions enable codexbar-linux@codexbar.dev
 gnome-extensions info codexbar-linux@codexbar.dev
 ```
+
+`codexbar-linux-setup` is intentionally user-run. It reloads the user systemd
+manager, verifies the daemon and D-Bus activation, detects user-local extension
+shadowing, and enables the extension only when GNOME Shell already discovers the
+packaged system extension.
 
 Package UI smoke is valid only when `gnome-extensions info` reports:
 
@@ -129,9 +135,9 @@ empty `prerm` maintainer script, and keeps no-browser/package guards active.
 - Real `sudo apt remove codexbar-linux` and `sudo apt purge codexbar-linux`
   were previously tested, but both must be rerun after the final successful
   package-extension smoke before final release sign-off.
-- Upstream CLI usage/status defaults to targeted `codex`; all-provider
-  usage/status probes remain explicit because promoted Linux evidence timed out
-  for all-provider usage/status.
+- Upstream CLI usage/status defaults to targeted `codex`, then `claude`;
+  all-provider usage/status probes remain explicit because promoted Linux
+  evidence timed out for all-provider usage/status.
 - Browser/web-backed providers remain unsupported unless upstream CLI or local
   provider tooling provides normalized data.
 

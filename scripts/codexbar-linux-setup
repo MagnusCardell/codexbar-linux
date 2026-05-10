@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXTENSION_UUID="codexbar-linux@codexbar.dev"
+DAEMON_BIN="/usr/bin/codexbar-linuxd"
+DBUS_NAME="org.codexbar.Linux1"
+DBUS_PATH="/org/codexbar/Linux1"
+DBUS_INTERFACE="org.codexbar.Linux1"
+SYSTEM_EXTENSION_DIR="/usr/share/gnome-shell/extensions/$EXTENSION_UUID"
+SYSTEM_DBUS_SERVICE="/usr/share/dbus-1/services/org.codexbar.Linux1.service"
+SYSTEM_USER_SERVICE="/usr/lib/systemd/user/codexbar-linuxd.service"
+USER_EXTENSION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$EXTENSION_UUID"
+
+DRY_RUN=0
+RELOAD_USER_SYSTEMD=1
+CODEXBAR_CLI_PATH=""
+
+usage() {
+  cat <<'EOF'
+Usage: codexbar-linux-setup [--codexbar-cli PATH] [--dry-run] [--no-daemon-reload]
+
+Enable and verify a CodexBar GNOME package install from the desktop user
+session.
+
+Options:
+  --codexbar-cli PATH  Set CODEXBAR_CLI for the user systemd manager and
+                       restart the user daemon. PATH must be absolute.
+  --dry-run            Print actions without changing systemd user state or
+                       GNOME settings.
+  --no-daemon-reload   Do not run systemctl --user daemon-reload.
+  -h, --help           Show this help.
+EOF
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+warn() {
+  printf 'Warning: %s\n' "$*" >&2
+}
+
+die() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+run_or_print() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf 'DRY RUN:'
+    printf ' %q' "$@"
+    printf '\n'
+    return 0
+  fi
+  "$@"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --codexbar-cli)
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        die "missing argument for --codexbar-cli"
+      fi
+      CODEXBAR_CLI_PATH="$2"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --no-daemon-reload)
+      RELOAD_USER_SYSTEMD=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+if [[ "$(id -u)" == "0" && "$DRY_RUN" != "1" ]]; then
+  die "run this helper as the desktop user, not with sudo"
+fi
+
+if [[ -n "$CODEXBAR_CLI_PATH" ]]; then
+  case "$CODEXBAR_CLI_PATH" in
+    /*) ;;
+    *) die "--codexbar-cli must be an absolute path" ;;
+  esac
+  if [[ "$DRY_RUN" != "1" && ! -x "$CODEXBAR_CLI_PATH" ]]; then
+    warn "configured CODEXBAR_CLI path is not executable; the daemon will report upstream_cli_not_executable"
+  fi
+fi
+
+check_installed_path() {
+  if [[ -e "$1" ]]; then
+    info "Found $2: $1"
+  else
+    warn "missing $2: $1"
+  fi
+}
+
+print_activation_commands() {
+  local cli_path
+  cli_path="$(command -v codexbar 2>/dev/null || true)"
+
+  printf '\nDefault daemon providers: codex and claude via upstream_cli.\n'
+  if [[ -n "$cli_path" ]]; then
+    printf 'Upstream codexbar CLI found on this shell PATH: %s\n' "$cli_path"
+  elif [[ -z "$CODEXBAR_CLI_PATH" ]]; then
+    printf 'If codexbar is outside the daemon PATH, configure it explicitly:\n'
+    printf '  codexbar-linux-setup --codexbar-cli /path/to/codexbar\n'
+  fi
+
+  printf '\nGNOME activation is explicit user action:\n'
+  printf '  gnome-extensions list | grep -Fx %s\n' "$EXTENSION_UUID"
+  printf '  gnome-extensions enable %s\n' "$EXTENSION_UUID"
+  printf '  gnome-extensions info %s\n' "$EXTENSION_UUID"
+  printf 'Expected package extension path: %s\n' "$SYSTEM_EXTENSION_DIR"
+  printf 'On Wayland, log out and back in if GNOME Shell does not list the extension yet.\n'
+}
+
+info "CodexBar GNOME package setup"
+check_installed_path "$DAEMON_BIN" "daemon"
+check_installed_path "$SYSTEM_DBUS_SERVICE" "D-Bus activation service"
+check_installed_path "$SYSTEM_USER_SERVICE" "systemd user service"
+check_installed_path "$SYSTEM_EXTENSION_DIR" "GNOME Shell extension directory"
+if [[ -d "$USER_EXTENSION_DIR" ]]; then
+  warn "user-local extension may shadow the package: $USER_EXTENSION_DIR"
+  warn "move it aside if gnome-extensions info does not report the /usr/share path"
+fi
+
+if [[ "$DRY_RUN" != "1" && ! -x "$DAEMON_BIN" ]]; then
+  die "packaged daemon is missing or not executable: $DAEMON_BIN"
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+  if [[ "$RELOAD_USER_SYSTEMD" == "1" ]]; then
+    info "Reloading user systemd manager"
+    if run_or_print systemctl --user daemon-reload; then
+      :
+    else
+      warn "systemctl --user daemon-reload failed; D-Bus activation may need a new user session"
+    fi
+  else
+    info "Skipped user systemd daemon reload."
+  fi
+
+  if [[ -n "$CODEXBAR_CLI_PATH" ]]; then
+    info "Setting CODEXBAR_CLI for the user systemd manager"
+    run_or_print systemctl --user set-environment "CODEXBAR_CLI=$CODEXBAR_CLI_PATH"
+    info "Restarting codexbar-linuxd.service to pick up CODEXBAR_CLI"
+    if run_or_print systemctl --user restart codexbar-linuxd.service; then
+      :
+    else
+      warn "daemon restart failed; D-Bus activation may still start it on demand"
+    fi
+  fi
+else
+  warn "systemctl not found; skipping user systemd reload"
+fi
+
+info "Checking daemon binary"
+run_or_print "$DAEMON_BIN" --check
+
+if command -v busctl >/dev/null 2>&1; then
+  info "Checking D-Bus activation"
+  if run_or_print busctl --user call "$DBUS_NAME" "$DBUS_PATH" "$DBUS_INTERFACE" GetDaemonInfo; then
+    :
+  else
+    warn "D-Bus activation failed; inspect journalctl --user -u codexbar-linuxd.service"
+  fi
+else
+  warn "busctl not found; skipping D-Bus activation check"
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  run_or_print gnome-extensions info "$EXTENSION_UUID"
+  run_or_print gnome-extensions enable "$EXTENSION_UUID"
+elif command -v gnome-extensions >/dev/null 2>&1; then
+  set +e
+  extension_info="$(gnome-extensions info "$EXTENSION_UUID" 2>&1)"
+  extension_status=$?
+  set -e
+  if [[ "$extension_status" == "0" ]]; then
+    printf '%s\n' "$extension_info"
+    extension_path="$(printf '%s\n' "$extension_info" | awk -F': ' '/^[[:space:]]*Path:/ {print $2; exit}')"
+    if [[ "$extension_path" == "$SYSTEM_EXTENSION_DIR" ]]; then
+      info "GNOME Shell discovered the packaged system extension."
+    elif [[ "$extension_path" == "$USER_EXTENSION_DIR" || "$extension_path" == "${HOME:-}/.local/share/gnome-shell/extensions/$EXTENSION_UUID" ]]; then
+      warn "GNOME Shell is using a user-local extension instead of the packaged /usr/share extension"
+    else
+      warn "GNOME Shell reported an unexpected extension path: ${extension_path:-unknown}"
+    fi
+    info "Enabling GNOME extension for this user"
+    if gnome-extensions enable "$EXTENSION_UUID"; then
+      info "Extension enable command completed."
+    else
+      warn "extension enable failed; log out and back in, then run: gnome-extensions enable $EXTENSION_UUID"
+    fi
+  else
+    warn "GNOME Shell does not currently discover $EXTENSION_UUID."
+    if [[ -d "$SYSTEM_EXTENSION_DIR" ]]; then
+      warn "The package files exist under /usr/share, but a running Wayland Shell may not load a newly installed system extension until logout/login."
+    else
+      warn "Expected system extension directory is missing: $SYSTEM_EXTENSION_DIR"
+    fi
+  fi
+else
+  warn "gnome-extensions not found; use a GNOME session for extension activation"
+fi
+
+print_activation_commands

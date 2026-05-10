@@ -158,6 +158,7 @@ scripts/release-completion-audit.sh \
 The package contents must include:
 
 - `/usr/bin/codexbar-linuxd`
+- `/usr/bin/codexbar-linux-setup`
 - `/usr/share/dbus-1/services/org.codexbar.Linux1.service`
 - `/usr/lib/systemd/user/codexbar-linuxd.service`
 - `/usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev/`
@@ -174,10 +175,12 @@ sha256sum "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1
 cmp "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
 sudo -v
 sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-systemctl --user daemon-reload
+codexbar-linux-setup
 test -x /usr/bin/codexbar-linuxd
+test -x /usr/bin/codexbar-linux-setup
 /usr/bin/codexbar-linuxd --version
 /usr/bin/codexbar-linuxd --check
+/usr/bin/codexbar-linux-setup --dry-run --no-daemon-reload
 test -f /usr/share/dbus-1/services/org.codexbar.Linux1.service
 test -f /usr/lib/systemd/user/codexbar-linuxd.service
 test -d /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
@@ -204,9 +207,22 @@ version is already installed; otherwise `apt` can leave the previously installed
 artifact in place.
 
 If the system-wide extension is not listed immediately on Wayland, log out and
-back in, then repeat `gnome-extensions list`. The package must not enable the
-extension automatically; the `gnome-extensions enable` command is the explicit
-user action.
+back in, then repeat `gnome-extensions list`. The package maintainer scripts
+must not enable the extension automatically; `codexbar-linux-setup` and
+`gnome-extensions enable` are explicit user-session actions.
+
+`codexbar-linux-setup` is a user-run post-install helper. It does not write
+daemon config directly; v0.1 provider defaults are owned by daemon settings and
+enable Codex and Claude through the upstream CLI path. The helper reloads the
+target user systemd manager when available, verifies `/usr/bin/codexbar-linuxd
+--check`, checks D-Bus activation, detects user-local extension shadowing, and
+attempts `gnome-extensions enable` only when GNOME Shell already discovers the
+packaged extension. It does not write global GNOME settings.
+
+System-wide extensions live under
+`/usr/share/gnome-shell/extensions/<uuid>` and are disabled by default. This
+package does not ship a dconf override for extension enablement; package smoke
+must record the explicit user `gnome-extensions enable` action.
 
 Package-extension UI smoke is accepted only when:
 
@@ -231,11 +247,11 @@ session is restarted if needed, and `gnome-extensions info` reports the
 Exercise the same service and UI cases as the local install path:
 
 ```bash
-busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 Refresh s '{"schemaVersion":1,"reason":"manual","force":true,"providers":["codex"],"busyBehavior":"return_existing"}'
+busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 Refresh s '{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing"}'
 systemctl --user set-environment CODEXBAR_CLI=/path/to/codexbar
 systemctl --user stop codexbar-linuxd.service
 systemctl --user restart codexbar-linuxd.service
-busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 Refresh s '{"schemaVersion":1,"reason":"manual","force":true,"providers":["codex"],"busyBehavior":"return_existing"}'
+busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 Refresh s '{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing"}'
 busctl --user call org.codexbar.Linux1 /org/codexbar/Linux1 org.codexbar.Linux1 GetDaemonInfo
 ```
 
@@ -245,6 +261,9 @@ Pass conditions:
   project-local `.deb` path is acceptable only when the install itself succeeds.
 - `/usr/bin/codexbar-linuxd --version` reports `codexbar-linuxd 0.1.0`.
 - `/usr/bin/codexbar-linuxd --check` succeeds.
+- `/usr/bin/codexbar-linux-setup --dry-run --no-daemon-reload` reports the
+  daemon check, D-Bus activation check, and GNOME extension enable command
+  without changing user state.
 - `GetDaemonInfo` returns a schema-valid daemon info JSON string with
   `version` equal to `0.1.0` and `capabilities.browserImport=false`,
   `capabilities.linuxWebAdapters=false`.
@@ -256,6 +275,10 @@ Pass conditions:
   extension path under `/usr/share/gnome-shell/extensions/`, not a user-local
   path under `~/.local/share/gnome-shell/extensions/`.
 - Missing upstream CLI returns a degraded `upstream_cli_missing` state safely.
+- Default provider refresh without explicit `RefreshOptions.providers` targets
+  Codex and Claude in that order. If one provider succeeds and the other is
+  unavailable, unauthenticated, rate-limited, or parse-invalid, the result is
+  partial/degraded and the successful provider remains usable.
 - A non-executable `CODEXBAR_CLI` path returns a degraded
   `upstream_cli_not_executable` state safely and does not expose the raw path.
 - With `CODEXBAR_CLI` set in the systemd user environment and

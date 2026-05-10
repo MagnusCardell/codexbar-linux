@@ -8,9 +8,9 @@ use crate::cache::ensure_private_dir;
 use crate::clock;
 use crate::error::{AppError, AppResult};
 use crate::model::{
-    BrowserImportPolicy, BrowserImportSettingsPatch, DiagnosticsSettingsPatch,
-    PreferredSourceAdapter, ProviderSettings, ProviderSettingsPatch, RefreshSettingsPatch,
-    Settings, SettingsPatch,
+    default_provider_settings, BrowserImportPolicy, BrowserImportSettingsPatch,
+    DiagnosticsSettingsPatch, PreferredSourceAdapter, ProviderSettings, ProviderSettingsPatch,
+    RefreshSettingsPatch, Settings, SettingsPatch,
 };
 use crate::redact;
 
@@ -147,6 +147,9 @@ pub fn apply_settings_patch(mut settings: Settings, patch: SettingsPatch) -> App
 }
 
 pub fn normalize_no_browser_settings(settings: &mut Settings) {
+    if settings.providers.is_empty() {
+        settings.providers = default_provider_settings();
+    }
     settings.browser_import.enabled = false;
     settings.browser_import.policy = BrowserImportPolicy::Off;
     settings.browser_import.profile_id_allowlist.clear();

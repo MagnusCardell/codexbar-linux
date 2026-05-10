@@ -155,6 +155,7 @@ check_inputs() {
   require_tool strings
 
   require_file "daemon/Cargo.toml"
+  require_file "scripts/codexbar-linux-setup"
   require_file "packaging/debian/changelog"
   require_file "packaging/debian/control"
   require_file "packaging/debian/postinst"
@@ -243,8 +244,9 @@ Depends: dbus-user-session | dbus-session-bus, gir1.2-adw-1, gir1.2-gtk-4.0, gno
 Description: Native GNOME companion for upstream CodexBar usage snapshots
  CodexBar GNOME installs a user-scoped Rust daemon, D-Bus session
  activation, a systemd user unit, GSettings schema, and GNOME Shell extension
- assets for the upstream-CLI-only CodexBar data path. It does not enable the
- extension automatically.
+ assets for the upstream-CLI-only CodexBar data path. It includes a user-run
+ setup helper for activation checks and does not enable the extension
+ automatically.
 EOF
 }
 
@@ -263,6 +265,7 @@ stage_package() {
   install -Dm755 "$ROOT/daemon/target/release/codexbar-linuxd" "$PKG_ROOT/usr/bin/codexbar-linuxd"
   strip --strip-unneeded "$PKG_ROOT/usr/bin/codexbar-linuxd"
   validate_no_build_path_leaks "$PKG_ROOT/usr/bin/codexbar-linuxd"
+  install -Dm755 "$ROOT/scripts/codexbar-linux-setup" "$PKG_ROOT/usr/bin/codexbar-linux-setup"
   install -Dm644 "$ROOT/packaging/dbus/org.codexbar.Linux1.service" \
     "$PKG_ROOT/usr/share/dbus-1/services/org.codexbar.Linux1.service"
   install -Dm644 "$ROOT/packaging/systemd/codexbar-linuxd.service" \

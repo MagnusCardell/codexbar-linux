@@ -37,11 +37,15 @@ Daemon-owned settings include:
 manual/off mode for scheduled interval refresh only; it does not disable
 startup refresh, which remains controlled by `refresh.startupRefresh`.
 
-Provider selection defaults empty-provider refreshes to `codex` only when the
-provider settings map is empty. Once the settings map is non-empty, disabled
-providers, providers whose preferred source adapter is `off`, and providers
-with CLI fallback disabled are excluded. If no configured provider remains, the
-daemon returns a schema-valid `noop` refresh with
+Provider settings default to Codex and Claude enabled with `auto` source
+adapter preference, CLI fallback enabled, and browser import disabled. Default
+refresh targeting is explicit and stable: `codex`, then `claude`, then any
+additional configured providers sorted by provider id. A legacy empty provider
+settings map is migrated in memory to the Codex + Claude default and is
+persisted on the next settings write. Once the settings map is non-empty,
+disabled providers, providers whose preferred source adapter is `off`, and
+providers with CLI fallback disabled are excluded. If no configured provider
+remains, the daemon returns a schema-valid `noop` refresh with
 `refresh_no_enabled_providers` instead of silently refreshing `codex`.
 
 The v1 settings schema still contains browser-import and Linux-web fields for

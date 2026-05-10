@@ -89,15 +89,16 @@ codexbar config dump --pretty
 codexbar config validate --format json --json-only
 ```
 
-Usage/status refreshes default to the targeted `codex` provider only when no
-provider settings are configured and `RefreshOptions.providers` is empty. A
-non-empty daemon provider config is authoritative: providers disabled, set to
-source adapter `off`, or without CLI fallback are skipped, and an all-off config
-returns a schema-valid `noop` refresh instead of silently probing `codex`.
-Explicit `RefreshOptions.providers` remains a manual override. The adapter does
-not default usage/status to `--provider all`; all-provider usage/status probes
-are explicit only. Cost remains the upstream Codex + Claude local cost command
-and deliberately omits `--source`.
+Usage/status refreshes default to configured daemon provider settings when
+`RefreshOptions.providers` is empty. The v0.1 built-in provider settings enable
+`codex` and `claude` by default, with explicit target order `codex`, then
+`claude`, then any additional configured providers sorted by id. Providers
+disabled, set to source adapter `off`, or without CLI fallback are skipped, and
+an all-off config returns a schema-valid `noop` refresh instead of silently
+probing `codex`. Explicit `RefreshOptions.providers` remains a manual override.
+The adapter does not default usage/status to `--provider all`; all-provider
+usage/status probes are explicit only. Cost remains the upstream Codex + Claude
+local cost command and deliberately omits `--source`.
 
 All invocations require:
 
@@ -232,8 +233,8 @@ recover.
 
 ## Packaging rules
 
-Task 05B chooses Option A: a development `.deb` package for local v0.1 release
-smoke testing.
+Task 05L keeps the v0.1 development `.deb` package path for local release smoke
+testing.
 
 Primary package installs:
 
@@ -247,7 +248,16 @@ Package maintainer scripts compile GSettings schemas when the GLib tool is
 available. They must not silently enable the extension, start a system daemon,
 create a TCP/listener unit, touch browser/keyring/web files, or assume an active
 user session. Active user managers may need `systemctl --user daemon-reload`
-after package install or removal.
+after package install or removal; the package-installed
+`codexbar-linux-setup` helper performs that reload from the target desktop user
+session and verifies D-Bus activation.
+
+The D-Bus activation file intentionally keeps
+`SystemdService=codexbar-linuxd.service`. Direct D-Bus `Exec=` activation could
+avoid some user-manager cache issues immediately after package install, but it
+would start a daemon outside the user systemd unit and weaken
+`systemctl --user stop/restart codexbar-linuxd.service`, restart policy, and
+unit-scoped journal behavior.
 
 ## Open decisions
 

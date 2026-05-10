@@ -76,6 +76,31 @@ async fn dbus_contract_runtime_methods_signals_errors_and_cache() {
         .await
         .expect("GetSettings");
     common::assert_schema("settings.schema.json", &initial_settings);
+    let initial_settings_value: serde_json::Value =
+        serde_json::from_str(&initial_settings).expect("initial settings json");
+    assert_eq!(initial_settings_value["refresh"]["intervalSeconds"], 86400);
+    assert_eq!(initial_settings_value["refresh"]["startupRefresh"], false);
+    assert_eq!(initial_settings_value["browserImport"]["enabled"], false);
+    assert_eq!(initial_settings_value["browserImport"]["policy"], "off");
+    assert_eq!(initial_settings_value["diagnostics"]["verbosity"], "normal");
+    for provider in ["codex", "claude"] {
+        assert_eq!(
+            initial_settings_value["providers"][provider]["enabled"],
+            true
+        );
+        assert_eq!(
+            initial_settings_value["providers"][provider]["preferredSourceAdapter"],
+            "auto"
+        );
+        assert_eq!(
+            initial_settings_value["providers"][provider]["allowCliFallback"],
+            true
+        );
+        assert_eq!(
+            initial_settings_value["providers"][provider]["allowBrowserImport"],
+            false
+        );
+    }
 
     let mut settings_stream = proxy
         .receive_signal("SettingsChanged")

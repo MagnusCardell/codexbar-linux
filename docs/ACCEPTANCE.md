@@ -6,8 +6,14 @@
 
 - On Ubuntu Desktop 24.04 LTS and 26.04 LTS, installing the Debian package places the daemon, D-Bus service, systemd user unit, GSettings schema, and GNOME Shell extension files in expected locations.
 - The package does not silently enable the extension.
+- The package-installed `codexbar-linux-setup` helper runs as the desktop user,
+  reloads the user systemd manager, verifies the daemon and D-Bus activation,
+  detects user-local extension shadowing, and attempts user extension enablement
+  only when GNOME Shell already discovers the packaged system extension.
 - After explicit user enablement, a top-bar item appears without requiring X11.
 - If daemon is not running, D-Bus activation starts it or the UI shows a clear recoverable state.
+- On Wayland, a logout/login remains the reliable path for first discovery of a
+  newly installed system-wide extension when the running Shell does not list it.
 
 ### B. Upstream CLI path
 
@@ -109,10 +115,14 @@ the command or smoke evidence used.
   running every interval forever, and refresh failure clears the active-refresh
   guard so manual Refresh can recover.
 - Provider off semantics pass: an empty provider config defaults empty-provider
-  refreshes to `codex`, but a non-empty config with every provider disabled,
-  set to source `off`, or without CLI fallback returns a schema-valid `noop`
-  refresh instead of silently probing `codex`; explicit
-  `RefreshOptions.providers` remains a manual override.
+  refreshes to the built-in Codex + Claude provider defaults, but a non-empty
+  config with every provider disabled, set to source `off`, or without CLI
+  fallback returns a schema-valid `noop` refresh instead of silently probing
+  `codex`; explicit `RefreshOptions.providers` remains a manual override.
+- Default provider settings pass: fresh daemon settings and legacy empty
+  provider maps expose Codex and Claude enabled by default, with browser import
+  disabled, CLI fallback enabled, and refresh targeting ordered as `codex`,
+  then `claude`.
 - Preferences UX passes: v0.1 does not show inert login-start controls;
   preferences display daemon info, refresh interval, panel provider selection,
   and provider enable/source controls, and daemon-owned writes go through
@@ -142,7 +152,8 @@ the command or smoke evidence used.
   GSettings schema, `codexbar-linuxd(1)` manual page, and release smoke docs.
 - Package install/uninstall smoke passes: installing the development `.deb`
   compiles schemas, does not auto-enable the extension, does not start a system
-  daemon or install a TCP listener, supports D-Bus activation after
+  daemon or install a TCP listener, supports D-Bus activation through the
+  user-run `codexbar-linux-setup` helper or an equivalent
   `systemctl --user daemon-reload`, and package removal removes only
   package-owned system files while preserving user config/cache.
 - Package UI smoke is accepted only when

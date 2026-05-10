@@ -3,6 +3,21 @@ export const SUPPORTED_PROVIDERS = [
     {id: 'claude', title: 'Claude'},
 ];
 
+export const DEFAULT_PROVIDER_SETTINGS = {
+    codex: {
+        enabled: true,
+        preferredSourceAdapter: 'auto',
+        allowBrowserImport: false,
+        allowCliFallback: true,
+    },
+    claude: {
+        enabled: true,
+        preferredSourceAdapter: 'auto',
+        allowBrowserImport: false,
+        allowCliFallback: true,
+    },
+};
+
 export const DEFAULT_DAEMON_SETTINGS = {
     schemaVersion: 1,
     refresh: {
@@ -10,7 +25,7 @@ export const DEFAULT_DAEMON_SETTINGS = {
         startupRefresh: true,
         allowStaleCacheFallback: true,
     },
-    providers: {},
+    providers: DEFAULT_PROVIDER_SETTINGS,
     browserImport: {
         enabled: false,
         policy: 'off',
@@ -23,7 +38,6 @@ export const DEFAULT_DAEMON_SETTINGS = {
     },
 };
 
-const DEFAULT_PROVIDER_ID = 'codex';
 const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];
 
 export function effectiveProviderSettings(settings) {
@@ -36,7 +50,7 @@ export function effectiveProviderSettings(settings) {
         result[provider.id] = {
             enabled: booleanOrDefault(
                 providerSettings.enabled,
-                hasConfiguredProviders ? false : provider.id === DEFAULT_PROVIDER_ID
+                hasConfiguredProviders ? false : true
             ),
             preferredSourceAdapter: normalizePreferredSourceAdapter(providerSettings.preferredSourceAdapter),
             allowBrowserImport: false,

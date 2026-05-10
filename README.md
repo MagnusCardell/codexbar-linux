@@ -113,7 +113,7 @@ From a downloaded `.deb`:
 ```bash
 arch="$(dpkg --print-architecture)"
 sudo apt install "./codexbar-linux_0.1.0-1_${arch}.deb"
-systemctl --user daemon-reload
+codexbar-linux-setup
 ```
 
 From this repository:
@@ -123,8 +123,13 @@ From this repository:
 arch="$(dpkg --print-architecture)"
 cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
 sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-systemctl --user daemon-reload
+codexbar-linux-setup
 ```
+
+Run `codexbar-linux-setup` as the desktop user, not with `sudo`. It reloads the
+user systemd manager, verifies `/usr/bin/codexbar-linuxd --check`, checks D-Bus
+activation, detects user-local extension shadowing, and enables the GNOME
+extension when the running Shell already discovers it.
 
 ### 3. Let the Daemon Find `codexbar`
 
@@ -135,8 +140,7 @@ If the UI shows `upstream_cli_missing`, set the executable path for the systemd
 user manager and restart the daemon:
 
 ```bash
-systemctl --user set-environment CODEXBAR_CLI=/absolute/path/to/codexbar
-systemctl --user restart codexbar-linuxd.service
+codexbar-linux-setup --codexbar-cli /absolute/path/to/codexbar
 ```
 
 For a persistent login environment, write the same absolute path to
@@ -146,8 +150,7 @@ For a persistent login environment, write the same absolute path to
 mkdir -p ~/.config/environment.d
 env_file=~/.config/environment.d/codexbar-linux.conf
 printf '%s\n' 'CODEXBAR_CLI=/absolute/path/to/codexbar' > "$env_file"
-systemctl --user daemon-reload
-systemctl --user restart codexbar-linuxd.service
+codexbar-linux-setup --codexbar-cli /absolute/path/to/codexbar
 ```
 
 Do not use `~` inside `environment.d`; write the full path.
@@ -155,14 +158,21 @@ Do not use `~` inside `environment.d`; write the full path.
 ### 4. Enable the GNOME Extension
 
 The package installs the extension, but it does not enable it for you.
+System-wide GNOME extensions live under
+`/usr/share/gnome-shell/extensions/<uuid>` and are disabled by default.
+`codexbar-linux-setup` attempts the enable step when GNOME Shell already
+discovers the packaged extension.
 
 ```bash
+codexbar-linux-setup
 gnome-extensions enable codexbar-linux@codexbar.dev
 gnome-extensions info codexbar-linux@codexbar.dev
 ```
 
 On Wayland, log out and back in if GNOME Shell does not discover the system
-extension immediately after install.
+extension immediately after install. System dconf defaults can enable
+extensions for future sessions or users, but they cannot reliably make an
+already-running GNOME Shell load a newly installed system extension.
 
 The packaged extension path should be:
 
@@ -194,8 +204,7 @@ Fix:
 
 ```bash
 codexbar --version
-systemctl --user set-environment CODEXBAR_CLI=/absolute/path/to/codexbar
-systemctl --user restart codexbar-linuxd.service
+codexbar-linux-setup --codexbar-cli /absolute/path/to/codexbar
 ```
 
 If `codexbar --version` fails, install upstream CodexBar CLI first.
@@ -282,6 +291,7 @@ Important paths:
 ~/.config/codexbar-linux/config.json
 ~/.cache/codexbar-linux/snapshot.json
 /usr/bin/codexbar-linuxd
+/usr/bin/codexbar-linux-setup
 /usr/share/dbus-1/services/org.codexbar.Linux1.service
 /usr/lib/systemd/user/codexbar-linuxd.service
 /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev
@@ -292,9 +302,9 @@ Important paths:
 The supported production data plane is upstream `codexbar` CLI plus local
 provider tooling.
 
-The first proven Linux usage/status provider is `codex` through the CLI source.
-Current upstream cost output is a local Codex + Claude cost scan. CodexBar
-GNOME requests both supported local cost providers:
+The default v0.1 usage/status refresh targets Codex, then Claude, through the
+upstream CLI source. Current upstream cost output is a local Codex + Claude
+cost scan. CodexBar GNOME requests both supported local cost providers:
 
 ```bash
 codexbar cost --format json --json-only --provider both

@@ -4,6 +4,7 @@ use std::fs;
 
 use codexbar_linuxd::app::App;
 use codexbar_linuxd::app::RefreshStart;
+use codexbar_linuxd::cli;
 use codexbar_linuxd::config;
 use codexbar_linuxd::error::AppError;
 use codexbar_linuxd::model::{
@@ -15,6 +16,24 @@ use codexbar_linuxd::model::{
 fn default_settings_validate() {
     let settings = Settings::default();
     assert_eq!(settings.refresh.interval_seconds, 300);
+    assert_eq!(
+        settings.providers.keys().cloned().collect::<Vec<_>>(),
+        vec!["claude".to_string(), "codex".to_string()]
+    );
+    for provider in ["codex", "claude"] {
+        let provider_settings = settings.providers.get(provider).expect("default provider");
+        assert!(provider_settings.enabled);
+        assert_eq!(
+            provider_settings.preferred_source_adapter,
+            PreferredSourceAdapter::Auto
+        );
+        assert!(provider_settings.allow_cli_fallback);
+        assert!(!provider_settings.allow_browser_import);
+    }
+    assert_eq!(
+        cli::target_providers(&settings, &[]),
+        vec!["codex".to_string(), "claude".to_string()]
+    );
     config::validate_settings(&settings).expect("default settings validate");
     let json = serde_json::to_string(&settings).expect("settings json");
     common::assert_schema("settings.schema.json", &json);
@@ -31,6 +50,43 @@ fn interval_zero_is_valid_manual_refresh_mode() {
     let settings: Settings = serde_json::from_str(&settings_json).expect("settings");
     assert_eq!(settings.refresh.interval_seconds, 0);
     assert!(settings.refresh.startup_refresh);
+}
+
+#[test]
+fn legacy_empty_provider_config_migrates_to_default_providers() {
+    let (_tmp, paths) = common::temp_paths();
+    fs::create_dir_all(&paths.config_dir).expect("config dir");
+    fs::write(
+        &paths.config_file,
+        r#"{
+  "schemaVersion": 1,
+  "refresh": {
+    "intervalSeconds": 300,
+    "startupRefresh": true,
+    "allowStaleCacheFallback": true
+  },
+  "providers": {},
+  "browserImport": {
+    "enabled": false,
+    "policy": "off",
+    "profileIdAllowlist": [],
+    "domainAllowlistMode": "provider_required_only"
+  },
+  "diagnostics": {
+    "verbosity": "normal",
+    "keepRedactedArtifacts": false
+  }
+}"#,
+    )
+    .expect("legacy config");
+    let app = App::new(paths).expect("app");
+    let settings_json = app.get_settings_json().expect("settings");
+    common::assert_schema("settings.schema.json", &settings_json);
+    let settings: Settings = serde_json::from_str(&settings_json).expect("settings");
+    assert_eq!(
+        cli::target_providers(&settings, &[]),
+        vec!["codex".to_string(), "claude".to_string()]
+    );
 }
 
 #[test]

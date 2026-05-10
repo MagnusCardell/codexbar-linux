@@ -36,6 +36,8 @@ Description: CodexBar Linux stage-only smoke fixture
 EOF
   printf '#!/bin/sh\nexit 0\n' >"$work/usr/bin/codexbar-linuxd"
   chmod 755 "$work/usr/bin/codexbar-linuxd"
+  printf '#!/bin/sh\nprintf "Default daemon providers: codex and claude via upstream_cli\\n"\n' >"$work/usr/bin/codexbar-linux-setup"
+  chmod 755 "$work/usr/bin/codexbar-linux-setup"
   printf 'Exec=/usr/bin/codexbar-linuxd\n' \
     >"$work/usr/share/dbus-1/services/org.codexbar.Linux1.service"
   printf 'ExecStart=/usr/bin/codexbar-linuxd\n' \
@@ -109,6 +111,7 @@ Architecture: $arch
 EOF
   cat >"$dir/candidate-contents.txt" <<'EOF'
 ./usr/bin/codexbar-linuxd
+./usr/bin/codexbar-linux-setup
 ./usr/share/dbus-1/services/org.codexbar.Linux1.service
 ./usr/lib/systemd/user/codexbar-linuxd.service
 ./usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml
@@ -134,6 +137,11 @@ codexbar-linuxd 0.1.0
 EOF
   cat >"$dir/installed-daemon-check.txt" <<'EOF'
 $ /usr/bin/codexbar-linuxd --check
+EOF
+  cat >"$dir/installed-setup-helper.txt" <<'EOF'
+$ /usr/bin/codexbar-linux-setup --dry-run --no-daemon-reload --codexbar-cli /tmp/codexbar
+Default daemon providers: codex and claude via upstream_cli
+  gnome-extensions enable codexbar-linux@codexbar.dev
 EOF
   cat >"$dir/installed-dbus-service.txt" <<'EOF'
 Exec=/usr/bin/codexbar-linuxd
@@ -191,6 +199,9 @@ $ systemctl --user daemon-reload
 EOF
   cat >"$dir/removed-daemon-absent.txt" <<'EOF'
 $ test ! -e /usr/bin/codexbar-linuxd
+EOF
+  cat >"$dir/removed-setup-helper-absent.txt" <<'EOF'
+$ test ! -e /usr/bin/codexbar-linux-setup
 EOF
   cat >"$dir/removed-dbus-service-absent.txt" <<'EOF'
 $ test ! -e /usr/share/dbus-1/services/org.codexbar.Linux1.service
@@ -317,6 +328,7 @@ PACKAGE_SIDECARS=(
   installed-dpkg-query.txt
   installed-daemon-version.txt
   installed-daemon-check.txt
+  installed-setup-helper.txt
   installed-dbus-service.txt
   installed-systemd-user-service.txt
   daemon-info.txt
@@ -335,6 +347,7 @@ PACKAGE_SIDECARS=(
   apt-remove.txt
   systemd-user-daemon-reload-after-remove.txt
   removed-daemon-absent.txt
+  removed-setup-helper-absent.txt
   removed-dbus-service-absent.txt
   removed-systemd-user-service-absent.txt
   removed-extension-dir-absent.txt
@@ -920,6 +933,7 @@ grep -F "source already matches /tmp candidate; copy skipped" \
 grep -F "$STAGE_DEB" "$TMP/package-stage-only/candidate-checksums.txt" >/dev/null
 grep -Fx "Package: codexbar-linux" "$TMP/package-stage-only/candidate-fields.txt" >/dev/null
 grep -F "usr/bin/codexbar-linuxd" "$TMP/package-stage-only/candidate-contents.txt" >/dev/null
+grep -F "usr/bin/codexbar-linux-setup" "$TMP/package-stage-only/candidate-contents.txt" >/dev/null
 grep -F "usr/share/dbus-1/services/org.codexbar.Linux1.service" "$TMP/package-stage-only/candidate-contents.txt" >/dev/null
 grep -F "usr/lib/systemd/user/codexbar-linuxd.service" "$TMP/package-stage-only/candidate-contents.txt" >/dev/null
 grep -F "usr/share/glib-2.0/schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml" "$TMP/package-stage-only/candidate-contents.txt" >/dev/null
