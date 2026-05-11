@@ -146,7 +146,7 @@ the command or smoke evidence used.
   strictly, reloads the user systemd manager, and uninstall removes owned files
   while preserving user config/cache.
 - Development package build passes: `./scripts/build-deb.sh` produces
-  `dist/codexbar-linux_0.1.0-1_<arch>.deb` from source without requiring live
+  `dist/codexbar-linux.deb` from source without requiring live
   GNOME Shell or upstream `codexbar`, and the package contains the daemon,
   session D-Bus service, systemd user unit, system-wide GNOME extension files,
   GSettings schema, `codexbar-linuxd(1)` manual page, and release smoke docs.
@@ -170,7 +170,7 @@ the command or smoke evidence used.
   recorded on the target Ubuntu GNOME host. If remove/purge was not rerun after
   the final successful package-extension smoke, it remains a required
   release-smoke gate even when package install and UI evidence have passed.
-- A non-fatal `_apt` sandbox warning during `sudo apt install ./dist/*.deb` is
+- A non-fatal `_apt` sandbox warning during `sudo apt install ./dist/codexbar-linux.deb` is
   not a package failure when the install succeeds; it indicates the local `.deb`
   path was inaccessible to the `_apt` sandbox user. The reproducible package
   smoke path copies the `.deb` to `/tmp` before installing.

@@ -304,8 +304,7 @@ if [[ "$MODE" == "check" ]]; then
 fi
 
 VERSION="$(package_version)"
-ARCHITECTURE="$(dpkg --print-architecture)"
-DEB_PATH="$DIST_DIR/${PACKAGE_NAME}_${VERSION}_${ARCHITECTURE}.deb"
+DEB_PATH="$DIST_DIR/${PACKAGE_NAME}.deb"
 
 RELEASE_RUSTFLAGS="$(release_rustflags)"
 env RUSTFLAGS="$RELEASE_RUSTFLAGS" cargo build --manifest-path "$ROOT/daemon/Cargo.toml" --release --locked

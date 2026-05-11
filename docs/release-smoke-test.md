@@ -75,8 +75,8 @@ Build and inspect the local package:
 
 ```bash
 ./scripts/build-deb.sh
-dpkg-deb --field dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
-dpkg-deb --contents dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
+dpkg-deb --field dist/codexbar-linux.deb
+dpkg-deb --contents dist/codexbar-linux.deb
 ```
 
 The root-backed package gate can also be run as one reproducible helper:
@@ -169,12 +169,11 @@ Install from `/tmp` to avoid non-fatal `_apt` sandbox permission notes from
 project-local paths:
 
 ```bash
-arch="$(dpkg --print-architecture)"
-cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sha256sum "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-cmp "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+cp -f dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+sha256sum dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+cmp dist/codexbar-linux.deb /tmp/codexbar-linux.deb
 sudo -v
-sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 codexbar-linux-setup
 test -x /usr/bin/codexbar-linuxd
 test -x /usr/bin/codexbar-linux-setup
@@ -196,11 +195,7 @@ gnome-extensions info codexbar-linux@codexbar.dev
 `.deb` from a project directory that the `_apt` sandbox user cannot access. If
 `sudo apt install` succeeds and the package files are installed, that warning
 is not a package failure. The reproducible release-smoke command above copies
-the package to `/tmp`; the project-local fallback is:
-
-```bash
-sudo apt install ./dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
-```
+the package to `/tmp`.
 
 `--reinstall` is required for final candidate smoke when the same package
 version is already installed; otherwise `apt` can leave the previously installed
@@ -321,7 +316,7 @@ Task 05C local release-candidate validation and Task 05C.1 operator package
 smoke were run on 2026-05-04 against the v0.1 development package candidate.
 Sanitized result:
 
-- Package build passed and produced `codexbar-linux_0.1.0-1_amd64.deb`.
+- Package build passed and produced `codexbar-linux.deb`.
 - Package metadata was inspected with `dpkg-deb -I`; package name, version,
   architecture, and GNOME/D-Bus/GSettings/systemd dependencies were correct.
   No browser, cookie, web-fetch, keyring, browser-extension, localhost, or
@@ -333,9 +328,9 @@ Sanitized result:
 - The package builder now compiles release binaries with path remapping, strips
   the staged daemon, and fails the build if exact private build-root, home,
   Cargo, Rustup, or package-staging paths remain in the packaged daemon.
-- `apt-get -s install ./dist/codexbar-linux_0.1.0-1_amd64.deb` resolved
+- `apt-get -s install ./dist/codexbar-linux.deb` resolved
   cleanly as one new local package.
-- Real `sudo apt install ./dist/codexbar-linux_0.1.0-1_amd64.deb` succeeded on
+- Real `sudo apt install ./dist/codexbar-linux.deb` succeeded on
   the operator host. `apt` printed a non-fatal `_apt` sandbox permission note
   because the local `.deb` was inside the user project directory; the install
   still completed successfully.

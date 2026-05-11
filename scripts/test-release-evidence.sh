@@ -379,9 +379,9 @@ GNOME_SIDECARS=(
   daemon-info-after-restart.txt
 )
 
-CANDIDATE_FILE="$TMP/codexbar-linux_0.1.0-1_amd64.candidate.deb"
-TMP_CANDIDATE_FILE="$TMP/codexbar-linux_0.1.0-1_amd64.deb"
-ALT_CANDIDATE_FILE="$TMP/codexbar-linux_0.1.0-1_amd64.alt.deb"
+CANDIDATE_FILE="$TMP/codexbar-linux.candidate.deb"
+TMP_CANDIDATE_FILE="$TMP/codexbar-linux.deb"
+ALT_CANDIDATE_FILE="$TMP/codexbar-linux.alt.deb"
 printf "package candidate\n" >"$CANDIDATE_FILE"
 cp -p "$CANDIDATE_FILE" "$TMP_CANDIDATE_FILE"
 cp -p "$CANDIDATE_FILE" "$ALT_CANDIDATE_FILE"

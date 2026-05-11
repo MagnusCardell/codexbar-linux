@@ -131,8 +131,9 @@ PY
 print_required_final_commands() {
   cat <<'EOF'
 Required final evidence commands:
-  arch="$(dpkg --print-architecture)"
-  candidate="dist/codexbar-linux_0.1.0-1_${arch}.deb"
+  ./scripts/build-deb.sh
+  cp -f dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+  candidate="/tmp/codexbar-linux.deb"
   ./scripts/package-root-smoke.sh --deb "$candidate" --purge
   # On automation hosts with cached sudo credentials:
   # CODEXBAR_LINUX_PACKAGE_SMOKE_SUDO_NONINTERACTIVE=1 ./scripts/package-root-smoke.sh --deb "$candidate" --purge
@@ -151,14 +152,7 @@ current_candidate_path() {
     printf '%s\n' "$CODEXBAR_LINUX_RELEASE_CANDIDATE"
     return
   fi
-  local version arch
-  version="$(release_version)"
-  if [[ -z "$version" ]]; then
-    echo "Could not parse package version from packaging/debian/changelog" >&2
-    exit 1
-  fi
-  arch="$(dpkg --print-architecture)"
-  printf '%s/dist/codexbar-linux_%s_%s.deb\n' "$ROOT" "$version" "$arch"
+  printf '%s/dist/codexbar-linux.deb\n' "$ROOT"
 }
 
 current_tmp_candidate_path() {

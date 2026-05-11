@@ -11,8 +11,8 @@ through the daemon.
   Wayland.
 - Ubuntu 26.04 LTS/GNOME 50 compatibility remains a release gate before final
   sign-off.
-- The package architecture follows `dpkg --print-architecture`; current recorded
-  smoke evidence used `amd64`.
+- The release artifact is the stable `codexbar-linux.deb` file produced by
+  `./scripts/build-deb.sh`.
 
 ## What Works
 
@@ -59,9 +59,8 @@ Install from `/tmp` to avoid the non-fatal `_apt` sandbox warning that can
 appear for project-local paths:
 
 ```bash
-arch="$(dpkg --print-architecture)"
-cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+cp -f dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 codexbar-linux-setup
 ```
 
@@ -172,7 +171,7 @@ Wayland discovery:
 
 Private package path install note:
 
-- `sudo apt install ./dist/*.deb` may produce a non-fatal `_apt` sandbox warning
+- `sudo apt install ./dist/codexbar-linux.deb` may produce a non-fatal `_apt` sandbox warning
   if the project path is not readable by `_apt`.
 - Copy the package to `/tmp` and install from there for the clean release-smoke
   path.

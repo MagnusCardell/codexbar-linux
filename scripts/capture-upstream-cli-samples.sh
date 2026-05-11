@@ -295,7 +295,7 @@ Unable to locate an upstream codexbar CLI binary.
 
 Install options:
   brew install steipete/tap/codexbar
-  or download CodexBarCLI-v<tag>-linux-<arch>.tar.gz from:
+  or download a Linux CLI archive from:
   https://github.com/steipete/CodexBar/releases
 
 Then run with either:

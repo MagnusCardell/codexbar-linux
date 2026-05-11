@@ -32,10 +32,9 @@ mkdir -p target/release-smoke
 check_log="target/release-smoke/check-$(date -u +%Y%m%dT%H%M%SZ).log"
 ./scripts/check.sh 2>&1 | tee "$check_log"
 ./scripts/build-deb.sh
-arch="$(dpkg --print-architecture)"
-candidate="dist/codexbar-linux_0.1.0-1_${arch}.deb"
+candidate="dist/codexbar-linux.deb"
 test -f "$candidate"
-cp "$candidate" /tmp/
+cp -f "$candidate" /tmp/codexbar-linux.deb
 ```
 
 The root package gate can be captured with:
@@ -154,11 +153,11 @@ Record:
 Run these against the copied `/tmp` artifact on the target Ubuntu GNOME host:
 
 ```bash
-cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-sha256sum "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
-cmp "dist/codexbar-linux_0.1.0-1_${arch}.deb" "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+cp -f dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+sha256sum dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+cmp dist/codexbar-linux.deb /tmp/codexbar-linux.deb
 sudo -v
-sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 systemctl --user daemon-reload
 /usr/bin/codexbar-linuxd --version
 /usr/bin/codexbar-linuxd --check

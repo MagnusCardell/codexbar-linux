@@ -25,7 +25,7 @@ installed daemon, D-Bus activation, system GNOME extension path, and then remove
 the package unless --keep-installed is passed.
 
 Options:
-  --deb PATH          Candidate .deb. Defaults to dist/codexbar-linux_0.1.0-1_<arch>.deb.
+  --deb PATH          Candidate .deb. Defaults to dist/codexbar-linux.deb.
   --evidence-dir DIR  Directory for smoke logs. Defaults under target/release-smoke/.
   --stage-only        Copy and inspect the candidate package, then stop before sudo.
                       This does not satisfy final release package smoke.
@@ -109,7 +109,7 @@ else
   arch="$(dpkg --print-architecture)"
 fi
 if [[ -z "$DEB_PATH" ]]; then
-  DEB_PATH="$ROOT/dist/${PACKAGE_NAME}_${DEFAULT_VERSION}_${arch}.deb"
+  DEB_PATH="$ROOT/dist/${PACKAGE_NAME}.deb"
 fi
 if [[ ! -f "$DEB_PATH" ]]; then
   echo "Candidate package not found: $DEB_PATH" >&2
@@ -228,7 +228,7 @@ if [[ "$candidate_real" == "$tmp_real" ]]; then
   log_cmd "$copy_log" cp "$DEB_PATH" "$tmp_deb"
   echo "source already matches /tmp candidate; copy skipped" >>"$copy_log"
 else
-  run_captured "copy-candidate-to-tmp" cp "$DEB_PATH" "$tmp_deb"
+  run_captured "copy-candidate-to-tmp" cp -f "$DEB_PATH" "$tmp_deb"
 fi
 run_captured "candidate-checksums" sha256sum "$DEB_PATH" "$tmp_deb"
 run_captured "candidate-byte-compare" cmp "$DEB_PATH" "$tmp_deb"

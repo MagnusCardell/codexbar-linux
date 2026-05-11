@@ -14,7 +14,7 @@ the candidate remains blocked until the root-backed package smoke and Ubuntu
 | 05F | Settings reschedule without daemon restart | `daemon/src/app.rs`; `settings_patch_advances_scheduler_revision` | Implemented and tested |
 | 05F | Refresh failure clears active-refresh guard | `daemon/src/app.rs`; `failed_refresh_can_be_unwedged_without_daemon_restart` | Implemented and tested |
 | 05F.1 | Hide or fix visible inert controls, especially `start-daemon-on-login` | `extension/prefs.js`; `schemas/org.gnome.shell.extensions.codexbar-linux.gschema.xml`; `docs/CONTRACTS.md`; `scripts/lint-gjs.sh` | Hidden/reserved for v0.1 and statically checked |
-| 05G | Final root-backed package smoke with latest `.deb` | `scripts/package-root-smoke.sh`; `scripts/validate-release-evidence.sh`; candidate staged at `/tmp/codexbar-linux_0.1.0-1_amd64.deb` | Blocked until sudo-backed install/remove/purge evidence exists |
+| 05G | Final root-backed package smoke with latest `.deb` | `scripts/package-root-smoke.sh`; `scripts/validate-release-evidence.sh`; candidate staged at `/tmp/codexbar-linux.deb` | Blocked until sudo-backed install/remove/purge evidence exists |
 | 05H | Release-candidate gate and tag prep | `docs/release-candidate-gate.md`; `scripts/validate-release-gate.sh`; `scripts/test-release-evidence.sh` | Gate implemented; final tag remains blocked |
 | 05H | Docs demote unimplemented promises | `README.md`; `docs/ACCEPTANCE.md`; `docs/release-notes-0.1.0.md`; `docs/release-smoke-test.md`; `docs/ROADMAP.md` | Current docs name remaining blockers and reject premature release claims |
 | 05I | Ubuntu matrix smoke includes GNOME 50 metadata validation | `extension/metadata.json`; `scripts/lint-gjs.sh`; `scripts/build-deb.sh`; `scripts/install-local.sh`; `scripts/validate-packaging.sh` | Static metadata validation implemented |
@@ -24,14 +24,12 @@ the candidate remains blocked until the root-backed package smoke and Ubuntu
 
 ## Release Evidence Commands
 
-Run the root-backed package smoke against the exact `dist/` candidate artifact.
-The helper copies that artifact to `/tmp` and records both paths in package
-evidence; passing the `/tmp` copy as `--deb` will not satisfy the completion
-audit's latest-artifact path check.
+Run the root-backed package smoke against the stable candidate artifact. The
+helper copies that artifact to `/tmp` and records both paths in package
+evidence.
 
 ```bash
-arch="$(dpkg --print-architecture)"
-candidate="dist/codexbar-linux_0.1.0-1_${arch}.deb"
+candidate="dist/codexbar-linux.deb"
 scripts/package-root-smoke.sh --deb "$candidate" --purge
 ```
 
@@ -119,11 +117,11 @@ verification claims true.
 ## Current Blockers
 
 - Latest rebuilt candidate staged locally:
-  `/tmp/codexbar-linux_0.1.0-1_amd64.deb`
+  `/tmp/codexbar-linux.deb`
   (`sha256: 9cc89abbe66834caa1799f642b232eeee6e59f68933d871dc66a2005e87c4cb8`).
   Non-root candidate staging, checksum, byte-compare, fields, and contents
   inspection passed with
-  `scripts/package-root-smoke.sh --deb dist/codexbar-linux_0.1.0-1_amd64.deb --evidence-dir /tmp/codexbar-package-stage-current.bCSRYa --stage-only`;
+  `scripts/package-root-smoke.sh --deb dist/codexbar-linux.deb --evidence-dir /tmp/codexbar-package-stage-current.bCSRYa --stage-only`;
   this is package
   preflight evidence only. Its manifest has `smokeType: package-stage` and
   `finalReleaseEvidence: false`, so it does not satisfy final root-backed
@@ -132,7 +130,7 @@ verification claims true.
   candidate. Non-interactive sudo is unavailable in the current environment.
   A non-interactive attempt at
   `/tmp/codexbar-package-root-noninteractive-attempt` ran
-  `scripts/package-root-smoke.sh --deb dist/codexbar-linux_0.1.0-1_amd64.deb --evidence-dir /tmp/codexbar-package-root-noninteractive-attempt --purge --noninteractive-sudo`;
+  `scripts/package-root-smoke.sh --deb dist/codexbar-linux.deb --evidence-dir /tmp/codexbar-package-root-noninteractive-attempt --purge --noninteractive-sudo`;
   it failed at `sudo -n -v` with `sudo: a password is required`, wrote
   `incomplete.txt` with `final-release-evidence: false`, and did not produce
   `evidence.json`; it did not install or remove the package.

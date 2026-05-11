@@ -13,11 +13,11 @@ a localhost web service.
 
 ## Status
 
-CodexBar GNOME v0.1.0 is the current development `.deb` package for
+CodexBar GNOME currently builds a local development `.deb` package for
 Ubuntu/GNOME users who are comfortable installing a local package and
-configuring the upstream CLI. The v0.2.0 compatibility target is upstream
-CodexBar CLI v0.25.1 while the v0.1 package and GNOME Shell behavior remain
-intact.
+configuring the upstream CLI. `./scripts/build-deb.sh` prints the package path;
+use that `.deb` as-is. The v0.2.0 release line targets upstream CodexBar CLI
+v0.25.1 while the existing GNOME Shell behavior remains intact.
 
 Primary target:
 
@@ -26,7 +26,7 @@ Primary target:
 - Wayland-first desktop sessions
 - `systemd --user` and D-Bus session activation
 
-Release gates before v0.1.0 final:
+Release gates before final package sign-off:
 
 - Ubuntu 26.04 LTS/GNOME 50 compatibility as a release gate.
 - Full Ubuntu 24.04/26.04 package smoke matrix sign-off.
@@ -82,16 +82,11 @@ Or download a Linux CLI tarball from upstream releases:
 https://github.com/steipete/CodexBar/releases
 ```
 
-Use the archive that matches your architecture, for example:
-
-- `CodexBarCLI-v<tag>-linux-x86_64.tar.gz`
-- `CodexBarCLI-v<tag>-linux-aarch64.tar.gz`
-
 Extract it somewhere stable, such as:
 
 ```bash
 mkdir -p ~/.local/bin/codexbar-upstream
-tar -xzf CodexBarCLI-v<tag>-linux-x86_64.tar.gz -C ~/.local/bin/codexbar-upstream
+tar -xzf /path/to/CodexBarCLI.tar.gz -C ~/.local/bin/codexbar-upstream
 chmod +x ~/.local/bin/codexbar-upstream/codexbar
 ```
 
@@ -113,11 +108,12 @@ If `codexbar` is not on your interactive shell `PATH`, use the extracted path:
 
 ### 2. Install CodexBar GNOME
 
-From a downloaded `.deb`:
+From a downloaded `.deb`, including a package asset from the GitHub Releases
+page:
 
-```bash
-arch="$(dpkg --print-architecture)"
-sudo apt install "./codexbar-linux_0.1.0-1_${arch}.deb"
+```text
+cp -f ./codexbar-linux.deb /tmp/codexbar-linux.deb
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 codexbar-linux-setup
 ```
 
@@ -125,9 +121,13 @@ From this repository:
 
 ```bash
 ./scripts/build-deb.sh
-arch="$(dpkg --print-architecture)"
-cp "dist/codexbar-linux_0.1.0-1_${arch}.deb" /tmp/
-sudo apt install --reinstall "/tmp/codexbar-linux_0.1.0-1_${arch}.deb"
+```
+
+Install the `.deb` printed by `./scripts/build-deb.sh`:
+
+```text
+cp -f ./dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 codexbar-linux-setup
 ```
 
@@ -242,10 +242,12 @@ Installing a local `.deb` from a private project directory can produce a
 non-fatal `_apt` sandbox warning. Copy the package to `/tmp` and install from
 there:
 
-```bash
-cp dist/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb /tmp/
-sudo apt install --reinstall /tmp/codexbar-linux_0.1.0-1_$(dpkg --print-architecture).deb
+```text
+cp -f ./dist/codexbar-linux.deb /tmp/codexbar-linux.deb
+sudo apt install --reinstall /tmp/codexbar-linux.deb
 ```
+
+Use the concrete filename printed by `./scripts/build-deb.sh`.
 
 ### Provider Shows Signed Out or Unavailable
 
@@ -354,6 +356,10 @@ Build the development package:
 ./scripts/build-deb.sh
 ```
 
+The script writes `dist/codexbar-linux.deb`. That `.deb` can be attached to a
+GitHub Release after the release gates pass.
+See [GitHub Release Publishing](docs/github-release-publishing.md).
+
 Run fixture-backed local development:
 
 ```bash
@@ -371,7 +377,7 @@ CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
 
 - [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md)
 - [Release Notes 0.2.0](docs/release-notes-0.2.0.md)
-- [Release Notes 0.1.0](docs/release-notes-0.1.0.md)
+- [GitHub Release Publishing](docs/github-release-publishing.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)
 - [Contracts](docs/CONTRACTS.md)

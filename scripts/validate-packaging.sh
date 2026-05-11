@@ -181,7 +181,7 @@ if "extension/* " in debian_install or "extension/tests" in debian_install or "t
 release_smoke = (root / "docs/release-smoke-test.md").read_text(encoding="utf-8")
 release_smoke_requirements = {
     "apt sandbox warning note": "`apt` may print a non-fatal `_apt` sandbox warning",
-    "architecture-neutral /tmp apt reinstall command": "sudo apt install --reinstall \"/tmp/codexbar-linux_0.1.0-1_${arch}.deb\"",
+    "stable /tmp apt reinstall command": "sudo apt install --reinstall /tmp/codexbar-linux.deb",
     "packaged daemon check": "/usr/bin/codexbar-linuxd --check",
     "system extension accepted path": "Path: /usr/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
     "user-local shadowing path": "Path: ~/.local/share/gnome-shell/extensions/codexbar-linux@codexbar.dev",
@@ -191,7 +191,7 @@ release_smoke_requirements = {
     "saved check log marker": "saved `./scripts/check.sh` log",
     "package setup helper": "codexbar-linux-setup",
     "CODEXBAR_CLI systemd user environment smoke": "CODEXBAR_CLI` in the systemd user environment",
-    "recorded apt install success": "Real `sudo apt install ./dist/codexbar-linux_0.1.0-1_amd64.deb` succeeded",
+    "recorded apt install success": "Real `sudo apt install ./dist/codexbar-linux.deb` succeeded",
     "recorded D-Bus activation pass": "D-Bus activation passed from the installed service files",
     "recorded CODEXBAR_CLI refresh pass": "After setting `CODEXBAR_CLI` in the systemd user environment and restarting",
     "non-executable CODEXBAR_CLI degraded state": "`upstream_cli_not_executable` state safely",

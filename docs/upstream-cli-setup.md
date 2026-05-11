@@ -14,8 +14,7 @@ before configuring `codexbar-linuxd`:
 brew install steipete/tap/codexbar
 ```
 
-or download a Linux release archive such as
-`CodexBarCLI-v<tag>-linux-<arch>.tar.gz` from:
+or download a Linux release archive from:
 
 ```text
 https://github.com/steipete/CodexBar/releases
