@@ -5,6 +5,20 @@ Ubuntu/GNOME companion. The compatibility target is upstream CodexBar CLI
 v0.25.1. The supported production data plane remains upstream `codexbar` CLI
 and local provider tooling through the user-scoped daemon.
 
+## Install
+
+1. Download `codexbar-linux.deb`, copy it to `/tmp`, and reinstall:
+
+```bash
+cp -f ./codexbar-linux.deb /tmp/codexbar-linux.deb
+sudo apt install --reinstall /tmp/codexbar-linux.deb
+```
+
+2. Run `codexbar-linux-setup` as your desktop user.
+
+3. If needed, set the upstream CLI path with
+   `codexbar-linux-setup --codexbar-cli /absolute/path/to/codexbar`.
+
 ## Compatibility Target
 
 - Upstream CodexBar CLI target: v0.25.1.
