@@ -5,7 +5,7 @@ import {
     createDiagnosticsButton,
     createDiagnosticsCopyButton,
 } from './diagnosticsView.js';
-import {createContinuousMeter, createProviderMeters} from './meterBars.js';
+import {createMeter, createProviderMeters} from './meterBars.js';
 import {safeDisplay} from './state.js';
 
 const MAX_POPOVER_PROVIDER_ITEMS = 4;
@@ -102,11 +102,11 @@ function createProviderStripItem(row, actions) {
 }
 
 function createStripMeter(meter, severity) {
-    return createContinuousMeter(
-        meterRemainingVisualPercent(meter),
-        meter?.tone ?? severityTone(severity),
-        {compact: true},
-    );
+    return createMeter(meter, {
+        compact: true,
+        strip: true,
+        fallbackTone: severityTone(severity),
+    });
 }
 
 function createSelectedProviderTitle(row, view, actions) {
@@ -163,6 +163,15 @@ function createUsageSections(row) {
         return section;
     }
 
+    if (row?.availabilityMeter) {
+        section.add_child(createUsageMeterSection({
+            title: 'Availability',
+            meter: row.availabilityMeter,
+        }));
+        section.add_child(createUsageDetailRows(usageSections));
+        return section;
+    }
+
     for (const usageSection of usageSections)
         section.add_child(createUsageMeterSection(usageSection));
 
@@ -180,6 +189,41 @@ function createUsageMeterSection(usageSection) {
         limit: 1,
     }));
     return box;
+}
+
+function createUsageDetailRows(usageSections) {
+    const rows = new St.BoxLayout({
+        vertical: true,
+        style_class: 'codexbar-usage-detail-list',
+        x_expand: true,
+    });
+
+    for (const usageSection of usageSections) {
+        const meter = usageSection?.meter ?? null;
+        const row = new St.BoxLayout({
+            style_class: 'codexbar-usage-detail-row',
+            x_expand: true,
+        });
+        row.add_child(new St.Label({
+            text: safeDisplay(usageSection?.title || meter?.label || 'Usage'),
+            style_class: 'codexbar-usage-detail-label',
+            x_expand: true,
+        }));
+        row.add_child(new St.Label({
+            text: usageDetailText(meter),
+            style_class: 'codexbar-usage-detail-value',
+        }));
+        rows.add_child(row);
+    }
+
+    return rows;
+}
+
+function usageDetailText(meter) {
+    return [meter?.detail, meter?.resetText]
+        .filter(text => typeof text === 'string' && text.length > 0)
+        .map(text => safeDisplay(text))
+        .join(' · ') || 'Usage unavailable';
 }
 
 function createCostSection(costRows) {
@@ -288,16 +332,6 @@ function selectedProviderSubtitle(row, view) {
         row.titleStatusText,
         row.identity,
     ].filter(Boolean).join(' · ') || row.resetText || view.headerStatus || 'Usage state unavailable';
-}
-
-function meterRemainingVisualPercent(meter) {
-    if (Number.isFinite(meter?.fillPercent))
-        return meter.fillPercent;
-    if (Number.isFinite(meter?.remainingPercent))
-        return meter.remainingPercent;
-    if (Number.isFinite(meter?.usedPercent))
-        return 100 - meter.usedPercent;
-    return null;
 }
 
 function severityTone(severity) {

@@ -1,0 +1,40 @@
+{
+  "fixtureId": "usage_codex_cli_success",
+  "synthetic": false,
+  "docDerived": true,
+  "command": "usage",
+  "expectedCategory": "usage_success",
+  "timeoutSeconds": 90,
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 1,
+  "stdoutBytes": 900,
+  "stderrBytes": 0,
+  "stdoutPath": "usage/doc_v0251_usage_codex_cli_success_stdout.json",
+  "stderrPath": "usage/doc_v0251_usage_codex_cli_success_stderr.txt",
+  "metadataPath": "usage/doc_v0251_usage_codex_cli_success_metadata.json",
+  "upstreamVersion": "doc-derived for upstream CodexBar v0.25.1 compatibility target",
+  "capturedAt": "2026-05-11T00:00:00Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "doc-derived",
+    "arch": "doc-derived"
+  },
+  "argv": [
+    "codexbar",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "codex",
+    "--source",
+    "cli"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "doc-derived v0.25.1 compatibility usage fixture with redacted identity values"
+    ]
+  }
+}

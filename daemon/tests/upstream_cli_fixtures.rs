@@ -123,7 +123,7 @@ fn upstream_cli_live_provider_fixture_ids_are_targeted() {
 }
 
 #[test]
-fn upstream_cli_required_live_matrix_is_present() {
+fn upstream_cli_required_compatibility_matrix_is_present() {
     let (manifest, _root) = load_manifest();
     for (fixture_id, argv, expected_category) in [
         ("version", &["codexbar", "--version"][..], "version"),
@@ -182,6 +182,19 @@ fn upstream_cli_required_live_matrix_is_present() {
             "cost_success",
         ),
         (
+            "cost_both_success",
+            &[
+                "codexbar",
+                "cost",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "both",
+            ],
+            "cost_success",
+        ),
+        (
             "status_all_cli",
             &[
                 "codexbar",
@@ -207,6 +220,62 @@ fn upstream_cli_required_live_matrix_is_present() {
                 "codex",
                 "--source",
                 "cli",
+            ],
+            "usage_success",
+        ),
+        (
+            "usage_codex_cli_success",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "cli",
+            ],
+            "usage_success",
+        ),
+        (
+            "usage_claude_cli_success",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "claude",
+                "--source",
+                "cli",
+            ],
+            "usage_success",
+        ),
+        (
+            "source_oauth_semantic",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "oauth",
+            ],
+            "usage_success",
+        ),
+        (
+            "source_api_semantic",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "codex",
+                "--source",
+                "api",
             ],
             "usage_success",
         ),

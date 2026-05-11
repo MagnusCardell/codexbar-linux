@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "claude",
+    "version": "0.25.1",
+    "source": "claude",
+    "usage": {
+      "primary": {
+        "usedPercent": 31,
+        "windowMinutes": 300,
+        "resetsAt": "2026-05-11T15:00:00Z"
+      },
+      "secondary": null,
+      "tertiary": null,
+      "updatedAt": "2026-05-11T10:00:00Z",
+      "identity": {
+        "providerID": "[REDACTED_ACCOUNT_ID]",
+        "accountEmail": "[REDACTED_EMAIL]",
+        "accountOrganization": null,
+        "loginMethod": "cli"
+      },
+      "accountEmail": "[REDACTED_EMAIL]",
+      "accountOrganization": null,
+      "loginMethod": "cli"
+    }
+  }
+]

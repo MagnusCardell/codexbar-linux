@@ -1,0 +1,39 @@
+{
+  "fixtureId": "cost_both_success",
+  "synthetic": false,
+  "docDerived": true,
+  "command": "cost",
+  "expectedCategory": "cost_success",
+  "timeoutSeconds": 30,
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 1,
+  "stdoutBytes": 1200,
+  "stderrBytes": 0,
+  "stdoutPath": "cost/doc_v0251_cost_both_success_stdout.json",
+  "stderrPath": "cost/doc_v0251_cost_both_success_stderr.txt",
+  "metadataPath": "cost/doc_v0251_cost_both_success_metadata.json",
+  "upstreamVersion": "doc-derived for upstream CodexBar v0.25.1 compatibility target",
+  "capturedAt": "2026-05-11T00:00:00Z",
+  "platform": {
+    "os": "Linux",
+    "kernel": "doc-derived",
+    "arch": "doc-derived"
+  },
+  "argv": [
+    "codexbar",
+    "cost",
+    "--format",
+    "json",
+    "--json-only",
+    "--provider",
+    "both"
+  ],
+  "redaction": {
+    "applied": true,
+    "policyVersion": 1,
+    "notes": [
+      "doc-derived v0.25.1 compatibility cost fixture; no identity-bearing values present"
+    ]
+  }
+}

@@ -19,14 +19,17 @@
   min-width: 30px;
 }
 
-.codexbar-panel-content-merged,
+.codexbar-panel-content-merged {
+  min-width: 54px;
+}
+
 .codexbar-panel-content-minimal {
   min-width: 30px;
 }
 
 .codexbar-panel-content-provider {
   spacing: 5px;
-  min-width: 30px;
+  min-width: 54px;
 }
 
 .codexbar-panel-label {
@@ -118,8 +121,8 @@
 }
 
 .codexbar-provider-strip-item {
-  min-width: 78px;
-  max-width: 104px;
+  min-width: 88px;
+  max-width: 116px;
   padding: 6px 8px;
   border-radius: 8px;
   border: 0;
@@ -227,8 +230,8 @@
 
 .codexbar-panel-provider-item {
   padding: 0;
-  min-width: 30px;
-  max-width: 30px;
+  min-width: 54px;
+  max-width: 54px;
 }
 
 .codexbar-panel-overflow {
@@ -239,9 +242,9 @@
 }
 
 .codexbar-panel-meter-stack {
-  width: 30px;
-  min-width: 30px;
-  spacing: 1px;
+  width: 54px;
+  min-width: 54px;
+  spacing: 0;
 }
 
 .codexbar-severity-ok {
@@ -260,6 +263,26 @@
 .codexbar-usage-sections,
 .codexbar-usage-section {
   spacing: 14px;
+}
+
+.codexbar-usage-detail-list {
+  spacing: 5px;
+}
+
+.codexbar-usage-detail-row {
+  spacing: 8px;
+}
+
+.codexbar-usage-detail-label {
+  max-width: 180px;
+  color: rgba(244, 244, 244, 0.66);
+  font-size: 0.82em;
+  font-weight: 600;
+}
+
+.codexbar-usage-detail-value {
+  color: #a8adb5;
+  font-size: 0.82em;
 }
 
 .codexbar-provider-meters,
@@ -374,11 +397,11 @@
 }
 
 .codexbar-meter-compact {
-  width: 30px;
-  min-width: 30px;
-  max-width: 30px;
-  height: 3px;
-  min-height: 3px;
+  width: 54px;
+  min-width: 54px;
+  max-width: 54px;
+  height: 5px;
+  min-height: 5px;
   border-radius: 2px;
 }
 
@@ -391,8 +414,30 @@
 }
 
 .codexbar-meter-compact .codexbar-meter-fill {
-  height: 3px;
-  min-height: 3px;
+  height: 5px;
+  min-height: 5px;
+  border-radius: 2px;
+}
+
+.codexbar-meter-composite {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.codexbar-meter-weekly-envelope {
+  border-radius: 3px;
+  background-color: rgba(122, 135, 148, 0.62);
+}
+
+.codexbar-meter-effective-fill {
+  border-radius: 3px;
+}
+
+.codexbar-meter-weekly-rest {
+  background-color: transparent;
+}
+
+.codexbar-meter-compact .codexbar-meter-weekly-envelope,
+.codexbar-meter-compact .codexbar-meter-effective-fill {
   border-radius: 2px;
 }
 

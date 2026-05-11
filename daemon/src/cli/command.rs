@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_matrix_matches_task_02b() {
+    fn command_matrix_matches_v0251_strategy() {
         assert_eq!(
             usage_default("codex").args,
             [
@@ -139,6 +139,18 @@ mod tests {
             ]
         );
         assert_eq!(
+            usage_default("claude").args,
+            [
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "claude",
+                "--source",
+                "cli"
+            ]
+        );
+        assert_eq!(
             cost_both().args,
             [
                 "cost",
@@ -148,6 +160,10 @@ mod tests {
                 "--provider",
                 "both"
             ]
+        );
+        assert!(
+            !cost_both().args.iter().any(|arg| arg == "--source"),
+            "cost command must not pass --source"
         );
     }
 }

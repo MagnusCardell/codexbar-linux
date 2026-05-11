@@ -1,0 +1,60 @@
+[
+  {
+    "provider": "codex",
+    "source": "local",
+    "updatedAt": "2026-05-11T10:00:00Z",
+    "sessionTokens": 1200,
+    "sessionCostUSD": 0.42,
+    "last30DaysTokens": 34000,
+    "last30DaysCostUSD": 12.34,
+    "daily": [
+      {
+        "date": "2026-05-11",
+        "inputTokens": 900,
+        "outputTokens": 300,
+        "totalTokens": 1200,
+        "totalCost": 0.42,
+        "modelsUsed": ["gpt-5-codex"],
+        "modelBreakdowns": [
+          {
+            "modelName": "gpt-5-codex",
+            "cost": 0.42
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalTokens": 34000,
+      "totalCost": 12.34
+    }
+  },
+  {
+    "provider": "claude",
+    "source": "claude",
+    "updatedAt": "2026-05-11T10:00:00Z",
+    "sessionTokens": 800,
+    "sessionCostUSD": 0.21,
+    "last30DaysTokens": 18000,
+    "last30DaysCostUSD": 4.56,
+    "daily": [
+      {
+        "date": "2026-05-11",
+        "inputTokens": 600,
+        "outputTokens": 200,
+        "totalTokens": 800,
+        "totalCost": 0.21,
+        "modelsUsed": ["claude-sonnet"],
+        "modelBreakdowns": [
+          {
+            "modelName": "claude-sonnet",
+            "cost": 0.21
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "totalTokens": 18000,
+      "totalCost": 4.56
+    }
+  }
+]

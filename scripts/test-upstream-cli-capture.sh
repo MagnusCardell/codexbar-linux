@@ -293,6 +293,39 @@ grep -Fx -- "usage --format json --json-only --provider all --source cli" "$LOG"
 }
 
 : >"$LOG"
+run_capture "$TMP/provider-oauth-flag" --allow-provider-network --providers codex --provider-source oauth
+for expected in \
+  "--format json --json-only --provider codex --source oauth" \
+  "usage --format json --json-only --provider codex --source oauth" \
+  "--format json --json-only --provider codex --source oauth --status" \
+  "cost --format json --json-only --provider both"
+do
+  grep -Fx -- "$expected" "$LOG" >/dev/null || {
+    echo "missing oauth provider-source capture invocation: $expected" >&2
+    cat "$LOG" >&2
+    exit 1
+  }
+done
+for expected_id in \
+  '"fixtureId": "usage_codex_oauth_default"' \
+  '"fixtureId": "usage_codex_oauth_subcommand"' \
+  '"fixtureId": "status_codex_oauth"'
+do
+  grep -R -F -- "$expected_id" "$TMP/provider-oauth-flag" >/dev/null || {
+    echo "missing oauth source fixture id: $expected_id" >&2
+    exit 1
+  }
+done
+
+: >"$LOG"
+run_capture "$TMP/provider-api-flag" --allow-provider-network --providers codex --provider-source api
+grep -Fx -- "--format json --json-only --provider codex --source api" "$LOG" >/dev/null || {
+  echo "explicit --provider-source api was not passed to default usage capture" >&2
+  cat "$LOG" >&2
+  exit 1
+}
+
+: >"$LOG"
 run_capture "$TMP/provider-codex" --allow-provider-network --providers codex --usage-timeout 90
 for expected in \
   "--version" \

@@ -793,6 +793,7 @@ export function providerRow(provider, options = {}) {
     const statusText = safeDisplay(providerStatusText(provider), meta.description);
     const meters = disabled ? [] : providerMeters(provider);
     const meterRows = meters.map(meter => meterRow(meter, options.resetTimeFormat));
+    const availabilityMeter = disabled ? null : compositeAvailabilityMeter(provider);
     const costRows = disabled ? [] : costSummaryRows(provider?.cost);
     const source = disabled ? '' : sourceLabel(provider?.source);
     const adapter = disabled ? '' : adapterLabel(provider?.sourceAdapter);
@@ -819,6 +820,7 @@ export function providerRow(provider, options = {}) {
         resetText: meters
             .map(meter => formatMeterDetail(meter, options.resetTimeFormat))
             .join(' / ') || 'No usage data',
+        availabilityMeter,
         meters,
         meterRows,
         usageSections: usageSectionRows(meterRows),
@@ -840,7 +842,7 @@ export function providerSelectorRow(row, selectedProviderId = '') {
         dimmed: row.disabled || !['ok', 'stale'].includes(row.state),
         disabled: row.disabled,
         statusLabel: row.statusLabel,
-        meter: primaryMeter,
+        meter: row.availabilityMeter ?? primaryMeter,
     };
 }
 
@@ -868,7 +870,7 @@ export function panelViewModel(providerRows, selectedRow, viewState, stale, opti
             meters: panelMeters(row.provider),
             compact: true,
             showText: false,
-            meterCount: 2,
+            meterCount: 1,
         }));
 
     return {
@@ -877,12 +879,12 @@ export function panelViewModel(providerRows, selectedRow, viewState, stale, opti
         status: stateMeta(viewState).label,
         iconName: stateMeta(viewState).iconName,
         stale,
-        meters: selectedRow?.disabled ? [null, null] : panelMeters(selectedRow?.provider),
+        meters: selectedRow?.disabled ? [null] : panelMeters(selectedRow?.provider),
         visibleProviders,
         overflowCount: Math.max(0, activeProviderRows.length - visibleProviders.length),
         compact: true,
         showText: false,
-        meterCount: 2,
+        meterCount: 1,
     };
 }
 
@@ -943,15 +945,19 @@ export function panelAccessibleName(view) {
 
 export function panelMeters(provider) {
     if (!provider)
-        return [null, null];
+        return [null];
 
+    const availabilityMeter = compositeAvailabilityMeter(provider);
+    if (availabilityMeter)
+        return [availabilityMeter];
     const primary = provider.usage?.primary ?? null;
-    const secondary = provider.usage?.secondary
+    const fallback = primary
+        ?? provider.usage?.secondary
         ?? meterFromCredits(provider.credits)
         ?? provider.usage?.tertiary
         ?? null;
 
-    return [primary, secondary];
+    return [fallback];
 }
 
 export function providerMeters(provider) {
@@ -970,6 +976,39 @@ export function providerMeters(provider) {
         meters.push(creditsMeter);
 
     return meters;
+}
+
+export function compositeAvailabilityMeter(provider) {
+    const primary = provider?.usage?.primary ?? null;
+    const secondary = provider?.usage?.secondary ?? null;
+    const sessionRemainingPercent = meterRemainingPercent(primary);
+    const weeklyRemainingPercent = meterRemainingPercent(secondary);
+    if (sessionRemainingPercent === null || weeklyRemainingPercent === null)
+        return null;
+
+    const weeklyEnvelopeFraction = weeklyRemainingPercent / 100;
+    const effectiveFraction = weeklyEnvelopeFraction * (sessionRemainingPercent / 100);
+    const weeklyEnvelopePercent = roundMeterPercent(weeklyRemainingPercent);
+    const effectivePercent = roundMeterPercent(effectiveFraction * 100);
+    return {
+        kind: 'composite_availability',
+        key: 'availability',
+        meterKey: 'availability',
+        label: 'Availability',
+        detail: `${formatPercent(effectivePercent)}% effective · ${formatPercent(sessionRemainingPercent)}% session inside ${formatPercent(weeklyRemainingPercent)}% weekly`,
+        usedPercent: roundMeterPercent(100 - effectivePercent),
+        remainingPercent: effectivePercent,
+        fillPercent: effectivePercent,
+        fillFraction: roundMeterFractionFromPercent(effectivePercent),
+        tone: meterTone({remainingPercent: effectivePercent}),
+        resetText: null,
+        sessionRemainingPercent: roundMeterPercent(sessionRemainingPercent),
+        weeklyRemainingPercent: roundMeterPercent(weeklyRemainingPercent),
+        weeklyEnvelopeFraction,
+        weeklyEnvelopePercent,
+        effectiveFraction,
+        effectivePercent,
+    };
 }
 
 export function meterFromCredits(credits) {
@@ -1014,6 +1053,24 @@ export function meterFillFraction(meter) {
 export function meterFillFractionFromPercent(percent) {
     const clamped = clampPercent(percent);
     return clamped === null ? null : clamped / 100;
+}
+
+function roundMeterPercent(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value))
+        return null;
+    return Math.round(clampPercent(value) * 10) / 10;
+}
+
+function formatPercent(value) {
+    const rounded = roundMeterPercent(value);
+    if (rounded === null)
+        return '0';
+    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+}
+
+function roundMeterFractionFromPercent(value) {
+    const fraction = meterFillFractionFromPercent(value);
+    return fraction === null ? null : Math.round(fraction * 1000) / 1000;
 }
 
 export function meterClassNames(tone, {compact = false} = {}) {

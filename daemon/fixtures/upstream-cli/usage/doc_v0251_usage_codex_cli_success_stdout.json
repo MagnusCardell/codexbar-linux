@@ -1,0 +1,35 @@
+[
+  {
+    "provider": "codex",
+    "version": "0.25.1",
+    "source": "codex-cli",
+    "usage": {
+      "primary": {
+        "usedPercent": 24,
+        "windowMinutes": 300,
+        "resetsAt": "2026-05-11T15:00:00Z"
+      },
+      "secondary": {
+        "usedPercent": 41,
+        "windowMinutes": 10080,
+        "resetsAt": "2026-05-18T00:00:00Z"
+      },
+      "tertiary": null,
+      "updatedAt": "2026-05-11T10:00:00Z",
+      "identity": {
+        "providerID": "[REDACTED_ACCOUNT_ID]",
+        "accountEmail": "[REDACTED_EMAIL]",
+        "accountOrganization": "[REDACTED_ORG]",
+        "loginMethod": "cli"
+      },
+      "accountEmail": "[REDACTED_EMAIL]",
+      "accountOrganization": "[REDACTED_ORG]",
+      "loginMethod": "cli"
+    },
+    "credits": {
+      "remaining": 80,
+      "remainingPercent": 76,
+      "updatedAt": "2026-05-11T10:00:00Z"
+    }
+  }
+]

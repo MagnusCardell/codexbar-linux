@@ -62,12 +62,32 @@ required_committed_fixtures = {
         "argv": ["codexbar", "cost", "--format", "json", "--json-only", "--provider", "all"],
         "expectedCategory": "cost_success",
     },
+    "cost_both_success": {
+        "argv": ["codexbar", "cost", "--format", "json", "--json-only", "--provider", "both"],
+        "expectedCategory": "cost_success",
+    },
     "status_all_cli": {
         "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "all", "--source", "cli", "--status"],
         "expectedCategory": "usage_error",
     },
     "usage_codex_cli_default": {
         "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "codex", "--source", "cli"],
+        "expectedCategory": "usage_success",
+    },
+    "usage_codex_cli_success": {
+        "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "codex", "--source", "cli"],
+        "expectedCategory": "usage_success",
+    },
+    "usage_claude_cli_success": {
+        "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "claude", "--source", "cli"],
+        "expectedCategory": "usage_success",
+    },
+    "source_oauth_semantic": {
+        "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "codex", "--source", "oauth"],
+        "expectedCategory": "usage_success",
+    },
+    "source_api_semantic": {
+        "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "codex", "--source", "api"],
         "expectedCategory": "usage_success",
     },
     "usage_codex_cli_subcommand": {

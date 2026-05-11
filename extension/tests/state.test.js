@@ -12,6 +12,7 @@ import {
     applyProviderEventJson,
     applyRefreshFinishedJson,
     applySnapshotJson,
+    compositeAvailabilityMeter,
     costSummaryRows,
     createInitialState,
     diagnosticsCopyText,
@@ -59,6 +60,7 @@ function main() {
     assertSnapshotFixturesRenderStates();
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
+    assertCompositeAvailabilityMeterSemantics();
     assertViewModelUsesStateCopyMap();
     assertEmptyProviderSnapshotShowsNoProviderCopy();
     assertAllProviderSettingsOffShowsNoProviderCopy();
@@ -189,7 +191,7 @@ function assertDisabledProvidersFromSettingsStayVisible() {
     assertEqual(selectedDisabled.selectedRow.titleStatusText, 'Disabled');
     assertEqual(selectedDisabled.selectedRow.planLabel, 'Off');
     assertEqual(selectedDisabled.selectedRow.usageSections.length, 0);
-    assertArrayEqual(selectedDisabled.panel.meters, [null, null]);
+    assertArrayEqual(selectedDisabled.panel.meters, [null]);
 
     const providerPanel = normalizeViewState(state, {panelMode: 'provider'});
     assertEqual(providerPanel.panel.visibleProviders.length, 1);
@@ -228,11 +230,59 @@ function assertProviderChangedReplacesCompleteProvider() {
 function assertPanelMetersPreservePrimarySecondarySemantics() {
     const ok = readJson('fixtures/snapshots/ok.json');
     const provider = selectProvider(ok, 'codex');
-    const [primary, secondary] = panelMeters(provider);
-    assertEqual(primary.label, 'Session');
-    assertEqual(secondary.label, 'Weekly');
-    assertEqual(meterRemainingPercent(primary), 58);
-    assertEqual(meterRemainingPercent(secondary), 36);
+    const [availability] = panelMeters(provider);
+    assertEqual(availability.kind, 'composite_availability');
+    assertEqual(availability.label, 'Availability');
+    assertEqual(availability.sessionRemainingPercent, 58);
+    assertEqual(availability.weeklyRemainingPercent, 36);
+    assertEqual(availability.weeklyEnvelopePercent, 36);
+    assertEqual(availability.effectivePercent, 20.9);
+    assertEqual(availability.fillFraction, 0.209);
+
+    const rawRows = providerMeters(provider).map(meter => meterRow(meter, 'countdown', 0));
+    assertArrayEqual(rawRows.map(row => row.label), ['Session', 'Weekly']);
+    assertArrayEqual(rawRows.map(row => row.remainingPercent), [58, 36]);
+}
+
+function assertCompositeAvailabilityMeterSemantics() {
+    const provider = (sessionRemaining, weeklyRemaining) => ({
+        usage: {
+            primary: sessionRemaining === null ? null : {remainingPercent: sessionRemaining, usedPercent: 100 - sessionRemaining, label: 'Session'},
+            secondary: weeklyRemaining === null ? null : {remainingPercent: weeklyRemaining, usedPercent: 100 - weeklyRemaining, label: 'Weekly'},
+            tertiary: null,
+        },
+    });
+
+    let availability = compositeAvailabilityMeter(provider(100, 0));
+    assertEqual(availability.weeklyEnvelopePercent, 0);
+    assertEqual(availability.effectivePercent, 0);
+    assertEqual(availability.fillFraction, 0);
+
+    availability = compositeAvailabilityMeter(provider(100, 69));
+    assertEqual(availability.weeklyEnvelopePercent, 69);
+    assertEqual(availability.effectivePercent, 69);
+    assertEqual(availability.fillFraction, 0.69);
+
+    availability = compositeAvailabilityMeter(provider(50, 69));
+    assertEqual(availability.weeklyEnvelopePercent, 69);
+    assertEqual(availability.effectivePercent, 34.5);
+    assertEqual(availability.fillFraction, 0.345);
+
+    availability = compositeAvailabilityMeter(provider(0, 69));
+    assertEqual(availability.weeklyEnvelopePercent, 69);
+    assertEqual(availability.effectivePercent, 0);
+    assertEqual(availability.fillFraction, 0);
+
+    assertEqual(compositeAvailabilityMeter(provider(80, null)), null);
+    assertEqual(compositeAvailabilityMeter(provider(null, 80)), null);
+
+    const [sessionFallback] = panelMeters(provider(80, null));
+    assertEqual(sessionFallback.label, 'Session');
+    assertEqual(meterRemainingPercent(sessionFallback), 80);
+
+    const [weeklyFallback] = panelMeters(provider(null, 69));
+    assertEqual(weeklyFallback.label, 'Weekly');
+    assertEqual(meterRemainingPercent(weeklyFallback), 69);
 }
 
 function assertViewModelUsesStateCopyMap() {
@@ -360,6 +410,9 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     assertEqual(view.selectedRow.meterRows[1].remainingPercent, 9);
     assertEqual(view.selectedRow.meterRows[1].fillPercent, 9);
     assertEqual(view.selectedRow.meterRows[1].fillFraction, 0.09);
+    assertEqual(view.selectedRow.availabilityMeter.kind, 'composite_availability');
+    assertEqual(view.selectedRow.availabilityMeter.weeklyEnvelopePercent, 9);
+    assertEqual(view.selectedRow.availabilityMeter.effectivePercent, 7.4);
     assertArrayEqual(
         view.selectedRow.usageSections.map(section => section.key),
         ['primary', 'secondary', 'credits'],
@@ -380,10 +433,12 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     assertEqual(view.providerSelectorRows[1].label, 'Claude');
     assertEqual(view.providerSelectorRows[1].displayName, 'Claude');
     assert(!view.providerSelectorRows[1].label.includes(view.selectedRow.shortLabel), 'provider strip should not concatenate badge and provider name');
+    assertEqual(view.providerSelectorRows[1].meter.kind, 'composite_availability');
     assertEqual(view.panel.label, 'CLA');
     assert(view.panel.label.length <= 3, 'top-bar provider label should stay compact');
-    assertEqual(view.panel.meters[0].label, 'Session');
-    assertEqual(view.panel.meters[1].label, 'Weekly');
+    assertEqual(view.panel.meters.length, 1);
+    assertEqual(view.panel.meters[0].kind, 'composite_availability');
+    assertEqual(view.panel.meters[0].effectivePercent, 7.4);
 }
 
 function assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels() {
@@ -569,16 +624,19 @@ function assertPanelViewModelStaysCompactProgressOnly() {
     for (const view of [mergedView, providerView, minimalView]) {
         assertEqual(view.panel.compact, true);
         assertEqual(view.panel.showText, false);
-        assertEqual(view.panel.meterCount, 2);
-        assertEqual(view.panel.meters.length, 2);
+        assertEqual(view.panel.meterCount, 1);
+        assertEqual(view.panel.meters.length, 1);
+        assertEqual(view.panel.meters[0].kind, 'composite_availability');
     }
 
     assertEqual(providerView.panel.visibleProviders.length, 3);
     for (const row of providerView.panel.visibleProviders) {
         assertEqual(row.compact, true);
         assertEqual(row.showText, false);
-        assertEqual(row.meterCount, 2);
-        assertEqual(row.meters.length, 2);
+        assertEqual(row.meterCount, 1);
+        assertEqual(row.meters.length, 1);
+        if (row.meters[0] !== null)
+            assertEqual(row.meters[0].kind, 'composite_availability');
         assert(row.label.length <= 3, 'provider labels should remain bounded for accessibility only');
     }
 }
@@ -750,10 +808,11 @@ function assertProviderMeterViewModelPreservesVisualFillFractions() {
     assertArrayEqual(providerRows.map(row => row.fillPercent), [13, 57, 65, 97]);
     assertArrayEqual(providerRows.map(row => row.fillFraction), [0.13, 0.57, 0.65, 0.97]);
 
-    const panelRows = panelMeters(provider).map(meter => meterRow(meter, 'countdown', 0));
-    assertArrayEqual(panelRows.map(row => row.label), ['Session', 'Weekly']);
-    assertArrayEqual(panelRows.map(row => row.fillPercent), [13, 57]);
-    assertArrayEqual(panelRows.map(row => row.fillFraction), [0.13, 0.57]);
+    const panelRows = panelMeters(provider);
+    assertArrayEqual(panelRows.map(row => row.label), ['Availability']);
+    assertArrayEqual(panelRows.map(row => row.weeklyEnvelopePercent), [57]);
+    assertArrayEqual(panelRows.map(row => row.effectivePercent), [7.4]);
+    assertArrayEqual(panelRows.map(row => row.fillFraction), [0.074]);
 }
 
 function assertMeterCssClassNamesMatchStylesheet() {
@@ -766,6 +825,15 @@ function assertMeterCssClassNamesMatchStylesheet() {
         for (const className of classNames)
             assert(stylesheet.includes(`.${className}`), `stylesheet missing selector for ${className}`);
     }
+    for (const className of [
+        'codexbar-meter-composite',
+        'codexbar-meter-weekly-envelope',
+        'codexbar-meter-effective-fill',
+        'codexbar-usage-detail-row',
+    ])
+        assert(stylesheet.includes(`.${className}`), `stylesheet missing selector for ${className}`);
+    assert(!stylesheet.includes('linear-gradient'), 'meter stylesheet must not use linear-gradient');
+    assert(!readText('extension/src/meterBars.js').includes('linear-gradient'), 'meter rendering must not use linear-gradient');
     assert(meterClassNames('invalid').endsWith('codexbar-meter-unknown'), 'invalid meter tone should fall back to unknown');
     assert(meterFillClassNames('invalid').endsWith('codexbar-meter-fill-unknown'), 'invalid fill tone should fall back to unknown');
 }

@@ -8,13 +8,25 @@ pub fn map_upstream_source(value: Option<&str>) -> SemanticSource {
     if normalized.is_empty() {
         return SemanticSource::Unknown;
     }
-    if normalized == "local" || normalized.starts_with("local-") || normalized.contains("cli") {
+    if matches!(
+        normalized.as_str(),
+        "codex-cli" | "claude" | "cli" | "local"
+    ) || normalized.starts_with("local-")
+        || normalized.ends_with("-cli")
+        || normalized.contains("cli")
+    {
         return SemanticSource::Local;
     }
-    if normalized.contains("web") || normalized.contains("browser") {
+    if matches!(normalized.as_str(), "openai-web" | "web")
+        || normalized.contains("web")
+        || normalized.contains("browser")
+    {
         return SemanticSource::Web;
     }
-    if normalized.contains("api") || normalized.contains("oauth") {
+    if matches!(normalized.as_str(), "oauth" | "api")
+        || normalized.contains("api")
+        || normalized.contains("oauth")
+    {
         return SemanticSource::Api;
     }
     SemanticSource::Unknown
@@ -25,14 +37,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_current_upstream_source_labels() {
-        assert_eq!(
-            map_upstream_source(Some("codex-cli")),
-            SemanticSource::Local
-        );
-        assert_eq!(map_upstream_source(Some("local")), SemanticSource::Local);
-        assert_eq!(map_upstream_source(Some("openai-web")), SemanticSource::Web);
-        assert_eq!(map_upstream_source(Some("oauth")), SemanticSource::Api);
-        assert_eq!(map_upstream_source(Some("api")), SemanticSource::Api);
+    fn maps_v0251_upstream_source_labels() {
+        for label in ["codex-cli", "claude", "cli", "local"] {
+            assert_eq!(
+                map_upstream_source(Some(label)),
+                SemanticSource::Local,
+                "{label} should map to local semantic source"
+            );
+        }
+        for label in ["openai-web", "web"] {
+            assert_eq!(
+                map_upstream_source(Some(label)),
+                SemanticSource::Web,
+                "{label} should map to web semantic source"
+            );
+        }
+        for label in ["oauth", "api"] {
+            assert_eq!(
+                map_upstream_source(Some(label)),
+                SemanticSource::Api,
+                "{label} should map to api semantic source"
+            );
+        }
+        assert_eq!(map_upstream_source(None), SemanticSource::Unknown);
+        assert_eq!(map_upstream_source(Some("")), SemanticSource::Unknown);
     }
 }

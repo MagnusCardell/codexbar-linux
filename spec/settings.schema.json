@@ -27,7 +27,7 @@
         "properties": {
           "enabled": { "type": "boolean", "default": true },
           "preferredSourceAdapter": { "type": "string", "enum": ["auto", "upstream_cli", "linux_web", "off"], "default": "auto" },
-          "allowBrowserImport": { "type": "boolean", "default": true },
+          "allowBrowserImport": { "type": "boolean", "default": false },
           "allowCliFallback": { "type": "boolean", "default": true }
         }
       },

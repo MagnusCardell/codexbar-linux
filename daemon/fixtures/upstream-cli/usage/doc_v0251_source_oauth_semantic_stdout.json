@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "codex",
+    "version": "0.25.1",
+    "source": "oauth",
+    "usage": {
+      "primary": {
+        "usedPercent": 18,
+        "windowMinutes": 300,
+        "resetsAt": "2026-05-11T15:00:00Z"
+      },
+      "secondary": null,
+      "tertiary": null,
+      "updatedAt": "2026-05-11T10:00:00Z",
+      "identity": {
+        "providerID": "[REDACTED_ACCOUNT_ID]",
+        "accountEmail": "[REDACTED_EMAIL]",
+        "accountOrganization": "[REDACTED_ORG]",
+        "loginMethod": "oauth"
+      },
+      "accountEmail": "[REDACTED_EMAIL]",
+      "accountOrganization": "[REDACTED_ORG]",
+      "loginMethod": "oauth"
+    }
+  }
+]

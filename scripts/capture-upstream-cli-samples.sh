@@ -49,8 +49,9 @@ Options:
       captures --provider both and intentionally does not receive --source.
   --provider-source SOURCE
       Source for provider success probes when --allow-provider-network is set.
-      Allowed values: cli, auto, web. Defaults to cli, which is the expected
-      Linux success source. auto and web are Linux error-probe sources.
+      Allowed values: cli, auto, web, oauth, api. Defaults to cli, which is the
+      expected Linux success source. auto and web are Linux error-probe
+      sources on Linux when they require browser/WebKit access.
   --version-timeout SECONDS
       Timeout for codexbar --version. Defaults to 5.
   --usage-timeout SECONDS
@@ -169,9 +170,9 @@ EOF
 fi
 
 case "$PROVIDER_SOURCE" in
-  cli|auto|web) ;;
+  cli|auto|web|oauth|api) ;;
   *)
-    echo "--provider-source must be one of: cli, auto, web" >&2
+    echo "--provider-source must be one of: cli, auto, web, oauth, api" >&2
     exit 2
     ;;
 esac

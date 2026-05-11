@@ -13,9 +13,11 @@ a localhost web service.
 
 ## Status
 
-CodexBar GNOME v0.1.0 is a development `.deb` package for Ubuntu/GNOME users
-who are comfortable installing a local package and configuring the upstream
-CLI.
+CodexBar GNOME v0.1.0 is the current development `.deb` package for
+Ubuntu/GNOME users who are comfortable installing a local package and
+configuring the upstream CLI. The v0.2.0 compatibility target is upstream
+CodexBar CLI v0.25.1 while the v0.1 package and GNOME Shell behavior remain
+intact.
 
 Primary target:
 
@@ -96,8 +98,11 @@ chmod +x ~/.local/bin/codexbar-upstream/codexbar
 Verify the upstream CLI before configuring GNOME:
 
 ```bash
+codexbar --version
 codexbar --format json --json-only --provider codex --source cli
+codexbar --format json --json-only --provider claude --source cli
 codexbar cost --format json --json-only --provider both
+codexbar config validate --format json --json-only
 ```
 
 If `codexbar` is not on your interactive shell `PATH`, use the extracted path:
@@ -302,17 +307,22 @@ Important paths:
 The supported production data plane is upstream `codexbar` CLI plus local
 provider tooling.
 
-The default v0.1 usage/status refresh targets Codex, then Claude, through the
-upstream CLI source. Current upstream cost output is a local Codex + Claude
-cost scan. CodexBar GNOME requests both supported local cost providers:
+The default usage/status refresh targets Codex, then Claude, through the
+upstream CLI source and does not default to `--provider all`. Explicit
+`RefreshOptions.providers` can still request a different target. Current
+upstream v0.25.1 cost output covers local Codex + Claude cost data. CodexBar
+GNOME requests both supported local cost providers:
 
 ```bash
 codexbar cost --format json --json-only --provider both
 ```
 
 Other providers depend on what upstream CodexBar CLI supports on Linux through
-CLI, API, OAuth, or local tooling. Browser/web-only provider collection remains
-out of scope for CodexBar GNOME v0.1.
+CLI, API, OAuth, or local tooling. Upstream semantic source labels such as
+`openai-web`, `web`, `oauth`, or `api` may appear in normalized provider
+metadata when upstream CLI generated them. They do not mean CodexBar GNOME read
+browser cookies, browser profiles, desktop keyrings, provider dashboards, or
+web endpoints. Browser/web-only provider collection remains out of scope.
 
 ## Build and Development
 
@@ -360,6 +370,7 @@ CODEXBAR_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
 ## Docs
 
 - [Upstream CodexBar CLI Setup](docs/upstream-cli-setup.md)
+- [Release Notes 0.2.0](docs/release-notes-0.2.0.md)
 - [Release Notes 0.1.0](docs/release-notes-0.1.0.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security](docs/SECURITY.md)

@@ -11,8 +11,10 @@ import {
     safeDisplay,
 } from './state.js';
 
-const PANEL_METER_WIDTH = 30;
-const PANEL_METER_HEIGHT = 3;
+const PANEL_METER_WIDTH = 54;
+const PANEL_METER_HEIGHT = 5;
+const STRIP_METER_WIDTH = 64;
+const STRIP_METER_HEIGHT = 5;
 const PROVIDER_METER_WIDTH = 330;
 const PROVIDER_METER_HEIGHT = 6;
 
@@ -26,16 +28,11 @@ export function createMicroMeterStack(meters) {
         y_align: Clutter.ActorAlign.CENTER,
     });
 
-    for (const meter of rows.slice(0, 2)) {
-        box.add_child(createContinuousMeter(
-            meterVisualPercent(meter),
-            meterVisualTone(meter),
-            {compact: true}
-        ));
-    }
+    for (const meter of rows.slice(0, 1))
+        box.add_child(createMeter(meter, {compact: true}));
 
-    while (box.get_n_children() < 2)
-        box.add_child(createContinuousMeter(null, 'unknown', {compact: true}));
+    while (box.get_n_children() < 1)
+        box.add_child(createMeter(null, {compact: true}));
 
     return box;
 }
@@ -84,7 +81,7 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
             style_class: 'codexbar-meter-label',
             x_expand: true,
         }));
-        row.add_child(createContinuousMeter(remainingVisualPercent(meter), meter.tone));
+        row.add_child(createMeter(meter));
 
         const detail = new St.BoxLayout({
             style_class: 'codexbar-meter-detail-row',
@@ -108,9 +105,8 @@ export function createProviderMeters(meterRows, {emptyText = 'Usage unavailable'
     return box;
 }
 
-export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = false} = {}) {
-    const width = compact ? PANEL_METER_WIDTH : PROVIDER_METER_WIDTH;
-    const height = compact ? PANEL_METER_HEIGHT : PROVIDER_METER_HEIGHT;
+export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = false, strip = false} = {}) {
+    const {width, height} = meterDimensions({compact, strip});
     const safeTone = safeMeterTone(tone);
     const fillWidth = fillWidthForPercent(fillPercent, width);
     const restWidth = Math.max(0, width - fillWidth);
@@ -151,6 +147,90 @@ export function createContinuousMeter(fillPercent, tone = 'unknown', {compact = 
     return track;
 }
 
+export function createMeter(meter, {compact = false, strip = false, fallbackTone = 'unknown'} = {}) {
+    if (meter?.kind === 'composite_availability')
+        return createCompositeAvailabilityMeter(meter, {compact, strip});
+    return createContinuousMeter(
+        meterVisualPercent(meter),
+        meter ? meterVisualTone(meter) : fallbackTone,
+        {compact, strip},
+    );
+}
+
+function createCompositeAvailabilityMeter(meter, {compact = false, strip = false} = {}) {
+    const {width, height} = meterDimensions({compact, strip});
+    const safeTone = safeMeterTone(meter?.tone);
+    const weeklyWidth = fillWidthForPercent(meter?.weeklyEnvelopePercent, width);
+    const effectiveWidth = Math.min(weeklyWidth, fillWidthForPercent(meter?.effectivePercent, width));
+    const weeklyRestWidth = Math.max(0, weeklyWidth - effectiveWidth);
+    const outerRestWidth = Math.max(0, width - weeklyWidth);
+
+    const track = new St.BoxLayout({
+        vertical: false,
+        style_class: `${meterClassNames(safeTone, {compact})} codexbar-meter-composite`,
+        x_expand: !compact && !strip,
+        x_align: Clutter.ActorAlign.CENTER,
+        y_align: Clutter.ActorAlign.CENTER,
+        style: fixedSizeStyle(width, height),
+    });
+    track.set_width(width);
+    track.set_height(height);
+
+    const weeklyEnvelope = new St.BoxLayout({
+        vertical: false,
+        style_class: 'codexbar-meter-weekly-envelope',
+        style: [
+            fixedSizeStyle(weeklyWidth, height),
+            `background-color: ${weeklyEnvelopeColor()}`,
+        ].join('; '),
+    });
+    weeklyEnvelope.set_width(weeklyWidth);
+    weeklyEnvelope.set_height(height);
+
+    const effectiveFill = new St.Widget({
+        style_class: `${meterFillClassNames(safeTone)} codexbar-meter-effective-fill`,
+        style: [
+            fixedSizeStyle(effectiveWidth, height),
+            `background-color: ${meterColor(safeTone)}`,
+        ].join('; '),
+    });
+    effectiveFill.set_width(effectiveWidth);
+    effectiveFill.set_height(height);
+    weeklyEnvelope.add_child(effectiveFill);
+
+    const weeklyRest = new St.Widget({
+        style_class: 'codexbar-meter-weekly-rest',
+        style: [
+            fixedSizeStyle(weeklyRestWidth, height),
+            'background-color: transparent',
+        ].join('; '),
+    });
+    weeklyRest.set_width(weeklyRestWidth);
+    weeklyRest.set_height(height);
+    weeklyEnvelope.add_child(weeklyRest);
+    track.add_child(weeklyEnvelope);
+
+    const outerRest = new St.Widget({
+        style: [
+            fixedSizeStyle(outerRestWidth, height),
+            'background-color: transparent',
+        ].join('; '),
+    });
+    outerRest.set_width(outerRestWidth);
+    outerRest.set_height(height);
+    track.add_child(outerRest);
+
+    return track;
+}
+
+function meterDimensions({compact = false, strip = false} = {}) {
+    if (strip)
+        return {width: STRIP_METER_WIDTH, height: STRIP_METER_HEIGHT};
+    if (compact)
+        return {width: PANEL_METER_WIDTH, height: PANEL_METER_HEIGHT};
+    return {width: PROVIDER_METER_WIDTH, height: PROVIDER_METER_HEIGHT};
+}
+
 function fillWidthForPercent(value, width) {
     const fraction = meterFillFractionFromPercent(value);
     if (fraction === null || fraction <= 0)
@@ -187,4 +267,8 @@ function meterColor(tone) {
     if (tone === 'ok')
         return '#57c785';
     return '#7a8794';
+}
+
+function weeklyEnvelopeColor() {
+    return 'rgba(122, 135, 148, 0.62)';
 }

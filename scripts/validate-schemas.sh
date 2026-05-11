@@ -27,6 +27,7 @@ fi
 python3 - "${SCHEMAS[@]}" <<'PY'
 import json
 import sys
+from pathlib import Path
 try:
     from jsonschema import Draft202012Validator
 except Exception as exc:
@@ -36,5 +37,12 @@ for path in sys.argv[1:]:
     with open(path, 'r', encoding='utf-8') as f:
         schema = json.load(f)
     Draft202012Validator.check_schema(schema)
+    if Path(path).name == "settings.schema.json":
+        provider_schema = schema["properties"]["providers"]["additionalProperties"]
+        allow_browser_import = provider_schema["properties"]["allowBrowserImport"]
+        if allow_browser_import.get("default") is not False:
+            raise SystemExit(
+                "settings.schema.json providers.*.allowBrowserImport.default must be false"
+            )
     print(f"JSON schema valid: {path}")
 PY

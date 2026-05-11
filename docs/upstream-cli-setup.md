@@ -3,7 +3,7 @@
 CodexBar GNOME uses the upstream `codexbar` CLI and local provider tooling as
 its production data plane. The GNOME Shell extension talks only to the
 user-scoped daemon over D-Bus; provider data is collected by the daemon through
-the CLI.
+the CLI. The v0.2.0 compatibility target is upstream CodexBar CLI v0.25.1.
 
 ## Install Upstream CLI
 
@@ -32,16 +32,23 @@ Check the binary:
 codexbar --version
 ```
 
-Check Codex usage through the Linux CLI source:
+Check Codex and Claude usage through the Linux CLI source:
 
 ```bash
 codexbar --format json --json-only --provider codex --source cli
+codexbar --format json --json-only --provider claude --source cli
 ```
 
-Check local cost summaries:
+Check local Codex + Claude cost summaries:
 
 ```bash
 codexbar cost --format json --json-only --provider both
+```
+
+Check upstream config validation:
+
+```bash
+codexbar config validate --format json --json-only
 ```
 
 If a provider reports that sign-in is required, authenticate the provider using
@@ -98,3 +105,25 @@ systemctl --user restart codexbar-linuxd.service
 Browser cookies, browser profile discovery, provider web fetches, browser
 extensions, keyring access, and localhost/TCP APIs are intentionally unsupported
 by this project.
+
+## Optional v0.25.1 Capture
+
+Normal CI does not require a live upstream v0.25.1 binary. Operators who need
+fresh local evidence can capture redacted sidecars outside the committed fixture
+tree:
+
+```bash
+CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
+  ./scripts/capture-upstream-cli-samples.sh \
+  --output /tmp/codexbar-upstream-cli-v0251 \
+  --allow-provider-network \
+  --providers codex,claude \
+  --provider-source cli \
+  --include-config-validate
+
+./scripts/validate-upstream-cli-capture.sh /tmp/codexbar-upstream-cli-v0251
+```
+
+Review redacted stdout, stderr, metadata, and the manifest manually before
+promoting any selected fixture. Do not commit raw terminal output or private
+provider payloads.

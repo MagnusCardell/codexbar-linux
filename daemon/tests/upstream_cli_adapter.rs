@@ -9,7 +9,7 @@ use codexbar_linuxd::app::{App, RefreshStart};
 use codexbar_linuxd::cache::SnapshotCache;
 use codexbar_linuxd::cli::{CliRefreshRequest, CliTimeouts, UpstreamCliAdapter};
 use codexbar_linuxd::fixtures;
-use codexbar_linuxd::model::{ProviderState, SemanticSource};
+use codexbar_linuxd::model::{ProviderState, SemanticSource, SourceAdapter};
 
 const UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"test","force":true,"sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"]}}"#;
 const LIVE_UPSTREAM_CLI_REFRESH_OPTIONS_JSON: &str = r#"{"schemaVersion":1,"reason":"manual","force":true,"busyBehavior":"return_existing","sourceAdapterPolicy":{"mode":"only","adapters":["upstream_cli"],"allowStaleCacheFallback":false},"providers":["codex"]}"#;
@@ -69,6 +69,40 @@ esac
     common::assert_schema("snapshot.schema.json", &snapshot_json);
     assert!(!snapshot_json.contains("raw.user@example.com"));
     assert!(!snapshot_json.contains("raw-provider-id"));
+}
+
+#[tokio::test]
+async fn upstream_web_semantic_source_does_not_change_daemon_adapter_boundary() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar v0.25.1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider both")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *)
+    cat <<'JSON'
+[{"provider":"codex","version":"0.25.1","source":"openai-web","usage":{"primary":{"usedPercent":12,"windowMinutes":300,"resetsAt":"2026-05-11T12:00:00Z"},"updatedAt":"2026-05-11T10:00:00Z"}}]
+JSON
+    exit 0
+    ;;
+esac
+"#,
+    );
+
+    let refresh = run_adapter(binary, vec!["codex".to_string()], short_timeouts()).await;
+    assert!(tmp.path().is_dir());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert_eq!(provider.source, SemanticSource::Web);
+    assert_eq!(provider.source_adapter, SourceAdapter::UpstreamCli);
+    let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+    common::assert_schema("snapshot.schema.json", &snapshot_json);
+    common::assert_public_json_safe(&snapshot_json);
 }
 
 #[tokio::test]
@@ -321,7 +355,7 @@ esac
 }
 
 #[tokio::test]
-async fn app_refresh_with_upstream_cli_uses_default_codex_and_claude_targets() {
+async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
     let (fake_tmp, binary, log_path) = fake_codexbar_recording();
     let (_app_tmp, mut paths) = common::temp_paths();
     paths.upstream_cli_path = Some(binary);
@@ -396,6 +430,11 @@ async fn app_refresh_with_upstream_cli_uses_default_codex_and_claude_targets() {
         log.lines()
             .any(|line| line == "cost --format json --json-only --provider both"),
         "cost command should use provider both without source: {log}"
+    );
+    assert!(
+        !log.lines()
+            .any(|line| line.starts_with("cost ") && line.contains("--source")),
+        "cost command must not include --source: {log}"
     );
     assert!(
         !log.lines()
