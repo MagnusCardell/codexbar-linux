@@ -16,9 +16,9 @@ import {
 } from './src/constants.js';
 import {
     DEFAULT_DAEMON_SETTINGS,
-    SUPPORTED_PROVIDERS,
     buildProviderSettingsPatch,
     effectiveProviderSettings,
+    providerCatalog,
 } from './src/providerSettings.js';
 
 const STRING_REPLY = GLib.VariantType.new('(s)');
@@ -28,7 +28,6 @@ const THEME_VALUES = THEMES;
 const PANEL_MODE_TITLES = ['Merged meters', 'Provider detail', 'Minimal icon'];
 const RESET_TIME_FORMAT_TITLES = ['Countdown', 'Absolute time', 'Both'];
 const THEME_TITLES = ['System', 'Compact', 'High contrast'];
-const PROVIDERS = SUPPORTED_PROVIDERS;
 const SOURCE_VALUES = ['auto', 'upstream_cli', 'off'];
 const SOURCE_TITLES = ['Automatic', 'Upstream CLI', 'Off'];
 const REFRESH_INTERVAL_VALUES = [0, 60, 120, 300, 900, 1800];
@@ -90,7 +89,13 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         this._refreshIntervalRow = null;
         this._refreshIntervalModel = null;
         this._refreshIntervalCustomSeconds = null;
+        this._providerGroup = null;
         this._providerRows = new Map();
+        this._providerCatalog = providerCatalog(DEFAULT_DAEMON_SETTINGS);
+        this._panelProviderRow = null;
+        this._panelProviderModel = null;
+        this._panelProviderValues = [''];
+        this._updatingPanelProviderModel = false;
         this._daemonSettings = DEFAULT_DAEMON_SETTINGS;
         this._applyingDaemonSettings = false;
 
@@ -115,13 +120,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         group.add(this._comboRow(settings, 'panel-mode', 'Panel mode', PANEL_MODE_VALUES, PANEL_MODE_TITLES));
         group.add(this._comboRow(settings, 'reset-time-format', 'Reset time format', RESET_TIME_FORMAT_VALUES, RESET_TIME_FORMAT_TITLES));
         group.add(this._comboRow(settings, 'theme', 'Theme', THEME_VALUES, THEME_TITLES));
-        group.add(this._comboRow(
-            settings,
-            'selected-provider',
-            'Panel provider',
-            ['', ...PROVIDERS.map(provider => provider.id)],
-            ['Automatic', ...PROVIDERS.map(provider => provider.title)]
-        ));
+        group.add(this._providerComboRow(settings));
 
         return group;
     }
@@ -190,8 +189,57 @@ export default class CodexBarPreferences extends ExtensionPreferences {
         const group = new Adw.PreferencesGroup({
             title: 'Providers',
         });
+        this._providerGroup = group;
+        this._syncProviderRows(this._providerCatalog);
 
-        for (const provider of PROVIDERS) {
+        return group;
+    }
+
+    _providerComboRow(settings) {
+        this._panelProviderModel = new Gtk.StringList();
+        this._panelProviderRow = new Adw.ComboRow({
+            title: 'Panel provider',
+            model: this._panelProviderModel,
+            selected: 0,
+        });
+        this._panelProviderRow.connect('notify::selected', combo => {
+            if (this._updatingPanelProviderModel)
+                return;
+            const selected = this._panelProviderValues[combo.selected] ?? '';
+            settings.set_string('selected-provider', selected);
+        });
+        this._syncPanelProviderModel(settings, this._providerCatalog);
+        return this._panelProviderRow;
+    }
+
+    _syncProviderCatalog(...sources) {
+        this._providerCatalog = providerCatalog(...sources);
+        this._syncPanelProviderModel(this.getSettings(), this._providerCatalog);
+        this._syncProviderRows(this._providerCatalog);
+    }
+
+    _syncPanelProviderModel(settings, providers) {
+        if (!this._panelProviderModel || !this._panelProviderRow)
+            return;
+        const values = ['', ...providers.map(provider => provider.id)];
+        const labels = ['Automatic', ...providers.map(provider => provider.title)];
+        const selectedValue = settings.get_string('selected-provider');
+        this._updatingPanelProviderModel = true;
+        try {
+            this._panelProviderValues = values;
+            this._panelProviderModel.splice(0, this._panelProviderModel.get_n_items(), labels);
+            this._panelProviderRow.selected = Math.max(0, values.indexOf(selectedValue));
+        } finally {
+            this._updatingPanelProviderModel = false;
+        }
+    }
+
+    _syncProviderRows(providers) {
+        if (!this._providerGroup)
+            return;
+        for (const provider of providers) {
+            if (this._providerRows.has(provider.id))
+                continue;
             const row = new Adw.ActionRow({
                 title: provider.title,
                 subtitle: provider.id,
@@ -231,11 +279,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
             row.add_suffix(source);
             row.add_suffix(enabled);
             row.activatable_widget = enabled;
-            group.add(row);
+            this._providerGroup.add(row);
             this._providerRows.set(provider.id, {enabled, source});
         }
-
-        return group;
     }
 
     _switchRow(settings, key, title) {
@@ -268,7 +314,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
     }
 
     async _loadDaemonState() {
-        this._applyDaemonSettings(this._readDaemonSettings());
+        const localSettings = this._readDaemonSettings();
+        this._syncProviderCatalog(localSettings);
+        this._applyDaemonSettings(localSettings);
         try {
             const [infoJson, snapshotJson, settingsJson] = await Promise.all([
                 this._daemon.getDaemonInfo(),
@@ -277,7 +325,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
             ]);
             const info = JSON.parse(infoJson);
             const snapshot = JSON.parse(snapshotJson);
-            this._applyDaemonSettings(JSON.parse(settingsJson));
+            const daemonSettings = JSON.parse(settingsJson);
+            this._syncProviderCatalog(info, snapshot, daemonSettings);
+            this._applyDaemonSettings(daemonSettings);
             this._setDaemonInfo(info, snapshot);
         } catch (error) {
             this._setDaemonUnavailable(error);
@@ -297,7 +347,7 @@ export default class CodexBarPreferences extends ExtensionPreferences {
                 this._upstreamCliRow.subtitle = upstreamCli.diagnosticCode ?? 'Unavailable';
         }
 
-        if (snapshot?.selectedProvider && PROVIDERS.some(provider => provider.id === snapshot.selectedProvider))
+        if (snapshot?.selectedProvider && this._providerCatalog.some(provider => provider.id === snapshot.selectedProvider))
             this.getSettings().set_string('selected-provider', snapshot.selectedProvider);
     }
 
@@ -338,8 +388,8 @@ export default class CodexBarPreferences extends ExtensionPreferences {
                 ?? DEFAULT_DAEMON_SETTINGS.refresh.intervalSeconds;
             this._setRefreshIntervalValue(interval);
 
-            const effectiveProviders = effectiveProviderSettings(daemonSettings);
-            for (const provider of PROVIDERS) {
+            const effectiveProviders = effectiveProviderSettings(daemonSettings, this._providerCatalog);
+            for (const provider of this._providerCatalog) {
                 const row = this._providerRows.get(provider.id);
                 if (!row)
                     continue;
@@ -374,7 +424,9 @@ export default class CodexBarPreferences extends ExtensionPreferences {
             this._daemonStatusRow.subtitle = 'Saving settings';
         try {
             const settingsJson = await this._daemon.setSettingsPatch(patch);
-            this._applyDaemonSettings(JSON.parse(settingsJson));
+            const settings = JSON.parse(settingsJson);
+            this._syncProviderCatalog(settings);
+            this._applyDaemonSettings(settings);
             if (this._daemonStatusRow)
                 this._daemonStatusRow.subtitle = 'Settings saved';
         } catch (error) {

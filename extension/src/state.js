@@ -9,8 +9,8 @@ import {
 } from './constants.js';
 import {
     DEFAULT_DAEMON_SETTINGS,
-    SUPPORTED_PROVIDERS,
     effectiveProviderSettings,
+    runtimeProviderCatalog,
 } from './providerSettings.js';
 
 export {PANEL_MODES, RESET_TIME_FORMATS, THEMES};
@@ -125,7 +125,9 @@ const PROVIDER_OPTIONAL_KEYS = [
 const SNAPSHOT_DAEMON_REQUIRED_KEYS = ['version', 'state'];
 const SNAPSHOT_DAEMON_OPTIONAL_KEYS = ['lastRefreshId', 'lastRefreshStartedAt', 'lastRefreshFinishedAt', 'upstreamCli'];
 const UPSTREAM_CLI_REQUIRED_KEYS = ['available'];
-const UPSTREAM_CLI_OPTIONAL_KEYS = ['path', 'version', 'diagnosticCode'];
+const UPSTREAM_CLI_STRING_OPTIONAL_KEYS = ['path', 'version', 'diagnosticCode'];
+const UPSTREAM_CLI_OPTIONAL_KEYS = [...UPSTREAM_CLI_STRING_OPTIONAL_KEYS, 'providerInventory'];
+const UPSTREAM_CLI_PROVIDER_INVENTORY_REQUIRED_KEYS = ['id', 'title'];
 const USAGE_REQUIRED_KEYS = ['primary', 'secondary', 'tertiary'];
 const METER_REQUIRED_KEYS = ['usedPercent', 'remainingPercent', 'windowMinutes', 'resetsAt', 'label'];
 const METER_OPTIONAL_KEYS = ['detail'];
@@ -663,14 +665,14 @@ function providerRefreshEnabled(settings) {
 function settingsProviderInfos(daemonSettings) {
     const providerInfos = [];
     const seen = new Set();
-    for (const provider of SUPPORTED_PROVIDERS) {
+    for (const provider of runtimeProviderCatalog(daemonSettings)) {
         providerInfos.push(provider);
         seen.add(provider.id);
     }
 
     if (plainObject(daemonSettings?.providers)) {
         for (const providerId of Object.keys(daemonSettings.providers)) {
-            if (!seen.has(providerId) && /^[A-Za-z0-9_-]+$/.test(providerId)) {
+            if (!seen.has(providerId) && isSafeProviderId(providerId)) {
                 providerInfos.push({
                     id: providerId,
                     title: titleFromProviderId(providerId),
@@ -704,7 +706,7 @@ function settingsForProvider(daemonSettings, effectiveProviders, providerId) {
 
 function titleFromProviderId(providerId) {
     return providerId
-        .replace(/[_-]+/g, ' ')
+        .replace(/[._:-]+/g, ' ')
         .replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
@@ -1683,11 +1685,27 @@ function validateUpstreamCli(upstreamCli) {
         return false;
     if (typeof upstreamCli.available !== 'boolean')
         return false;
-    for (const key of UPSTREAM_CLI_OPTIONAL_KEYS) {
+    for (const key of UPSTREAM_CLI_STRING_OPTIONAL_KEYS) {
         if (Object.prototype.hasOwnProperty.call(upstreamCli, key) && !isNullableString(upstreamCli[key]))
             return false;
     }
+    if (Object.prototype.hasOwnProperty.call(upstreamCli, 'providerInventory')
+        && !validateProviderInventory(upstreamCli.providerInventory))
+        return false;
     return true;
+}
+
+function validateProviderInventory(providerInventory) {
+    if (!Array.isArray(providerInventory))
+        return false;
+    return providerInventory.every(provider => provider
+        && typeof provider === 'object'
+        && !Array.isArray(provider)
+        && hasExactKeys(provider, UPSTREAM_CLI_PROVIDER_INVENTORY_REQUIRED_KEYS)
+        && isSafeProviderId(provider.id)
+        && typeof provider.title === 'string'
+        && provider.title.length > 0
+        && provider.title.length <= 80);
 }
 
 function validateUsage(usage) {
@@ -1797,6 +1815,13 @@ function isNullableString(value) {
     return value === null || typeof value === 'string';
 }
 
+function isSafeProviderId(value) {
+    return typeof value === 'string'
+        && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+        && value !== 'all'
+        && value !== 'both';
+}
+
 function isNullableNumber(value) {
     return value === null || (typeof value === 'number' && Number.isFinite(value));
 }
@@ -1820,7 +1845,7 @@ function isDaemonSettingsPayload(settings) {
         return false;
 
     for (const [providerId, provider] of Object.entries(settings.providers)) {
-        if (!/^[A-Za-z0-9_-]+$/.test(providerId) || !plainObject(provider))
+        if (!isSafeProviderId(providerId) || !plainObject(provider))
             return false;
         if (Object.prototype.hasOwnProperty.call(provider, 'enabled') && typeof provider.enabled !== 'boolean')
             return false;

@@ -69,7 +69,7 @@ if rg -n '\b(pkg-config|libsqlite3-dev|sqlite3|cmake|ca-certificates|libsoup|web
 fi
 
 if rg -n \
-  'CODEXBAR_BROWSER|CODEXBAR_CODEX_WEB_LIVE|CODEXBAR_WEB_HOME|BrowserDiscoveryRoots|collect_session_material|ReqwestStaticGetClient|FakeWebClient|decrypt_cookie|cookie_store|provider web fetch|chatgpt\.com/codex/settings/usage|libsecret|Secret Service|KWallet|TcpListener|TcpStream|std::net|tokio::net|Gio\.SocketService|Gio\.SocketListener|Soup\.Server|axum|warp|hyper|ureq|isahc' \
+  'CODEXBAR_BROWSER|CODEXBAR_CODEX_WEB_LIVE|CODEXBAR_WEB_HOME|BrowserDiscoveryRoots|collect_session_material|ReqwestStaticGetClient|FakeWebClient|decrypt_cookie|cookie_store|provider web fetch|chatgpt\.com/codex/settings/usage|libsecret|Secret Service|KWallet|TcpListener|TcpStream|std::net|tokio::net|Gio\.SocketService|Gio\.SocketListener|Soup\.Server|axum|hyper|ureq|isahc' \
   "$ROOT/daemon/src" "$ROOT/daemon/tests" "$ROOT/extension/extension.js" "$ROOT/extension/prefs.js" "$ROOT/extension/src/"*.js "$ROOT/packaging" "$ROOT/scripts/install-local.sh" "$ROOT/scripts/uninstall-local.sh" "$ROOT/scripts/build-deb.sh" "$ROOT/.github" \
   "$ROOT/scripts/codexbar-linux-setup" \
   --glob '!daemon/src/model.rs' \

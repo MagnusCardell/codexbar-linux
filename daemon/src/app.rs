@@ -639,6 +639,15 @@ impl App {
                 .as_ref()
                 .and_then(|cli| cli.version.clone());
         }
+        if upstream_cli.available && upstream_cli.provider_inventory.is_empty() {
+            upstream_cli.provider_inventory = state
+                .snapshot
+                .daemon
+                .upstream_cli
+                .as_ref()
+                .map(|cli| cli.provider_inventory.clone())
+                .unwrap_or_default();
+        }
         let upstream_cli_available = upstream_cli.available;
         DaemonInfo {
             schema_version: 1,

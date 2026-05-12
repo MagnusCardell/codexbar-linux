@@ -31,6 +31,15 @@ pub struct UpstreamCliInfo {
     pub version: Option<String>,
     pub available: bool,
     pub diagnostic_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_inventory: Vec<ProviderInventoryItem>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderInventoryItem {
+    pub id: String,
+    pub title: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]

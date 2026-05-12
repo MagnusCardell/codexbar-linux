@@ -206,6 +206,13 @@ fn invalid_patch_maps_to_internal_typed_errors() {
     )
     .expect_err("policy reject");
     assert!(matches!(err, AppError::InvalidSettingsPatch(_)));
+
+    for provider_id in ["all", "both"] {
+        let patch =
+            format!(r#"{{"schemaVersion":1,"providers":{{"{provider_id}":{{"enabled":true}}}}}}"#);
+        let err = config::parse_settings_patch(&patch).expect_err("pseudo provider rejected");
+        assert!(matches!(err, AppError::InvalidSettingsPatch(_)));
+    }
 }
 
 #[test]

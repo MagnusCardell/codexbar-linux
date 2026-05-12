@@ -127,6 +127,10 @@ the command or smoke evidence used.
   preferences display daemon info, refresh interval, panel provider selection,
   and provider enable/source controls, and daemon-owned writes go through
   `SetSettingsPatch`.
+- Provider expansion UX passes: Preferences can show upstream-discovered
+  provider IDs beyond Codex/Claude, persist newly enabled provider IDs, and keep
+  unsupported or not-yet-implemented providers visible as recoverable failure
+  states without defaulting refresh to `--provider all`.
 - Upstream CLI missing degraded UI passes: with no resolvable `codexbar`, manual
   refresh remains available, provider state is `missing_dependency`, and
   diagnostics are copyable and redacted.

@@ -17,9 +17,9 @@ use crate::config::is_safe_id;
 use crate::error::AppResult;
 use crate::model::{
     CostItem, CostSummary, Credits, DaemonState, DiagnosticEvent, DiagnosticSeverity,
-    EventRedaction, Identity, Meter, Provider, ProviderState, ProviderStatus, SemanticSource,
-    Settings, Snapshot, SnapshotDaemon, SourceAdapter, UpstreamCliInfo, Usage,
-    DEFAULT_PROVIDER_IDS,
+    EventRedaction, Identity, Meter, Provider, ProviderInventoryItem, ProviderState,
+    ProviderStatus, SemanticSource, Settings, Snapshot, SnapshotDaemon, SourceAdapter,
+    UpstreamCliInfo, Usage, DEFAULT_PROVIDER_IDS,
 };
 use crate::paths::AppPaths;
 use crate::redact;
@@ -190,11 +190,16 @@ impl UpstreamCliAdapter {
             }
         }
 
+        let provider_inventory = self
+            .discover_provider_inventory(&path, &request.finished_at, &mut diagnostics)
+            .await;
+
         let cli = UpstreamCliInfo {
             path: Some(resolver::display_safe_path(&path)),
             version,
             available: true,
             diagnostic_code: cli_diagnostic_code,
+            provider_inventory,
         };
 
         diagnostics.push(command_event(
@@ -475,6 +480,67 @@ impl UpstreamCliAdapter {
     ) -> Result<CommandOutput, CommandRunError> {
         self.runner.run(path, &spec).await
     }
+
+    async fn discover_provider_inventory(
+        &self,
+        path: &std::path::Path,
+        now: &str,
+        diagnostics: &mut Vec<DiagnosticEvent>,
+    ) -> Vec<ProviderInventoryItem> {
+        diagnostics.push(command_event(
+            "upstream_cli_command_started",
+            CommandKind::ProviderInventory,
+            None,
+            now,
+        ));
+        let result = self
+            .run(path, provider_inventory_spec(self.timeouts.version))
+            .await;
+        diagnostics.push(command_event(
+            "upstream_cli_command_finished",
+            CommandKind::ProviderInventory,
+            None,
+            now,
+        ));
+
+        match result {
+            Ok(output) if output.success() => {
+                let inventory =
+                    provider_inventory_from_help(&String::from_utf8_lossy(&output.stdout));
+                if !inventory.is_empty() {
+                    diagnostics.push(diagnostic(
+                        "upstream_cli_provider_inventory_discovered",
+                        "Upstream CLI provider inventory discovered",
+                        DiagnosticSeverity::Info,
+                        now,
+                        None,
+                        provider_inventory_details(inventory.len()),
+                    ));
+                }
+                inventory
+            }
+            Ok(output) => {
+                let failure = CliFailure::from_output(&output);
+                diagnostics.push(failure.to_diagnostic(
+                    CommandKind::ProviderInventory,
+                    None,
+                    now,
+                    Some(&output),
+                ));
+                Vec::new()
+            }
+            Err(err) => {
+                let failure = CliFailure::from_run_error(err);
+                diagnostics.push(failure.to_diagnostic(
+                    CommandKind::ProviderInventory,
+                    None,
+                    now,
+                    None,
+                ));
+                Vec::new()
+            }
+        }
+    }
 }
 
 pub fn resolve_info(paths: &AppPaths) -> UpstreamCliInfo {
@@ -542,6 +608,7 @@ fn upstream_info_from_resolution(
         version,
         available,
         diagnostic_code,
+        provider_inventory: Vec::new(),
     }
 }
 
@@ -551,6 +618,16 @@ fn version_spec(timeout: Duration) -> CommandSpec {
         args: vec!["--version".to_string()],
         timeout,
         max_stdout_bytes: 16 * 1024,
+        max_stderr_bytes: 16 * 1024,
+    }
+}
+
+fn provider_inventory_spec(timeout: Duration) -> CommandSpec {
+    CommandSpec {
+        kind: CommandKind::ProviderInventory,
+        args: vec!["--help".to_string()],
+        timeout,
+        max_stdout_bytes: 64 * 1024,
         max_stderr_bytes: 16 * 1024,
     }
 }
@@ -622,6 +699,52 @@ fn parse_success_json(output: &CommandOutput) -> Result<Value, CliFailure> {
             diagnostic_code_for_stdout(&classification),
         )),
     }
+}
+
+fn provider_inventory_from_help(text: &str) -> Vec<ProviderInventoryItem> {
+    let normalized = text.lines().collect::<Vec<_>>().join(" ");
+    let mut providers = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut remaining = normalized.as_str();
+    let marker = "--provider ";
+
+    while let Some(index) = remaining.find(marker) {
+        let after_marker = &remaining[index + marker.len()..];
+        let Some(end_index) = after_marker.find(']') else {
+            break;
+        };
+        let candidate = &after_marker[..end_index];
+        for token in candidate.split('|') {
+            let provider_id = token
+                .trim()
+                .trim_matches(|ch: char| matches!(ch, '[' | ']' | ',' | ';'));
+            if is_safe_id(provider_id)
+                && !is_pseudo_provider(provider_id)
+                && seen.insert(provider_id.to_string())
+            {
+                providers.push(ProviderInventoryItem {
+                    id: provider_id.to_string(),
+                    title: display_name(provider_id),
+                });
+            }
+        }
+        remaining = &after_marker[end_index + 1..];
+    }
+
+    providers
+}
+
+fn is_pseudo_provider(provider: &str) -> bool {
+    matches!(provider, "all" | "both")
+}
+
+fn provider_inventory_details(count: usize) -> BTreeMap<String, Value> {
+    let mut details = BTreeMap::new();
+    details.insert(
+        "providerCount".to_string(),
+        Value::Number(serde_json::Number::from(count)),
+    );
+    details
 }
 
 fn normalize_provider(
@@ -1119,7 +1242,7 @@ fn display_name(provider: &str) -> String {
     let mut name = String::new();
     let mut uppercase_next = true;
     for ch in provider.chars() {
-        if matches!(ch, '-' | '_' | '.') {
+        if matches!(ch, '-' | '_' | '.' | ':') {
             name.push(' ');
             uppercase_next = true;
         } else if uppercase_next {

@@ -21,6 +21,16 @@ pub fn version() -> CommandSpec {
     }
 }
 
+pub fn provider_inventory() -> CommandSpec {
+    CommandSpec {
+        kind: CommandKind::ProviderInventory,
+        args: vec!["--help".to_string()],
+        timeout: VERSION_TIMEOUT,
+        max_stdout_bytes: 64 * 1024,
+        max_stderr_bytes: 16 * 1024,
+    }
+}
+
 pub fn usage_default(provider: &str) -> CommandSpec {
     CommandSpec {
         kind: CommandKind::Usage,
@@ -100,6 +110,7 @@ mod tests {
 
     #[test]
     fn command_matrix_matches_v0251_strategy() {
+        assert_eq!(provider_inventory().args, ["--help"]);
         assert_eq!(
             usage_default("codex").args,
             [

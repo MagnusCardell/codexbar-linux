@@ -9,6 +9,7 @@ const CHILD_KILL_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandKind {
     Version,
+    ProviderInventory,
     Usage,
     Cost,
     Status,
@@ -18,6 +19,7 @@ impl CommandKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Version => "version",
+            Self::ProviderInventory => "provider_inventory",
             Self::Usage => "usage",
             Self::Cost => "cost",
             Self::Status => "status",

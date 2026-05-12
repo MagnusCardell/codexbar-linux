@@ -51,7 +51,12 @@
         "available": { "type": "boolean" },
         "path": { "type": ["string", "null"] },
         "version": { "type": ["string", "null"] },
-        "diagnosticCode": { "type": ["string", "null"] }
+        "diagnosticCode": { "type": ["string", "null"] },
+        "providerInventory": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/providerInventoryItem" },
+          "default": []
+        }
       }
     },
     "build": {
@@ -61,6 +66,23 @@
         "gitSha": { "type": ["string", "null"] },
         "target": { "type": ["string", "null"] },
         "profile": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "providerInventoryItem": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 }
+      },
+      "not": {
+        "anyOf": [
+          { "properties": { "id": { "const": "all" } }, "required": ["id"] },
+          { "properties": { "id": { "const": "both" } }, "required": ["id"] }
+        ]
       }
     }
   }

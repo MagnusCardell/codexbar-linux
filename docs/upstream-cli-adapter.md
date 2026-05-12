@@ -51,6 +51,18 @@ from daemon settings. The built-in daemon defaults are `codex`, then `claude`.
 Explicit `RefreshOptions.providers` still override daemon settings. The daemon
 does not default usage/status refresh to `--provider all`.
 
+Provider inventory is discovered from bounded upstream help output:
+
+```bash
+codexbar --help
+```
+
+The daemon parses only the safe `--provider` enum IDs from help text, filters
+the pseudo-provider values `all` and `both`, and exposes the result as
+`upstreamCli.providerInventory` in normalized daemon/snapshot JSON. This is an
+inventory hint for Preferences; it is not provider I/O and it does not fetch
+provider data.
+
 The adapter does not default usage/status to `--provider all` because the
 promoted live Linux evidence timed out for all-provider usage/status with empty
 stdout/stderr. If refresh options request `providers:["all"]`, the adapter may
@@ -70,6 +82,13 @@ Provider targets are selected in this order:
 fixtures. Browser import and Linux web adapters are unsupported compatibility
 surface and do not run. Web/auto upstream source paths remain upstream Linux
 limitations unless the upstream CLI itself supports them later.
+
+Preferences can show a broader provider catalog from the built-in compatibility
+list plus upstream `providerInventory`, daemon settings, and the latest
+snapshot. Enabling one of those providers writes a normal provider setting; the
+daemon then targets that provider directly with `--source cli`. The Shell
+popover remains bounded to configured/default providers and providers already
+present in snapshots.
 
 An empty legacy provider settings map is migrated to the v0.1 built-in default
 set and targets `codex`, then `claude`. A non-empty provider settings map is

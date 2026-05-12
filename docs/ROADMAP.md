@@ -131,6 +131,14 @@ label normalization covers `codex-cli`, `claude`, `cli`, `local`,
 planes remain out of scope, and the provider-level `allowBrowserImport` schema
 default now matches the runtime `false` normalization.
 
+Provider-expansion status: the upstream CLI adapter now discovers safe provider
+IDs from bounded `codexbar --help` output and exposes them as
+`upstreamCli.providerInventory` for Preferences. Preferences can show a broader
+provider catalog and persist newly enabled provider IDs, while daemon
+usage/status refresh remains targeted per configured provider and still does not
+default to `--provider all`. Multi-provider failure UX keeps enabled providers
+visible when upstream reports unsupported source/provider availability failures.
+
 Exit criteria:
 
 - Targeted upstream CLI provider refresh is reliable on supported Ubuntu releases.

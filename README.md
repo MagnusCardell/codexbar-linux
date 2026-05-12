@@ -48,11 +48,16 @@ Release gates before final package sign-off:
   manual refresh, and compact diagnostics utilities.
 - Preferences for panel mode, refresh interval, provider visibility, and
   provider source settings.
+- Provider selection stays upstream-CLI-driven: Preferences can show the
+  upstream v0.25.1 provider catalog and discovered provider IDs, while refresh
+  still targets selected/configured providers individually.
 - A user daemon, `codexbar-linuxd`, activated through the D-Bus session service
   `org.codexbar.Linux1`.
 - Normalized local cache for fast startup and stale rendering.
 - Upstream `codexbar` CLI integration for Linux-supported CLI/API/local provider
   data and local cost summaries.
+- No browser-cookie, browser-profile, provider dashboard, keyring, localhost,
+  or Shell subprocess data plane is used for provider data.
 
 ## Requirements
 

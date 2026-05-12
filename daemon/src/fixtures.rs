@@ -98,5 +98,6 @@ pub fn task01_upstream_cli() -> UpstreamCliInfo {
         path: None,
         version: None,
         diagnostic_code: Some("upstream_cli_not_implemented".to_string()),
+        provider_inventory: Vec::new(),
     }
 }

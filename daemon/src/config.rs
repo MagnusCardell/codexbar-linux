@@ -126,7 +126,7 @@ pub fn apply_settings_patch(mut settings: Settings, patch: SettingsPatch) -> App
     }
     if let Some(providers) = patch.providers {
         for (provider_id, provider_patch) in providers {
-            if !is_safe_id(&provider_id) {
+            if !is_provider_settings_id(&provider_id) {
                 return Err(AppError::invalid_settings_patch(
                     "provider id rejected by daemon policy",
                 ));
@@ -171,7 +171,7 @@ pub fn validate_settings(settings: &Settings) -> AppResult<()> {
         return Err(AppError::invalid_json());
     }
     for provider_id in settings.providers.keys() {
-        if !is_safe_id(provider_id) {
+        if !is_provider_settings_id(provider_id) {
             return Err(AppError::invalid_settings_patch(
                 "provider id rejected by daemon policy",
             ));
@@ -190,7 +190,7 @@ pub fn validate_settings(settings: &Settings) -> AppResult<()> {
 fn validate_settings_patch_policy(patch: &SettingsPatch) -> AppResult<()> {
     if let Some(providers) = &patch.providers {
         for provider_id in providers.keys() {
-            if !is_safe_id(provider_id) {
+            if !is_provider_settings_id(provider_id) {
                 return Err(AppError::invalid_settings_patch(
                     "provider id rejected by daemon policy",
                 ));
@@ -280,4 +280,8 @@ pub fn is_safe_id(value: &str) -> bool {
     value.len() <= 128
         && first.is_ascii_alphanumeric()
         && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | ':' | '-'))
+}
+
+fn is_provider_settings_id(value: &str) -> bool {
+    is_safe_id(value) && !matches!(value, "all" | "both")
 }

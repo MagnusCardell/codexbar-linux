@@ -6,6 +6,8 @@ import {
     SUPPORTED_PROVIDERS,
     buildProviderSettingsPatch,
     effectiveProviderSettings,
+    providerCatalog,
+    runtimeProviderCatalog,
 } from '../src/providerSettings.js';
 import {
     applyDaemonSettingsJson,
@@ -65,6 +67,7 @@ function main() {
     assertEmptyProviderSnapshotShowsNoProviderCopy();
     assertAllProviderSettingsOffShowsNoProviderCopy();
     assertViewModelBuildsProviderStripAndSelectedSurface();
+    assertManyConfiguredProviderFailuresRemainVisible();
     assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels();
     assertSecondaryActionsRemainFooterUtilities();
     assertStaleCacheCopyIsCalm();
@@ -109,11 +112,31 @@ function assertManualRefreshOptions() {
 }
 
 function assertSupportedProviderSettingsDefaultsAndPatches() {
-    assertArrayEqual(SUPPORTED_PROVIDERS.map(provider => provider.id), ['codex', 'claude']);
+    const supportedIds = SUPPORTED_PROVIDERS.map(provider => provider.id);
+    assert(supportedIds.length > 8, 'Preferences provider catalog should expose more than the default two providers');
+    for (const providerId of ['codex', 'claude', 'gemini', 'cursor', 'openai', 'windsurf'])
+        assert(supportedIds.includes(providerId), `provider catalog missing ${providerId}`);
+    assert(!supportedIds.includes('all'), 'all must remain an explicit probe target, not a provider setting');
+    assert(!supportedIds.includes('both'), 'both must remain a cost pseudo-provider, not a provider setting');
+
+    const discoveredCatalog = providerCatalog({
+        upstreamCli: {
+            providerInventory: [
+                {id: 'codex', title: 'Codex'},
+                {id: 'future-provider', title: 'Future Provider'},
+                {id: 'all', title: 'All'},
+                {id: 'both', title: 'Both'},
+            ],
+        },
+    });
+    assert(discoveredCatalog.some(provider => provider.id === 'future-provider'));
+    assert(!discoveredCatalog.some(provider => provider.id === 'all'));
+    assert(!discoveredCatalog.some(provider => provider.id === 'both'));
 
     const empty = effectiveProviderSettings({providers: {}});
     assertEqual(empty.codex.enabled, true);
     assertEqual(empty.claude.enabled, true);
+    assertEqual(Object.prototype.hasOwnProperty.call(empty, 'gemini'), false);
     assertEqual(empty.codex.preferredSourceAdapter, 'auto');
     assertEqual(empty.claude.preferredSourceAdapter, 'auto');
 
@@ -134,6 +157,23 @@ function assertSupportedProviderSettingsDefaultsAndPatches() {
     assertEqual(enableClaude.providers.codex.allowCliFallback, true);
     assertEqual(enableClaude.providers.claude.allowCliFallback, true);
     assertEqual(Object.prototype.hasOwnProperty.call(enableClaude.providers, 'gemini'), false);
+
+    const enableGemini = buildProviderSettingsPatch({providers: {}}, {
+        providerId: 'gemini',
+        enabled: true,
+    });
+    assertEqual(enableGemini.providers.codex.enabled, true);
+    assertEqual(enableGemini.providers.claude.enabled, true);
+    assertEqual(enableGemini.providers.gemini.enabled, true);
+    assertEqual(Object.keys(enableGemini.providers).length, 3);
+
+    const runtimeCatalog = runtimeProviderCatalog({
+        providers: {
+            codex: {enabled: true},
+            future_provider: {enabled: true},
+        },
+    });
+    assertArrayEqual(runtimeCatalog.map(provider => provider.id), ['codex', 'claude', 'future_provider']);
 
     const disableCodex = buildProviderSettingsPatch({
         providers: {
@@ -439,6 +479,105 @@ function assertViewModelBuildsProviderStripAndSelectedSurface() {
     assertEqual(view.panel.meters.length, 1);
     assertEqual(view.panel.meters[0].kind, 'composite_availability');
     assertEqual(view.panel.meters[0].effectivePercent, 7.4);
+}
+
+function assertManyConfiguredProviderFailuresRemainVisible() {
+    const snapshot = readJson('fixtures/snapshots/ok.json');
+    const now = '2026-04-27T12:00:00Z';
+    const enabledProviders = [
+        'codex',
+        'claude',
+        'gemini',
+        'cursor',
+        'openai',
+        'windsurf',
+        'ollama',
+        'kiro',
+    ];
+    const settings = providerSettings(Object.fromEntries(
+        enabledProviders.map(provider => [
+            provider,
+            {enabled: true, preferredSourceAdapter: 'upstream_cli', allowCliFallback: true},
+        ])
+    ));
+
+    const codex = cloneProvider(snapshot.providers[0], {
+        provider: 'codex',
+        displayName: 'Codex',
+        primaryUsed: 20,
+        primaryRemaining: 80,
+        secondaryUsed: 40,
+        secondaryRemaining: 60,
+    });
+    const claude = cloneProvider(snapshot.providers[0], {
+        provider: 'claude',
+        displayName: 'Claude',
+        primaryUsed: 30,
+        primaryRemaining: 70,
+        secondaryUsed: 50,
+        secondaryRemaining: 50,
+    });
+    const failureProvider = (provider, displayName, diagnosticCode) => ({
+        provider,
+        displayName,
+        version: null,
+        source: 'unknown',
+        sourceAdapter: 'upstream_cli',
+        state: 'provider_unavailable',
+        updatedAt: now,
+        staleSince: null,
+        usage: {
+            primary: null,
+            secondary: null,
+            tertiary: null,
+        },
+        credits: null,
+        identity: null,
+        status: {
+            indicator: 'provider_unavailable',
+            description: 'Requested provider source is not available through CodexBar CLI.',
+            updatedAt: now,
+            url: null,
+        },
+        cost: null,
+        dashboardUrl: null,
+        diagnosticsSummary: 'Requested provider source is not available through CodexBar CLI.',
+        diagnosticCodes: [diagnosticCode],
+    });
+    snapshot.providers = [
+        codex,
+        claude,
+        failureProvider('cursor', 'Cursor', 'upstream_cli_capability_unimplemented'),
+        failureProvider('gemini', 'Gemini', 'upstream_cli_unsupported_source'),
+        failureProvider('kiro', 'Kiro', 'upstream_cli_provider_unavailable'),
+        failureProvider('ollama', 'Ollama', 'upstream_cli_provider_cli_missing'),
+        failureProvider('openai', 'OpenAI', 'upstream_cli_unsupported_source'),
+        failureProvider('windsurf', 'Windsurf', 'upstream_cli_capability_unimplemented'),
+    ];
+    snapshot.selectedProvider = 'gemini';
+
+    let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
+    state = applySnapshotJson(state, JSON.stringify(snapshot), 0);
+    const view = normalizeViewState(state, {
+        selectedProvider: 'gemini',
+        panelMode: 'provider',
+    });
+
+    assertEqual(view.providerRows.length, 8);
+    assertEqual(view.providerSelectorRows.length, 8);
+    assertEqual(view.selectedProviderId, 'gemini');
+    assertEqual(view.selectedRow.statusLabel, 'Provider unavailable');
+    assertEqual(view.selectedRow.statusDescription, 'Check provider setup in the upstream CLI, then refresh.');
+    assertEqual(view.selectedRow.adapterLabel, 'Upstream CLI');
+    assertEqual(view.selectedRow.sourceLabel, 'Unknown');
+    assertEqual(view.providerSelectorRows.filter(row => row.state === 'ok').length, 2);
+    assertEqual(view.providerSelectorRows.filter(row => row.state === 'provider_unavailable').length, 6);
+    assert(view.providerSelectorRows
+        .filter(row => row.state === 'provider_unavailable')
+        .every(row => row.dimmed && !row.disabled), 'failed configured providers should stay visible but dimmed');
+    assertEqual(view.panel.visibleProviders.length, 3);
+    assertEqual(view.panel.overflowCount, 5);
+    assertNormalViewLabelsSafe(collectMainViewLabels(view), 'many-provider failure view labels');
 }
 
 function assertDefaultViewModelKeepsDiagnosticsAndDebugCopyOutOfMainLabels() {

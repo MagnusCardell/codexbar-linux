@@ -119,6 +119,10 @@ Default behavior:
 `RefreshStarted(refresh_id)` is emitted when work starts. `RefreshFinished(refresh_id, result_json)` carries `spec/refresh-result.schema.json`.
 
 `SnapshotChanged(snapshot_json)` carries a complete `spec/snapshot.schema.json` snapshot.
+`snapshot.daemon.upstreamCli.providerInventory`, when present, is a safe
+inventory hint parsed from upstream CLI help output. It contains provider IDs
+and labels only; it is not provider data and must not include `all`, `both`, raw
+settings, identity, stdout/stderr, or provider payloads.
 
 `ProviderChanged(provider_id, provider_event_json)` carries `spec/provider-event.schema.json`. The embedded `provider` must be a full normalized provider object, not a partial patch. This avoids UI merge bugs and makes fixture testing simpler.
 

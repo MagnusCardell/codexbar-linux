@@ -394,6 +394,19 @@ async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
     assert_eq!(snapshot_providers[1]["provider"], "claude");
     assert_eq!(snapshot_providers[1]["sourceAdapter"], "upstream_cli");
     assert_eq!(snapshot_providers[1]["state"], "ok");
+    let provider_inventory = snapshot["daemon"]["upstreamCli"]["providerInventory"]
+        .as_array()
+        .expect("provider inventory");
+    let provider_inventory_ids = provider_inventory
+        .iter()
+        .filter_map(|provider| provider["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(provider_inventory_ids.contains(&"codex"));
+    assert!(provider_inventory_ids.contains(&"claude"));
+    assert!(provider_inventory_ids.contains(&"gemini"));
+    assert!(provider_inventory_ids.contains(&"windsurf"));
+    assert!(!provider_inventory_ids.contains(&"all"));
+    assert!(!provider_inventory_ids.contains(&"both"));
     let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
     common::assert_schema("diagnostics.schema.json", &diagnostics_json);
     common::assert_public_json_safe(&diagnostics_json);
@@ -406,6 +419,10 @@ async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
     assert_no_warning_or_error_diagnostics(&provider_diagnostics_json);
 
     let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.lines().any(|line| line == "--help"),
+        "provider inventory should be discovered from bounded help output: {log}"
+    );
     assert!(
         log.lines()
             .any(|line| line == "--format json --json-only --provider codex --source cli"),
@@ -440,6 +457,60 @@ async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
         !log.lines()
             .any(|line| line.contains("--provider all --source cli")),
         "usage/status must not default to all-provider cli probes: {log}"
+    );
+    assert!(fake_tmp.path().is_dir());
+}
+
+#[tokio::test]
+async fn app_refresh_targets_many_configured_providers_without_all_probe() {
+    let (fake_tmp, binary, log_path) = fake_codexbar_recording();
+    let (_app_tmp, mut paths) = common::temp_paths();
+    paths.upstream_cli_path = Some(binary);
+    let app = App::new(paths).expect("app starts");
+    app.set_settings_patch_json(
+        r#"{"schemaVersion":1,"providers":{"codex":{"enabled":true},"claude":{"enabled":true},"gemini":{"enabled":true},"cursor":{"enabled":true},"openai":{"enabled":true},"windsurf":{"enabled":true},"ollama":{"enabled":true},"kiro":{"enabled":true}}}"#,
+    )
+    .expect("settings patch");
+
+    let completion = run_app_refresh(&app, UPSTREAM_CLI_REFRESH_OPTIONS_JSON).await;
+    common::assert_schema("snapshot.schema.json", &completion.snapshot_json);
+    common::assert_schema("refresh-result.schema.json", &completion.result_json);
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&completion.snapshot_json).expect("snapshot json");
+    let providers = snapshot["providers"].as_array().expect("providers");
+    assert_eq!(providers.len(), 8);
+    for provider in [
+        "codex", "claude", "cursor", "gemini", "kiro", "ollama", "openai", "windsurf",
+    ] {
+        assert!(
+            providers
+                .iter()
+                .any(|item| item["provider"] == provider && item["state"] == "ok"),
+            "missing successful configured provider {provider}: {providers:?}"
+        );
+    }
+
+    let log = fs::read_to_string(&log_path).expect("command log");
+    for provider in [
+        "codex", "claude", "cursor", "gemini", "kiro", "ollama", "openai", "windsurf",
+    ] {
+        let usage_command = format!("--format json --json-only --provider {provider} --source cli");
+        let status_command =
+            format!("--format json --json-only --provider {provider} --source cli --status");
+        assert!(
+            log.lines().any(|line| line == usage_command),
+            "usage command should target configured provider {provider}: {log}"
+        );
+        assert!(
+            log.lines().any(|line| line == status_command),
+            "status command should target configured provider {provider}: {log}"
+        );
+    }
+    assert!(
+        !log.lines()
+            .any(|line| line.contains("--provider all --source cli")),
+        "configured provider refresh must not use all-provider usage/status probes: {log}"
     );
     assert!(fake_tmp.path().is_dir());
 }
@@ -1129,7 +1200,20 @@ fn very_short_timeouts() -> CliTimeouts {
 fn fake_codexbar(script_body: &str) -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
     let binary = temp.path().join("codexbar");
-    let script = format!("#!/bin/sh\nset -eu\n{script_body}\n");
+    let script = format!(
+        r#"#!/bin/sh
+set -eu
+if [ "$*" = "--help" ]; then
+  cat <<'HELP'
+CodexBar test
+Usage:
+  codexbar [--provider codex|claude|gemini|cursor|openai|windsurf|ollama|kiro|both|all]
+HELP
+  exit 0
+fi
+{script_body}
+"#
+    );
     fs::write(&binary, script).expect("write fake codexbar");
     chmod(&binary, 0o700);
     (temp, binary)
@@ -1144,14 +1228,27 @@ fn fake_codexbar_recording() -> (tempfile::TempDir, PathBuf, PathBuf) {
 set -eu
 printf '%s\n' "$*" >> '{}'
 provider=codex
-case "$*" in
-  *"--provider claude"*) provider=claude ;;
-  *"--provider gemini"*) provider=gemini ;;
-  *"--provider all"*) provider=all ;;
-esac
+previous=
+for arg in "$@"; do
+  if [ "$previous" = "--provider" ]; then
+    provider="$arg"
+    break
+  fi
+  previous="$arg"
+done
 case "$*" in
   "--version")
     printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "--help")
+    cat <<'HELP'
+CodexBar 0.25.1
+Usage:
+  codexbar [--format text|json]
+          [--provider codex|openai|claude|cursor|opencode|opencodego|alibaba-coding-plan|factory|gemini|antigravity|copilot|zai|minimax|manus|kimi|kilo|kiro|vertexai|augment|jetbrains|kimik2|amp|ollama|synthetic|warp|openrouter|windsurf|perplexity|mimo|doubao|abacusai|mistral|deepseek|codebuff|crof|venice|commandcode|stepfun|both|all]
+          [--source <auto|web|cli|oauth|api>]
+HELP
     exit 0
     ;;
   "cost --format json --json-only --provider both")
