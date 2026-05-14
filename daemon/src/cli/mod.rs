@@ -7,7 +7,7 @@ pub mod source;
 pub mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -57,6 +57,13 @@ pub struct CliTimeouts {
     pub usage: Duration,
     pub status: Duration,
     pub cost: Duration,
+}
+
+#[derive(Debug)]
+struct ProviderCommandOutput {
+    provider: String,
+    usage: Result<CommandOutput, CommandRunError>,
+    status: Result<CommandOutput, CommandRunError>,
 }
 
 impl Default for CliTimeouts {
@@ -202,139 +209,21 @@ impl UpstreamCliAdapter {
             provider_inventory,
         };
 
-        diagnostics.push(command_event(
-            "upstream_cli_command_started",
-            CommandKind::Cost,
-            None,
-            &request.finished_at,
-        ));
-        let (cost_by_provider, cost_failures) =
-            match self.run(&path, cost_spec(self.timeouts.cost)).await {
-                Ok(output) => match parse_success_json(&output) {
-                    Ok(value) => {
-                        diagnostics.push(command_event(
-                            "upstream_cli_command_finished",
-                            CommandKind::Cost,
-                            None,
-                            &request.finished_at,
-                        ));
-                        let normalized_costs = normalize_costs(&value);
-                        for cost_failure in &normalized_costs.failures {
-                            diagnostics.push(cost_failure.failure.to_diagnostic(
-                                CommandKind::Cost,
-                                cost_failure.provider.as_deref(),
-                                &request.finished_at,
-                                Some(&output),
-                            ));
-                            diagnostics.push(cost_unavailable_diagnostic(
-                                cost_failure.provider.as_deref(),
-                                &request.finished_at,
-                                Some(&output),
-                                Some(&cost_failure.failure),
-                            ));
-                        }
-                        if !normalized_costs.costs.is_empty() {
-                            diagnostics.push(diagnostic(
-                                "upstream_cli_cost_normalized",
-                                "Upstream CLI cost output normalized",
-                                DiagnosticSeverity::Info,
-                                &request.finished_at,
-                                None,
-                                command_details(CommandKind::Cost, Some(&output)),
-                            ));
-                        }
-                        (normalized_costs.costs, normalized_costs.failures)
-                    }
-                    Err(failure) => {
-                        diagnostics.push(command_event(
-                            "upstream_cli_command_finished",
-                            CommandKind::Cost,
-                            None,
-                            &request.finished_at,
-                        ));
-                        diagnostics.push(failure.to_diagnostic(
-                            CommandKind::Cost,
-                            None,
-                            &request.finished_at,
-                            Some(&output),
-                        ));
-                        diagnostics.push(cost_unavailable_diagnostic(
-                            None,
-                            &request.finished_at,
-                            Some(&output),
-                            Some(&failure),
-                        ));
-                        (
-                            BTreeMap::new(),
-                            vec![CostFailure {
-                                provider: None,
-                                failure,
-                            }],
-                        )
-                    }
-                },
-                Err(err) => {
-                    diagnostics.push(command_event(
-                        "upstream_cli_command_finished",
-                        CommandKind::Cost,
-                        None,
-                        &request.finished_at,
-                    ));
-                    let failure = CliFailure::from_run_error(err);
-                    diagnostics.push(failure.to_diagnostic(
-                        CommandKind::Cost,
-                        None,
-                        &request.finished_at,
-                        None,
-                    ));
-                    diagnostics.push(cost_unavailable_diagnostic(
-                        None,
-                        &request.finished_at,
-                        None,
-                        Some(&failure),
-                    ));
-                    (
-                        BTreeMap::new(),
-                        vec![CostFailure {
-                            provider: None,
-                            failure,
-                        }],
-                    )
-                }
-            };
+        let cost_probe = self.collect_costs(&path, &request.finished_at);
+        let provider_probes =
+            self.collect_provider_commands(&path, &providers, &request.finished_at);
+        let (
+            (cost_by_provider, cost_failures, mut cost_diagnostics),
+            (provider_outputs, mut command_diagnostics),
+        ) = tokio::join!(cost_probe, provider_probes);
+        diagnostics.append(&mut cost_diagnostics);
+        diagnostics.append(&mut command_diagnostics);
 
-        let mut normalized = Vec::with_capacity(providers.len());
-        for provider in &providers {
-            diagnostics.push(command_event(
-                "upstream_cli_command_started",
-                CommandKind::Usage,
-                Some(provider.clone()),
-                &request.finished_at,
-            ));
-            let usage = self
-                .run(&path, usage_spec(provider, self.timeouts.usage))
-                .await;
-            diagnostics.push(command_event(
-                "upstream_cli_command_finished",
-                CommandKind::Usage,
-                Some(provider.clone()),
-                &request.finished_at,
-            ));
-            diagnostics.push(command_event(
-                "upstream_cli_command_started",
-                CommandKind::Status,
-                Some(provider.clone()),
-                &request.finished_at,
-            ));
-            let status = self
-                .run(&path, status_spec(provider, self.timeouts.status))
-                .await;
-            diagnostics.push(command_event(
-                "upstream_cli_command_finished",
-                CommandKind::Status,
-                Some(provider.clone()),
-                &request.finished_at,
-            ));
+        let mut normalized = Vec::with_capacity(provider_outputs.len());
+        for output in provider_outputs {
+            let provider = output.provider;
+            let usage = output.usage;
+            let status = output.status;
 
             let mut provider_diagnostics = Vec::new();
             let usage_value = match usage {
@@ -354,7 +243,7 @@ impl UpstreamCliAdapter {
                         provider_diagnostics.push(failure.clone());
                         diagnostics.push(failure.to_diagnostic(
                             CommandKind::Usage,
-                            Some(provider),
+                            Some(provider.as_str()),
                             &request.finished_at,
                             Some(&output),
                         ));
@@ -366,7 +255,7 @@ impl UpstreamCliAdapter {
                     provider_diagnostics.push(failure.clone());
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Usage,
-                        Some(provider),
+                        Some(provider.as_str()),
                         &request.finished_at,
                         None,
                     ));
@@ -391,7 +280,7 @@ impl UpstreamCliAdapter {
                         provider_diagnostics.push(failure.clone());
                         diagnostics.push(failure.to_diagnostic(
                             CommandKind::Status,
-                            Some(provider),
+                            Some(provider.as_str()),
                             &request.finished_at,
                             Some(&output),
                         ));
@@ -403,7 +292,7 @@ impl UpstreamCliAdapter {
                     provider_diagnostics.push(failure.clone());
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Status,
-                        Some(provider),
+                        Some(provider.as_str()),
                         &request.finished_at,
                         None,
                     ));
@@ -411,12 +300,12 @@ impl UpstreamCliAdapter {
                 }
             };
 
-            let cost = cost_by_provider.get(provider).cloned();
-            for _ in cost_failures_for_provider(&cost_failures, provider) {
+            let cost = cost_by_provider.get(&provider).cloned();
+            for _ in cost_failures_for_provider(&cost_failures, &provider) {
                 provider_diagnostics.push(CliFailure::cost_unavailable());
             }
             let normalized_provider = normalize_provider(
-                provider,
+                &provider,
                 usage_value.as_ref(),
                 status_value.as_ref(),
                 cost,
@@ -471,6 +360,157 @@ impl UpstreamCliAdapter {
             snapshot,
             diagnostics,
         })
+    }
+
+    async fn collect_costs(
+        &self,
+        path: &Path,
+        now: &str,
+    ) -> (
+        BTreeMap<String, CostSummary>,
+        Vec<CostFailure>,
+        Vec<DiagnosticEvent>,
+    ) {
+        let mut diagnostics = vec![command_event(
+            "upstream_cli_command_started",
+            CommandKind::Cost,
+            None,
+            now,
+        )];
+        match self.run(path, cost_spec(self.timeouts.cost)).await {
+            Ok(output) => match parse_success_json(&output) {
+                Ok(value) => {
+                    diagnostics.push(command_event(
+                        "upstream_cli_command_finished",
+                        CommandKind::Cost,
+                        None,
+                        now,
+                    ));
+                    let normalized_costs = normalize_costs(&value);
+                    for cost_failure in &normalized_costs.failures {
+                        diagnostics.push(cost_failure.failure.to_diagnostic(
+                            CommandKind::Cost,
+                            cost_failure.provider.as_deref(),
+                            now,
+                            Some(&output),
+                        ));
+                        diagnostics.push(cost_unavailable_diagnostic(
+                            cost_failure.provider.as_deref(),
+                            now,
+                            Some(&output),
+                            Some(&cost_failure.failure),
+                        ));
+                    }
+                    if !normalized_costs.costs.is_empty() {
+                        diagnostics.push(diagnostic(
+                            "upstream_cli_cost_normalized",
+                            "Upstream CLI cost output normalized",
+                            DiagnosticSeverity::Info,
+                            now,
+                            None,
+                            command_details(CommandKind::Cost, Some(&output)),
+                        ));
+                    }
+                    (
+                        normalized_costs.costs,
+                        normalized_costs.failures,
+                        diagnostics,
+                    )
+                }
+                Err(failure) => {
+                    diagnostics.push(command_event(
+                        "upstream_cli_command_finished",
+                        CommandKind::Cost,
+                        None,
+                        now,
+                    ));
+                    diagnostics.push(failure.to_diagnostic(
+                        CommandKind::Cost,
+                        None,
+                        now,
+                        Some(&output),
+                    ));
+                    diagnostics.push(cost_unavailable_diagnostic(
+                        None,
+                        now,
+                        Some(&output),
+                        Some(&failure),
+                    ));
+                    (
+                        BTreeMap::new(),
+                        vec![CostFailure {
+                            provider: None,
+                            failure,
+                        }],
+                        diagnostics,
+                    )
+                }
+            },
+            Err(err) => {
+                diagnostics.push(command_event(
+                    "upstream_cli_command_finished",
+                    CommandKind::Cost,
+                    None,
+                    now,
+                ));
+                let failure = CliFailure::from_run_error(err);
+                diagnostics.push(failure.to_diagnostic(CommandKind::Cost, None, now, None));
+                diagnostics.push(cost_unavailable_diagnostic(None, now, None, Some(&failure)));
+                (
+                    BTreeMap::new(),
+                    vec![CostFailure {
+                        provider: None,
+                        failure,
+                    }],
+                    diagnostics,
+                )
+            }
+        }
+    }
+
+    async fn collect_provider_commands(
+        &self,
+        path: &Path,
+        providers: &[String],
+        now: &str,
+    ) -> (Vec<ProviderCommandOutput>, Vec<DiagnosticEvent>) {
+        let mut diagnostics = Vec::new();
+        let mut outputs = Vec::with_capacity(providers.len());
+        for provider in providers {
+            diagnostics.push(command_event(
+                "upstream_cli_command_started",
+                CommandKind::Usage,
+                Some(provider.clone()),
+                now,
+            ));
+            diagnostics.push(command_event(
+                "upstream_cli_command_started",
+                CommandKind::Status,
+                Some(provider.clone()),
+                now,
+            ));
+            let usage = self.run(path, usage_spec(provider, self.timeouts.usage));
+            let status = self.run(path, status_spec(provider, self.timeouts.status));
+            let (usage, status) = tokio::join!(usage, status);
+            diagnostics.push(command_event(
+                "upstream_cli_command_finished",
+                CommandKind::Usage,
+                Some(provider.clone()),
+                now,
+            ));
+            diagnostics.push(command_event(
+                "upstream_cli_command_finished",
+                CommandKind::Status,
+                Some(provider.clone()),
+                now,
+            ));
+            outputs.push(ProviderCommandOutput {
+                provider: provider.clone(),
+                usage,
+                status,
+            });
+        }
+        (outputs, diagnostics)
     }
 
     async fn run(

@@ -30,6 +30,8 @@ const STALE_CACHE_USED_MESSAGE: &str = "Showing cached usage data.";
 const NO_ENABLED_PROVIDERS_CODE: &str = "refresh_no_enabled_providers";
 const NO_ENABLED_PROVIDERS_MESSAGE: &str =
     "No providers are enabled for automatic refresh; refresh was skipped.";
+const MAX_DIAGNOSTIC_EVENTS: usize = 512;
+const MAX_DIAGNOSTIC_RESPONSE_EVENTS: usize = 200;
 
 pub struct App {
     paths: AppPaths,
@@ -191,6 +193,7 @@ impl App {
                 settings
             }
         };
+        align_snapshot_with_settings(&mut snapshot, &settings);
 
         Ok(Self {
             paths,
@@ -242,15 +245,7 @@ impl App {
             }
             Some(provider_id.to_string())
         };
-        let events = state
-            .diagnostics
-            .iter()
-            .filter(|event| match &provider {
-                Some(provider) => event.provider.as_deref() == Some(provider.as_str()),
-                None => event.provider.is_none(),
-            })
-            .cloned()
-            .collect();
+        let events = recent_diagnostic_events(&state.diagnostics, provider.as_deref());
         let diagnostics = crate::model::Diagnostics {
             schema_version: 1,
             generated_at: now_rfc3339(),
@@ -273,13 +268,18 @@ impl App {
             let next = apply_settings_patch(state.settings.clone(), patch)?;
             self.settings_store.store(&next)?;
             state.settings = next;
+            let settings = state.settings.clone();
+            align_snapshot_with_settings(&mut state.snapshot, &settings);
             let now = now_rfc3339();
-            state.diagnostics.push(diagnostic_event(
-                "settings_written",
-                "Daemon settings patch applied",
-                &now,
-                None,
-            ));
+            push_state_diagnostic(
+                &mut state,
+                diagnostic_event(
+                    "settings_written",
+                    "Daemon settings patch applied",
+                    &now,
+                    None,
+                ),
+            );
             to_public_json(&state.settings)?
         };
         self.settings_revision.fetch_add(1, Ordering::AcqRel);
@@ -388,7 +388,7 @@ impl App {
             (active, state.settings.clone(), state.snapshot.clone())
         };
 
-        let finished_at = now_rfc3339();
+        let mut finished_at = now_rfc3339();
         let provider_targets = cli::target_providers(&settings, &active.options.providers);
         let fixture_requested = fixture_requested(&active.options);
         let fixture_only = active.options.source_adapter_policy.allows_fixture()
@@ -435,13 +435,11 @@ impl App {
                         selected_provider: previous_snapshot.selected_provider.clone(),
                     })
                     .await?;
+                finished_at = now_rfc3339();
                 let diagnostic_codes = result_diagnostic_codes(&refresh.diagnostics);
-                (
-                    refresh.snapshot,
-                    refresh.diagnostics,
-                    diagnostic_codes,
-                    true,
-                )
+                let mut snapshot = refresh.snapshot;
+                set_snapshot_finished_at(&mut snapshot, &finished_at);
+                (snapshot, refresh.diagnostics, diagnostic_codes, true)
             } else {
                 (
                     fixtures::unsupported_adapter_snapshot(&finished_at)?,
@@ -505,13 +503,16 @@ impl App {
         }
         state.snapshot = snapshot;
         state.active_refresh = None;
-        state.diagnostics.append(&mut diagnostics);
-        state.diagnostics.push(diagnostic_event(
-            "refresh_finished",
-            "Daemon refresh finished",
-            &finished_at,
-            None,
-        ));
+        append_state_diagnostics(&mut state, &mut diagnostics);
+        push_state_diagnostic(
+            &mut state,
+            diagnostic_event(
+                "refresh_finished",
+                "Daemon refresh finished",
+                &finished_at,
+                None,
+            ),
+        );
         let snapshot_json = to_public_json(&state.snapshot)?;
         let result_json = to_public_json(&result)?;
         Ok(RefreshCompletion {
@@ -575,20 +576,23 @@ impl App {
 
         state.snapshot = snapshot;
         state.active_refresh = None;
-        state.diagnostics.push(DiagnosticEvent {
-            code: diagnostic_code.to_string(),
-            severity: DiagnosticSeverity::Error,
-            safe_message: safe_message.to_string(),
-            timestamp: finished_at.clone(),
-            provider: None,
-            source_adapter: None,
-            recoverable: true,
-            details: Default::default(),
-            redacted: EventRedaction {
-                applied: true,
-                classes: vec!["secrets".to_string(), "identity".to_string()],
+        push_state_diagnostic(
+            &mut state,
+            DiagnosticEvent {
+                code: diagnostic_code.to_string(),
+                severity: DiagnosticSeverity::Error,
+                safe_message: safe_message.to_string(),
+                timestamp: finished_at.clone(),
+                provider: None,
+                source_adapter: None,
+                recoverable: true,
+                details: Default::default(),
+                redacted: EventRedaction {
+                    applied: true,
+                    classes: vec!["secrets".to_string(), "identity".to_string()],
+                },
             },
-        });
+        );
         let result = refresh_result(
             &state.snapshot,
             &active,
@@ -697,6 +701,74 @@ fn validate_version_metadata() -> AppResult<()> {
         return Err(AppError::internal_redacted());
     }
     Ok(())
+}
+
+fn align_snapshot_with_settings(snapshot: &mut Snapshot, settings: &Settings) {
+    let targets = cli::target_providers(settings, &[]);
+    let target_set = targets.iter().cloned().collect::<BTreeSet<_>>();
+    snapshot
+        .providers
+        .retain(|provider| target_set.contains(&provider.provider));
+    if snapshot.providers.is_empty() {
+        snapshot.selected_provider = None;
+        snapshot.daemon.state = if target_set.is_empty() {
+            DaemonState::Ok
+        } else if snapshot.stale {
+            DaemonState::Starting
+        } else {
+            snapshot.daemon.state
+        };
+        return;
+    }
+    if snapshot
+        .selected_provider
+        .as_ref()
+        .is_some_and(|provider| !target_set.contains(provider))
+    {
+        snapshot.selected_provider = snapshot
+            .providers
+            .first()
+            .map(|provider| provider.provider.clone());
+    }
+}
+
+fn set_snapshot_finished_at(snapshot: &mut Snapshot, finished_at: &str) {
+    snapshot.generated_at = finished_at.to_string();
+    snapshot.daemon.last_refresh_finished_at = Some(finished_at.to_string());
+}
+
+fn recent_diagnostic_events(
+    events: &[DiagnosticEvent],
+    provider: Option<&str>,
+) -> Vec<DiagnosticEvent> {
+    let mut recent = events
+        .iter()
+        .rev()
+        .filter(|event| match provider {
+            Some(provider) => event.provider.as_deref() == Some(provider),
+            None => event.provider.is_none(),
+        })
+        .take(MAX_DIAGNOSTIC_RESPONSE_EVENTS)
+        .cloned()
+        .collect::<Vec<_>>();
+    recent.reverse();
+    recent
+}
+
+fn append_state_diagnostics(state: &mut AppState, diagnostics: &mut Vec<DiagnosticEvent>) {
+    state.diagnostics.append(diagnostics);
+    prune_diagnostics(&mut state.diagnostics);
+}
+
+fn push_state_diagnostic(state: &mut AppState, diagnostic: DiagnosticEvent) {
+    state.diagnostics.push(diagnostic);
+    prune_diagnostics(&mut state.diagnostics);
+}
+
+fn prune_diagnostics(events: &mut Vec<DiagnosticEvent>) {
+    if events.len() > MAX_DIAGNOSTIC_EVENTS {
+        events.drain(0..events.len() - MAX_DIAGNOSTIC_EVENTS);
+    }
 }
 
 fn result_diagnostic_codes(events: &[DiagnosticEvent]) -> Vec<String> {
@@ -962,5 +1034,70 @@ fn redaction_summary() -> RedactionSummary {
         applied: true,
         policy_version: 1,
         notes: vec!["Task 01 diagnostics are redacted before D-Bus output".to_string()],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_are_pruned_to_recent_history() {
+        let mut events = Vec::new();
+        for index in 0..(MAX_DIAGNOSTIC_EVENTS + 12) {
+            events.push(diagnostic_event(
+                &format!("event-{index}"),
+                "diagnostic event",
+                "2026-05-13T00:00:00Z",
+                None,
+            ));
+        }
+
+        prune_diagnostics(&mut events);
+
+        assert_eq!(events.len(), MAX_DIAGNOSTIC_EVENTS);
+        assert_eq!(events.first().expect("first event").code, "event-12");
+        assert_eq!(
+            events.last().expect("last event").code,
+            format!("event-{}", MAX_DIAGNOSTIC_EVENTS + 11)
+        );
+    }
+
+    #[test]
+    fn diagnostics_response_is_limited_and_chronological() {
+        let mut events = Vec::new();
+        for index in 0..(MAX_DIAGNOSTIC_RESPONSE_EVENTS + 25) {
+            events.push(diagnostic_event(
+                &format!("global-{index}"),
+                "global diagnostic",
+                "2026-05-13T00:00:00Z",
+                None,
+            ));
+            events.push(diagnostic_event(
+                &format!("provider-{index}"),
+                "provider diagnostic",
+                "2026-05-13T00:00:00Z",
+                Some("claude".to_string()),
+            ));
+        }
+
+        let global = recent_diagnostic_events(&events, None);
+        let provider = recent_diagnostic_events(&events, Some("claude"));
+
+        assert_eq!(global.len(), MAX_DIAGNOSTIC_RESPONSE_EVENTS);
+        assert_eq!(provider.len(), MAX_DIAGNOSTIC_RESPONSE_EVENTS);
+        assert_eq!(global.first().expect("first global").code, "global-25");
+        assert_eq!(
+            global.last().expect("last global").code,
+            format!("global-{}", MAX_DIAGNOSTIC_RESPONSE_EVENTS + 24)
+        );
+        assert_eq!(
+            provider.first().expect("first provider").code,
+            "provider-25"
+        );
+        assert_eq!(
+            provider.last().expect("last provider").code,
+            format!("provider-{}", MAX_DIAGNOSTIC_RESPONSE_EVENTS + 24)
+        );
     }
 }

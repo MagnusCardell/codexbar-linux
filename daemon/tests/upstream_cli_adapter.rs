@@ -72,6 +72,57 @@ esac
 }
 
 #[tokio::test]
+async fn upstream_cli_adapter_runs_cost_usage_and_status_together() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar test-1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider both")
+    sleep 1
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *"--status")
+    sleep 1
+    cat <<'JSON'
+[{"provider":"codex","version":"0.125.0","source":"codex-cli","usage":{"primary":{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"updatedAt":"2026-04-29T19:32:19Z"},"status":{"updatedAt":"2026-04-29T19:32:19Z","indicator":"none","description":"All Systems Operational"}}]
+JSON
+    exit 0
+    ;;
+  *)
+    sleep 1
+    cat <<'JSON'
+[{"provider":"codex","version":"0.125.0","source":"codex-cli","usage":{"primary":{"usedPercent":34,"windowMinutes":300,"resetsAt":"2026-04-29T22:36:14Z"},"updatedAt":"2026-04-29T19:32:11Z"}}]
+JSON
+    exit 0
+    ;;
+esac
+"#,
+    );
+    let started = std::time::Instant::now();
+    let refresh = run_adapter(
+        binary,
+        vec!["codex".to_string()],
+        CliTimeouts {
+            version: Duration::from_secs(1),
+            usage: Duration::from_secs(3),
+            status: Duration::from_secs(3),
+            cost: Duration::from_secs(3),
+        },
+    )
+    .await;
+    assert!(tmp.path().is_dir());
+    assert_eq!(refresh.snapshot.providers[0].state, ProviderState::Ok);
+    assert!(
+        started.elapsed() < Duration::from_millis(1700),
+        "cost, usage, and status probes should overlap instead of taking the sum of their sleeps"
+    );
+}
+
+#[tokio::test]
 async fn upstream_web_semantic_source_does_not_change_daemon_adapter_boundary() {
     let (tmp, binary) = fake_codexbar(
         r#"

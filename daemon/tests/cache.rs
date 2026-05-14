@@ -57,6 +57,35 @@ async fn restart_loads_cache_as_stale_without_relabeling_known_adapter() {
     assert_eq!(value["providers"][0]["source"], "api");
 }
 
+#[test]
+fn restart_prunes_cached_providers_not_enabled_in_current_settings() {
+    let (_tmp, paths) = common::temp_paths();
+    let cache = SnapshotCache::new(paths.cache_dir.clone(), paths.cache_file.clone());
+    let now = codexbar_linuxd::clock::now_rfc3339();
+    let mut snapshot = fixtures::refreshed_snapshot("cached-ok", &now, &now).expect("snapshot");
+    let mut openai = snapshot.providers[0].clone();
+    openai.provider = "openai".to_string();
+    openai.display_name = "OpenAI".to_string();
+    snapshot.selected_provider = Some("openai".to_string());
+    snapshot.providers.push(openai);
+    cache.store(&snapshot).expect("cache store");
+
+    let restarted = App::new(paths).expect("restarted app");
+    let snapshot = restarted.get_snapshot_json().expect("snapshot");
+    common::assert_schema("snapshot.schema.json", &snapshot);
+    let value: serde_json::Value = serde_json::from_str(&snapshot).expect("snapshot json");
+    let providers = value["providers"].as_array().expect("providers");
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0]["provider"], "codex");
+    assert_eq!(value["selectedProvider"], "codex");
+    assert!(
+        providers
+            .iter()
+            .all(|provider| provider["provider"] != "openai"),
+        "disabled cached providers must not surface while startup refresh is pending"
+    );
+}
+
 #[tokio::test]
 async fn stale_cache_fallback_reports_partial_refresh() {
     let (_tmp, paths) = common::temp_paths();

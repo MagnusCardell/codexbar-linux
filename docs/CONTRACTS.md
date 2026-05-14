@@ -152,6 +152,9 @@ Future errors may be added only with docs, tests, and UI fallback behavior.
 - `scope=browser_import` is retained only for the compatibility no-op method and must not imply active browser access.
 - Every event has a stable `code`, `severity`, `safeMessage`, `timestamp`, and `redacted.applied=true`.
 - `details` may contain small scalar redacted values only.
+- Diagnostics are a bounded recent history, not an append-only session log. The
+  daemon may drop older events and cap D-Bus diagnostic responses to keep Shell
+  and Preferences interactions responsive.
 - Copy-diagnostics uses this payload after one more redaction pass.
 
 `TestBrowserImport(options_json)` accepts `spec/browser-import-options.schema.json` and returns `spec/browser-import-result.schema.json`. The method is reserved and unsupported in the no-browser product scope. The daemon must validate JSON/schema and return a schema-valid result with `status=not_implemented`, empty `profiles`, provider results with `sourceAdapter=none`, and safe diagnostic codes. It must not inspect browser profiles, keyrings, cookie stores, provider endpoints, daemon cache files, or settings files.
