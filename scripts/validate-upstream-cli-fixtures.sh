@@ -90,6 +90,10 @@ required_committed_fixtures = {
         "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "codex", "--source", "api"],
         "expectedCategory": "usage_success",
     },
+    "source_oauth_api_semantic": {
+        "argv": ["codexbar", "--format", "json", "--json-only", "--provider", "gemini", "--source", "oauth"],
+        "expectedCategory": "usage_success",
+    },
     "usage_codex_cli_subcommand": {
         "argv": ["codexbar", "usage", "--format", "json", "--json-only", "--provider", "codex", "--source", "cli"],
         "expectedCategory": "usage_success",

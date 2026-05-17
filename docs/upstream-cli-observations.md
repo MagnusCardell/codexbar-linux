@@ -2,7 +2,7 @@
 
 Task 02A recorded upstream `codexbar` CLI evidence without implementing the
 production adapter. Task 06A updates the compatibility target to upstream
-CodexBar CLI v0.25.1. The current committed corpus includes a safe baseline of
+CodexBar CLI v0.26.1. The current committed corpus includes a safe baseline of
 doc-derived samples from upstream public docs, synthetic error samples,
 reviewed redacted live Linux captures from 2026-04-29, and doc-derived v0.25.1
 compatibility samples for cost, Claude CLI, and semantic source labels.
@@ -22,9 +22,9 @@ compatibility samples for cost, Claude CLI, and semantic source labels.
   semantic version string in the promoted live capture.
 - Documentation sample version fields include provider-level examples such as
   `0.6.0`; that is not a verified Linux binary version.
-- v0.25.1 is the current compatibility target. The committed v0.25.1 samples
-  are synthetic/doc-derived compatibility fixtures, not private live terminal
-  output.
+- v0.26.1 is the current compatibility target. The committed v0.25.1 and
+  v0.26.1 compatibility samples are synthetic/doc-derived fixtures, not private
+  live terminal output.
 
 Task 02B implements the production daemon adapter from the reviewed live
 evidence for config validation, cost output, unsupported-source errors,
@@ -138,7 +138,7 @@ The v0.1 built-in defaults target `codex` first, then `claude`; all-provider
 usage/status remains an explicit requested probe or future optimization, not
 the default production path.
 
-Task 06A keeps the runtime cost command on the v0.25.1-compatible shape:
+Task 06A keeps the runtime cost command on the v0.26.1-compatible shape:
 
 - `codexbar cost --format json --json-only --provider both`
 
@@ -147,19 +147,24 @@ the reviewed 2026-04-29 live `cost_all` evidence. It exists to pin the current
 daemon command strategy and normalizer coverage without committing private
 output.
 
-## v0.25.1 Source Labels
+## v0.26.1 Source Labels
 
 Task 06A treats source labels as provider semantic metadata reported by
 upstream CLI, not as local daemon implementation adapters:
 
 - `codex-cli`, `claude`, `cli`, and `local` normalize to semantic `local`.
 - `openai-web` and `web` normalize to semantic `web`.
-- `oauth` and `api` normalize to semantic `api`.
+- `oauth`, `oauth-api`, and `api` normalize to semantic `api`.
 
 The implementation adapter remains `sourceAdapter: "upstream_cli"` for payloads
 produced by upstream CLI. A semantic `web` source label does not mean this
 daemon read browser cookies, browser profiles, keyrings, provider dashboards,
 or web endpoints.
+
+Upstream v0.26.1 adds `codexbar serve`, a foreground localhost-only HTTP
+adapter for upstream usage and cost JSON. This project deliberately does not
+use it; D-Bus remains the daemon interface and no localhost/TCP provider data
+plane is added.
 
 ## Usage JSON Shape Summary
 
@@ -260,7 +265,7 @@ Allowed normalized identity is limited to the frozen fields in
 - Which Linux `--json-only` failures emit single JSON, multiple JSON documents,
   or no output? Unsupported web/auto emitted single JSON arrays, invalid
   provider emitted multiple JSON documents, and timeouts emitted no output.
-- Which additional upstream `source` labels, beyond the v0.25.1 set covered by
+- Which additional upstream `source` labels, beyond the v0.26.1 set covered by
   fixtures, should map to semantic `api`, `local`, `web`, or `unknown`?
 - Which provider-specific extras are safe and useful enough to normalize, and
   which must become diagnostics or be discarded?

@@ -116,6 +116,9 @@ esac
     .await;
     assert!(tmp.path().is_dir());
     assert_eq!(refresh.snapshot.providers[0].state, ProviderState::Ok);
+    assert_command_finished_after_started(&refresh.diagnostics, "cost", None);
+    assert_command_finished_after_started(&refresh.diagnostics, "usage", Some("codex"));
+    assert_command_finished_after_started(&refresh.diagnostics, "status", Some("codex"));
     assert!(
         started.elapsed() < Duration::from_millis(1700),
         "cost, usage, and status probes should overlap instead of taking the sum of their sleeps"
@@ -150,6 +153,40 @@ esac
     let provider = &refresh.snapshot.providers[0];
     assert_eq!(provider.state, ProviderState::Ok);
     assert_eq!(provider.source, SemanticSource::Web);
+    assert_eq!(provider.source_adapter, SourceAdapter::UpstreamCli);
+    let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
+    common::assert_schema("snapshot.schema.json", &snapshot_json);
+    common::assert_public_json_safe(&snapshot_json);
+}
+
+#[tokio::test]
+async fn upstream_oauth_api_semantic_source_maps_to_api_without_local_api_plane() {
+    let (tmp, binary) = fake_codexbar(
+        r#"
+case "$*" in
+  "--version")
+    printf '%s\n' 'CodexBar 0.26.1'
+    exit 0
+    ;;
+  "cost --format json --json-only --provider both")
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *)
+    cat <<'JSON'
+[{"provider":"gemini","version":"0.26.1","source":"oauth-api","usage":{"primary":{"usedPercent":12,"windowMinutes":1440,"resetsAt":"2026-05-16T12:00:00Z"},"updatedAt":"2026-05-15T10:00:00Z"}}]
+JSON
+    exit 0
+    ;;
+esac
+"#,
+    );
+
+    let refresh = run_adapter(binary, vec!["gemini".to_string()], short_timeouts()).await;
+    assert!(tmp.path().is_dir());
+    let provider = &refresh.snapshot.providers[0];
+    assert_eq!(provider.state, ProviderState::Ok);
+    assert_eq!(provider.source, SemanticSource::Api);
     assert_eq!(provider.source_adapter, SourceAdapter::UpstreamCli);
     let snapshot_json = serde_json::to_string(&refresh.snapshot).expect("snapshot json");
     common::assert_schema("snapshot.schema.json", &snapshot_json);
@@ -406,7 +443,7 @@ esac
 }
 
 #[tokio::test]
-async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
+async fn app_refresh_with_upstream_cli_uses_v0261_command_strategy() {
     let (fake_tmp, binary, log_path) = fake_codexbar_recording();
     let (_app_tmp, mut paths) = common::temp_paths();
     paths.upstream_cli_path = Some(binary);
@@ -455,6 +492,8 @@ async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
     assert!(provider_inventory_ids.contains(&"codex"));
     assert!(provider_inventory_ids.contains(&"claude"));
     assert!(provider_inventory_ids.contains(&"gemini"));
+    assert!(provider_inventory_ids.contains(&"moonshot"));
+    assert!(provider_inventory_ids.contains(&"bedrock"));
     assert!(provider_inventory_ids.contains(&"windsurf"));
     assert!(!provider_inventory_ids.contains(&"all"));
     assert!(!provider_inventory_ids.contains(&"both"));
@@ -508,6 +547,10 @@ async fn app_refresh_with_upstream_cli_uses_v0251_command_strategy() {
         !log.lines()
             .any(|line| line.contains("--provider all --source cli")),
         "usage/status must not default to all-provider cli probes: {log}"
+    );
+    assert!(
+        !log.lines().any(|line| line.starts_with("serve")),
+        "upstream serve must not be used as the daemon data plane: {log}"
     );
     assert!(fake_tmp.path().is_dir());
 }
@@ -1202,6 +1245,43 @@ fn assert_no_warning_or_error_diagnostics(diagnostics_json: &str) {
     }
 }
 
+fn assert_command_finished_after_started(
+    events: &[codexbar_linuxd::model::DiagnosticEvent],
+    command: &str,
+    provider: Option<&str>,
+) {
+    let started =
+        command_event_timestamp(events, "upstream_cli_command_started", command, provider);
+    let finished =
+        command_event_timestamp(events, "upstream_cli_command_finished", command, provider);
+    assert!(
+        finished > started,
+        "{command} finish timestamp {finished} should be after start timestamp {started}"
+    );
+}
+
+fn command_event_timestamp<'a>(
+    events: &'a [codexbar_linuxd::model::DiagnosticEvent],
+    code: &str,
+    command: &str,
+    provider: Option<&str>,
+) -> &'a str {
+    events
+        .iter()
+        .find(|event| {
+            event.code == code
+                && event.provider.as_deref() == provider
+                && event
+                    .details
+                    .get("command")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(command)
+        })
+        .unwrap_or_else(|| panic!("missing diagnostic event {code} for {command}/{provider:?}"))
+        .timestamp
+        .as_str()
+}
+
 async fn run_adapter(
     binary: PathBuf,
     providers: Vec<String>,
@@ -1294,10 +1374,10 @@ case "$*" in
     ;;
   "--help")
     cat <<'HELP'
-CodexBar 0.25.1
+CodexBar 0.26.1
 Usage:
   codexbar [--format text|json]
-          [--provider codex|openai|claude|cursor|opencode|opencodego|alibaba-coding-plan|factory|gemini|antigravity|copilot|zai|minimax|manus|kimi|kilo|kiro|vertexai|augment|jetbrains|kimik2|amp|ollama|synthetic|warp|openrouter|windsurf|perplexity|mimo|doubao|abacusai|mistral|deepseek|codebuff|crof|venice|commandcode|stepfun|both|all]
+          [--provider codex|openai|claude|cursor|opencode|opencodego|alibaba-coding-plan|factory|gemini|antigravity|copilot|zai|minimax|manus|kimi|kilo|kiro|vertexai|augment|jetbrains|kimik2|moonshot|amp|ollama|synthetic|warp|openrouter|windsurf|perplexity|mimo|doubao|abacusai|mistral|deepseek|codebuff|crof|venice|commandcode|stepfun|bedrock|both|all]
           [--source <auto|web|cli|oauth|api>]
 HELP
     exit 0

@@ -3,7 +3,7 @@
 CodexBar GNOME uses the upstream `codexbar` CLI and local provider tooling as
 its production data plane. The GNOME Shell extension talks only to the
 user-scoped daemon over D-Bus; provider data is collected by the daemon through
-the CLI. The v0.2.0 compatibility target is upstream CodexBar CLI v0.25.1.
+the CLI. The v0.2.0 compatibility target is upstream CodexBar CLI v0.26.1.
 
 ## Install Upstream CLI
 
@@ -103,24 +103,25 @@ systemctl --user restart codexbar-linuxd.service
 
 Browser cookies, browser profile discovery, provider web fetches, browser
 extensions, keyring access, and localhost/TCP APIs are intentionally unsupported
-by this project.
+by this project. Upstream v0.26.1 includes `codexbar serve`, but this project
+does not use it because the Shell UI remains D-Bus-only.
 
-## Optional v0.25.1 Capture
+## Optional v0.26.1 Capture
 
-Normal CI does not require a live upstream v0.25.1 binary. Operators who need
+Normal CI does not require a live upstream v0.26.1 binary. Operators who need
 fresh local evidence can capture redacted sidecars outside the committed fixture
 tree:
 
 ```bash
 CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   ./scripts/capture-upstream-cli-samples.sh \
-  --output /tmp/codexbar-upstream-cli-v0251 \
+  --output /tmp/codexbar-upstream-cli-v0261 \
   --allow-provider-network \
   --providers codex,claude \
   --provider-source cli \
   --include-config-validate
 
-./scripts/validate-upstream-cli-capture.sh /tmp/codexbar-upstream-cli-v0251
+./scripts/validate-upstream-cli-capture.sh /tmp/codexbar-upstream-cli-v0261
 ```
 
 Review redacted stdout, stderr, metadata, and the manifest manually before

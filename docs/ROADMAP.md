@@ -120,16 +120,17 @@ and partial-success states are documented in `docs/upstream-cli-ux.md`.
 `docs/upstream-cli-setup.md` documents the supported upstream CLI setup and
 systemd user environment flow for the packaged daemon.
 
-Task 06A status: v0.2.0 targets upstream CodexBar CLI v0.25.1 compatibility
+Task 06A status: v0.2.0 targets upstream CodexBar CLI v0.26.1 compatibility
 without changing the v0.1 package/GNOME behavior. Usage/status refresh remains
 targeted per provider from daemon settings (`codex`, then `claude` by default),
 cost uses `codexbar cost --format json --json-only --provider both` without
 `--source`, and all-provider usage/status probes remain explicit only. Source
 label normalization covers `codex-cli`, `claude`, `cli`, `local`,
-`openai-web`, `web`, `oauth`, and `api` while keeping `sourceAdapter` at
-`upstream_cli`. Browser-cookie/profile/keyring/provider-web/localhost data
-planes remain out of scope, and the provider-level `allowBrowserImport` schema
-default now matches the runtime `false` normalization.
+`openai-web`, `web`, `oauth`, `oauth-api`, and `api` while keeping
+`sourceAdapter` at `upstream_cli`. Browser-cookie/profile/keyring/provider-web
+and localhost/TCP data planes remain out of scope, including upstream
+`codexbar serve`. The provider-level `allowBrowserImport` schema default
+matches the runtime `false` normalization.
 
 Provider-expansion status: the upstream CLI adapter now discovers safe provider
 IDs from bounded `codexbar --help` output and exposes them as

@@ -10,8 +10,8 @@ daemon refresh behavior.
   sidecars.
 - `usage/` contains redacted output for usage/default probes such as
   `codexbar --format json --json-only --provider all --source cli`.
-- `cost/` contains redacted output for
-  `codexbar cost --format json --json-only --provider all`.
+- `cost/` contains redacted output for cost probes such as
+  `codexbar cost --format json --json-only --provider both`.
 - `status/` contains status-bearing CLI output.
 - `errors/` contains missing-binary, non-zero-exit, timeout, and parse-oriented
   fixtures.
@@ -89,9 +89,8 @@ for usage/default/status probes; when omitted, the provider target is `all`.
 Targeted usage/default/subcommand/status fixture ids include both provider and
 source, for example `usage_codex_cli_default` or `status_claude_cli`. `auto`
 and `web` are Linux unsupported-source probe values, not expected success
-paths. The cost probe intentionally uses `--json-only`, always captures
-`--provider all`, and does not receive `--source` unless upstream support for
-that flag is verified.
+paths. The cost probe intentionally uses `--json-only`, captures the requested
+cost provider target, and does not receive `--source`.
 
 ```bash
 ./scripts/capture-upstream-cli-samples.sh \

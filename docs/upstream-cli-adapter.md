@@ -2,7 +2,7 @@
 
 Task 02B added the production daemon adapter for upstream `codexbar` CLI
 refresh. Task 06A keeps that adapter compatible with upstream CodexBar CLI
-v0.25.1 while preserving the upstream-CLI-only Linux scope. The adapter is
+v0.26.1 while preserving the upstream-CLI-only Linux scope. The adapter is
 owned by the Rust daemon and is not called from GNOME Shell, preferences,
 reserved browser-import compatibility code, or any localhost API.
 
@@ -44,7 +44,7 @@ Cost uses the upstream Codex + Claude local cost command and deliberately omits
 codexbar cost --format json --json-only --provider both
 ```
 
-This matches the v0.25.1 compatibility target: upstream `--provider
+This matches the v0.26.1 compatibility target: upstream `--provider
 <id|both|all>` defaults are owned by upstream config when the CLI is called
 directly, but the daemon continues to pass explicit provider targets selected
 from daemon settings. The built-in daemon defaults are `codex`, then `claude`.
@@ -62,6 +62,9 @@ the pseudo-provider values `all` and `both`, and exposes the result as
 `upstreamCli.providerInventory` in normalized daemon/snapshot JSON. This is an
 inventory hint for Preferences; it is not provider I/O and it does not fetch
 provider data.
+
+Upstream v0.26.1 adds providers such as `moonshot` and `bedrock`; those IDs can
+appear through `providerInventory` when reported by `codexbar --help`.
 
 The adapter does not default usage/status to `--provider all` because the
 promoted live Linux evidence timed out for all-provider usage/status with empty
@@ -104,7 +107,7 @@ The adapter normalizes upstream JSON into the frozen
 
 - upstream CLI sources such as `codex-cli`, `claude`, `cli`, and `local`
   become semantic `source: "local"`;
-- upstream CLI sources such as `oauth` and `api` become semantic
+- upstream CLI sources such as `oauth`, `oauth-api`, and `api` become semantic
   `source: "api"`;
 - upstream CLI sources such as `openai-web` and `web` become semantic
   `source: "web"`;
@@ -125,6 +128,11 @@ when upstream CLI generated that payload. It does not mean the Linux daemon
 performed a local browser-cookie import, provider dashboard fetch, WebKit flow,
 or Linux web adapter refresh. Local Linux browser/web adapters remain
 unsupported and disabled.
+
+Upstream v0.26.1 also adds `codexbar serve`, a foreground localhost-only HTTP
+server for upstream usage and cost JSON. This project does not use it as a data
+plane: the product surface remains a user-scoped D-Bus daemon consumed by GNOME
+Shell, with no localhost/TCP API.
 
 ## Refresh And Cache
 
@@ -182,7 +190,7 @@ strings for raw emails, home paths, token/cookie/auth markers, `rawResponse`,
 and `rawPayload`. They do not commit live output and do not expose raw
 stdout/stderr.
 
-For manual upstream v0.25.1 smoke outside CI, run:
+For manual upstream v0.26.1 smoke outside CI, run:
 
 ```bash
 /path/to/codexbar --version
@@ -197,13 +205,13 @@ To capture reviewed redacted evidence without committing private output:
 ```bash
 CODEXBAR_CAPTURE_LIVE=1 CODEXBAR_CLI=/path/to/codexbar \
   ./scripts/capture-upstream-cli-samples.sh \
-  --output /tmp/codexbar-upstream-cli-v0251 \
+  --output /tmp/codexbar-upstream-cli-v0261 \
   --allow-provider-network \
   --providers codex,claude \
   --provider-source cli \
   --include-config-validate
 
-./scripts/validate-upstream-cli-capture.sh /tmp/codexbar-upstream-cli-v0251
+./scripts/validate-upstream-cli-capture.sh /tmp/codexbar-upstream-cli-v0261
 ```
 
-Live v0.25.1 capture is optional and must not be required for normal CI.
+Live v0.26.1 capture is optional and must not be required for normal CI.

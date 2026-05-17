@@ -17,7 +17,7 @@ CodexBar GNOME currently builds a local development `.deb` package for
 Ubuntu/GNOME users who are comfortable installing a local package and
 configuring the upstream CLI. `./scripts/build-deb.sh` prints the package path;
 use that `.deb` as-is. The v0.2.0 release line targets upstream CodexBar CLI
-v0.25.1 while the existing GNOME Shell behavior remains intact.
+v0.26.1 while the existing GNOME Shell behavior remains intact.
 
 Primary target:
 
@@ -49,7 +49,7 @@ Release gates before final package sign-off:
 - Preferences for panel mode, refresh interval, provider visibility, and
   provider source settings.
 - Provider selection stays upstream-CLI-driven: Preferences can show the
-  upstream v0.25.1 provider catalog and discovered provider IDs, while refresh
+  upstream v0.26.1 provider catalog and discovered provider IDs, while refresh
   still targets selected/configured providers individually.
 - A user daemon, `codexbar-linuxd`, activated through the D-Bus session service
   `org.codexbar.Linux1`.
@@ -317,7 +317,7 @@ provider tooling.
 The default usage/status refresh targets Codex, then Claude, through the
 upstream CLI source and does not default to `--provider all`. Explicit
 `RefreshOptions.providers` can still request a different target. Current
-upstream v0.25.1 cost output covers local Codex + Claude cost data. CodexBar
+upstream v0.26.1 cost output covers local Codex + Claude cost data. CodexBar
 GNOME requests both supported local cost providers:
 
 ```bash
@@ -326,10 +326,15 @@ codexbar cost --format json --json-only --provider both
 
 Other providers depend on what upstream CodexBar CLI supports on Linux through
 CLI, API, OAuth, or local tooling. Upstream semantic source labels such as
-`openai-web`, `web`, `oauth`, or `api` may appear in normalized provider
-metadata when upstream CLI generated them. They do not mean CodexBar GNOME read
+`openai-web`, `web`, `oauth`, `oauth-api`, or `api` may appear in normalized
+provider metadata when upstream CLI generated them. They do not mean CodexBar GNOME read
 browser cookies, browser profiles, desktop keyrings, provider dashboards, or
 web endpoints. Browser/web-only provider collection remains out of scope.
+
+Upstream CodexBar v0.26.1 also ships `codexbar serve`, a localhost HTTP
+adapter for upstream CLI payloads. CodexBar GNOME intentionally does not use
+that command; the Shell UI remains D-Bus-only and the daemon does not expose a
+localhost/TCP provider data plane.
 
 ## Build and Development
 

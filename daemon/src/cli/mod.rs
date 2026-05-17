@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::cache::validate_snapshot;
+use crate::clock::now_rfc3339;
 use crate::config::is_safe_id;
 use crate::error::AppResult;
 use crate::model::{
@@ -63,7 +64,9 @@ pub struct CliTimeouts {
 struct ProviderCommandOutput {
     provider: String,
     usage: Result<CommandOutput, CommandRunError>,
+    usage_finished_at: String,
     status: Result<CommandOutput, CommandRunError>,
+    status_finished_at: String,
 }
 
 impl Default for CliTimeouts {
@@ -139,66 +142,70 @@ impl UpstreamCliAdapter {
         )];
         let mut version = None;
         let mut cli_diagnostic_code = None;
+        let version_started_at = now_rfc3339();
         diagnostics.push(command_event(
             "upstream_cli_command_started",
             CommandKind::Version,
             None,
-            &request.finished_at,
+            &version_started_at,
         ));
         match self.run(&path, version_spec(self.timeouts.version)).await {
             Ok(output) if output.success() => {
+                let version_finished_at = now_rfc3339();
                 version = sanitize_version(&String::from_utf8_lossy(&output.stdout));
                 diagnostics.push(command_event(
                     "upstream_cli_command_finished",
                     CommandKind::Version,
                     None,
-                    &request.finished_at,
+                    &version_finished_at,
                 ));
                 diagnostics.push(diagnostic(
                     "upstream_cli_version_detected",
                     "Upstream CodexBar CLI version detected",
                     DiagnosticSeverity::Info,
-                    &request.finished_at,
+                    &version_finished_at,
                     None,
                     command_details(CommandKind::Version, Some(&output)),
                 ));
             }
             Ok(output) => {
+                let version_finished_at = now_rfc3339();
                 diagnostics.push(command_event(
                     "upstream_cli_command_finished",
                     CommandKind::Version,
                     None,
-                    &request.finished_at,
+                    &version_finished_at,
                 ));
                 let failure = CliFailure::from_output(&output);
                 cli_diagnostic_code = Some(failure.code.to_string());
                 diagnostics.push(failure.to_diagnostic(
                     CommandKind::Version,
                     None,
-                    &request.finished_at,
+                    &version_finished_at,
                     Some(&output),
                 ));
             }
             Err(err) => {
+                let version_finished_at = now_rfc3339();
                 diagnostics.push(command_event(
                     "upstream_cli_command_finished",
                     CommandKind::Version,
                     None,
-                    &request.finished_at,
+                    &version_finished_at,
                 ));
                 let failure = CliFailure::from_run_error(err);
                 cli_diagnostic_code = Some(failure.code.to_string());
                 diagnostics.push(failure.to_diagnostic(
                     CommandKind::Version,
                     None,
-                    &request.finished_at,
+                    &version_finished_at,
                     None,
                 ));
             }
         }
 
         let provider_inventory = self
-            .discover_provider_inventory(&path, &request.finished_at, &mut diagnostics)
+            .discover_provider_inventory(&path, &mut diagnostics)
             .await;
 
         let cli = UpstreamCliInfo {
@@ -209,9 +216,8 @@ impl UpstreamCliAdapter {
             provider_inventory,
         };
 
-        let cost_probe = self.collect_costs(&path, &request.finished_at);
-        let provider_probes =
-            self.collect_provider_commands(&path, &providers, &request.finished_at);
+        let cost_probe = self.collect_costs(&path);
+        let provider_probes = self.collect_provider_commands(&path, &providers);
         let (
             (cost_by_provider, cost_failures, mut cost_diagnostics),
             (provider_outputs, mut command_diagnostics),
@@ -222,6 +228,8 @@ impl UpstreamCliAdapter {
         let mut normalized = Vec::with_capacity(provider_outputs.len());
         for output in provider_outputs {
             let provider = output.provider;
+            let usage_finished_at = output.usage_finished_at;
+            let status_finished_at = output.status_finished_at;
             let usage = output.usage;
             let status = output.status;
 
@@ -233,7 +241,7 @@ impl UpstreamCliAdapter {
                             "upstream_cli_usage_normalized",
                             "Upstream CLI usage output normalized",
                             DiagnosticSeverity::Info,
-                            &request.finished_at,
+                            &usage_finished_at,
                             Some(provider.clone()),
                             command_details(CommandKind::Usage, Some(&output)),
                         ));
@@ -244,7 +252,7 @@ impl UpstreamCliAdapter {
                         diagnostics.push(failure.to_diagnostic(
                             CommandKind::Usage,
                             Some(provider.as_str()),
-                            &request.finished_at,
+                            &usage_finished_at,
                             Some(&output),
                         ));
                         None
@@ -256,7 +264,7 @@ impl UpstreamCliAdapter {
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Usage,
                         Some(provider.as_str()),
-                        &request.finished_at,
+                        &usage_finished_at,
                         None,
                     ));
                     None
@@ -270,7 +278,7 @@ impl UpstreamCliAdapter {
                             "upstream_cli_status_normalized",
                             "Upstream CLI status output normalized",
                             DiagnosticSeverity::Info,
-                            &request.finished_at,
+                            &status_finished_at,
                             Some(provider.clone()),
                             command_details(CommandKind::Status, Some(&output)),
                         ));
@@ -281,7 +289,7 @@ impl UpstreamCliAdapter {
                         diagnostics.push(failure.to_diagnostic(
                             CommandKind::Status,
                             Some(provider.as_str()),
-                            &request.finished_at,
+                            &status_finished_at,
                             Some(&output),
                         ));
                         None
@@ -293,7 +301,7 @@ impl UpstreamCliAdapter {
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Status,
                         Some(provider.as_str()),
-                        &request.finished_at,
+                        &status_finished_at,
                         None,
                     ));
                     None
@@ -304,13 +312,18 @@ impl UpstreamCliAdapter {
             for _ in cost_failures_for_provider(&cost_failures, &provider) {
                 provider_diagnostics.push(CliFailure::cost_unavailable());
             }
+            let provider_finished_at = if status_finished_at > usage_finished_at {
+                status_finished_at.as_str()
+            } else {
+                usage_finished_at.as_str()
+            };
             let normalized_provider = normalize_provider(
                 &provider,
                 usage_value.as_ref(),
                 status_value.as_ref(),
                 cost,
                 &provider_diagnostics,
-                &request.finished_at,
+                provider_finished_at,
             );
             normalized.push(normalized_provider);
         }
@@ -365,38 +378,39 @@ impl UpstreamCliAdapter {
     async fn collect_costs(
         &self,
         path: &Path,
-        now: &str,
     ) -> (
         BTreeMap<String, CostSummary>,
         Vec<CostFailure>,
         Vec<DiagnosticEvent>,
     ) {
+        let started_at = now_rfc3339();
         let mut diagnostics = vec![command_event(
             "upstream_cli_command_started",
             CommandKind::Cost,
             None,
-            now,
+            &started_at,
         )];
         match self.run(path, cost_spec(self.timeouts.cost)).await {
             Ok(output) => match parse_success_json(&output) {
                 Ok(value) => {
+                    let finished_at = now_rfc3339();
                     diagnostics.push(command_event(
                         "upstream_cli_command_finished",
                         CommandKind::Cost,
                         None,
-                        now,
+                        &finished_at,
                     ));
                     let normalized_costs = normalize_costs(&value);
                     for cost_failure in &normalized_costs.failures {
                         diagnostics.push(cost_failure.failure.to_diagnostic(
                             CommandKind::Cost,
                             cost_failure.provider.as_deref(),
-                            now,
+                            &finished_at,
                             Some(&output),
                         ));
                         diagnostics.push(cost_unavailable_diagnostic(
                             cost_failure.provider.as_deref(),
-                            now,
+                            &finished_at,
                             Some(&output),
                             Some(&cost_failure.failure),
                         ));
@@ -406,7 +420,7 @@ impl UpstreamCliAdapter {
                             "upstream_cli_cost_normalized",
                             "Upstream CLI cost output normalized",
                             DiagnosticSeverity::Info,
-                            now,
+                            &finished_at,
                             None,
                             command_details(CommandKind::Cost, Some(&output)),
                         ));
@@ -418,21 +432,22 @@ impl UpstreamCliAdapter {
                     )
                 }
                 Err(failure) => {
+                    let finished_at = now_rfc3339();
                     diagnostics.push(command_event(
                         "upstream_cli_command_finished",
                         CommandKind::Cost,
                         None,
-                        now,
+                        &finished_at,
                     ));
                     diagnostics.push(failure.to_diagnostic(
                         CommandKind::Cost,
                         None,
-                        now,
+                        &finished_at,
                         Some(&output),
                     ));
                     diagnostics.push(cost_unavailable_diagnostic(
                         None,
-                        now,
+                        &finished_at,
                         Some(&output),
                         Some(&failure),
                     ));
@@ -447,15 +462,26 @@ impl UpstreamCliAdapter {
                 }
             },
             Err(err) => {
+                let finished_at = now_rfc3339();
                 diagnostics.push(command_event(
                     "upstream_cli_command_finished",
                     CommandKind::Cost,
                     None,
-                    now,
+                    &finished_at,
                 ));
                 let failure = CliFailure::from_run_error(err);
-                diagnostics.push(failure.to_diagnostic(CommandKind::Cost, None, now, None));
-                diagnostics.push(cost_unavailable_diagnostic(None, now, None, Some(&failure)));
+                diagnostics.push(failure.to_diagnostic(
+                    CommandKind::Cost,
+                    None,
+                    &finished_at,
+                    None,
+                ));
+                diagnostics.push(cost_unavailable_diagnostic(
+                    None,
+                    &finished_at,
+                    None,
+                    Some(&failure),
+                ));
                 (
                     BTreeMap::new(),
                     vec![CostFailure {
@@ -472,42 +498,57 @@ impl UpstreamCliAdapter {
         &self,
         path: &Path,
         providers: &[String],
-        now: &str,
     ) -> (Vec<ProviderCommandOutput>, Vec<DiagnosticEvent>) {
         let mut diagnostics = Vec::new();
         let mut outputs = Vec::with_capacity(providers.len());
         for provider in providers {
+            let usage_started_at = now_rfc3339();
             diagnostics.push(command_event(
                 "upstream_cli_command_started",
                 CommandKind::Usage,
                 Some(provider.clone()),
-                now,
+                &usage_started_at,
             ));
+            let status_started_at = now_rfc3339();
             diagnostics.push(command_event(
                 "upstream_cli_command_started",
                 CommandKind::Status,
                 Some(provider.clone()),
-                now,
+                &status_started_at,
             ));
-            let usage = self.run(path, usage_spec(provider, self.timeouts.usage));
-            let status = self.run(path, status_spec(provider, self.timeouts.status));
+            let usage = async {
+                let result = self
+                    .run(path, usage_spec(provider, self.timeouts.usage))
+                    .await;
+                (result, now_rfc3339())
+            };
+            let status = async {
+                let result = self
+                    .run(path, status_spec(provider, self.timeouts.status))
+                    .await;
+                (result, now_rfc3339())
+            };
             let (usage, status) = tokio::join!(usage, status);
+            let (usage, usage_finished_at) = usage;
+            let (status, status_finished_at) = status;
             diagnostics.push(command_event(
                 "upstream_cli_command_finished",
                 CommandKind::Usage,
                 Some(provider.clone()),
-                now,
+                &usage_finished_at,
             ));
             diagnostics.push(command_event(
                 "upstream_cli_command_finished",
                 CommandKind::Status,
                 Some(provider.clone()),
-                now,
+                &status_finished_at,
             ));
             outputs.push(ProviderCommandOutput {
                 provider: provider.clone(),
                 usage,
+                usage_finished_at,
                 status,
+                status_finished_at,
             });
         }
         (outputs, diagnostics)
@@ -524,23 +565,24 @@ impl UpstreamCliAdapter {
     async fn discover_provider_inventory(
         &self,
         path: &std::path::Path,
-        now: &str,
         diagnostics: &mut Vec<DiagnosticEvent>,
     ) -> Vec<ProviderInventoryItem> {
+        let started_at = now_rfc3339();
         diagnostics.push(command_event(
             "upstream_cli_command_started",
             CommandKind::ProviderInventory,
             None,
-            now,
+            &started_at,
         ));
         let result = self
             .run(path, provider_inventory_spec(self.timeouts.version))
             .await;
+        let finished_at = now_rfc3339();
         diagnostics.push(command_event(
             "upstream_cli_command_finished",
             CommandKind::ProviderInventory,
             None,
-            now,
+            &finished_at,
         ));
 
         match result {
@@ -552,7 +594,7 @@ impl UpstreamCliAdapter {
                         "upstream_cli_provider_inventory_discovered",
                         "Upstream CLI provider inventory discovered",
                         DiagnosticSeverity::Info,
-                        now,
+                        &finished_at,
                         None,
                         provider_inventory_details(inventory.len()),
                     ));
@@ -564,7 +606,7 @@ impl UpstreamCliAdapter {
                 diagnostics.push(failure.to_diagnostic(
                     CommandKind::ProviderInventory,
                     None,
-                    now,
+                    &finished_at,
                     Some(&output),
                 ));
                 Vec::new()
@@ -574,7 +616,7 @@ impl UpstreamCliAdapter {
                 diagnostics.push(failure.to_diagnostic(
                     CommandKind::ProviderInventory,
                     None,
-                    now,
+                    &finished_at,
                     None,
                 ));
                 Vec::new()

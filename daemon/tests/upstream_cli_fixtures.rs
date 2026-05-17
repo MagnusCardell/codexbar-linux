@@ -280,6 +280,20 @@ fn upstream_cli_required_compatibility_matrix_is_present() {
             "usage_success",
         ),
         (
+            "source_oauth_api_semantic",
+            &[
+                "codexbar",
+                "--format",
+                "json",
+                "--json-only",
+                "--provider",
+                "gemini",
+                "--source",
+                "oauth",
+            ],
+            "usage_success",
+        ),
+        (
             "usage_codex_cli_subcommand",
             &[
                 "codexbar",

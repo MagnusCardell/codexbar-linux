@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "gemini",
+    "version": "0.26.1",
+    "source": "oauth-api",
+    "usage": {
+      "primary": {
+        "usedPercent": 11,
+        "windowMinutes": 1440,
+        "resetsAt": "2026-05-16T15:00:00Z"
+      },
+      "secondary": null,
+      "tertiary": null,
+      "updatedAt": "2026-05-15T14:00:00Z",
+      "identity": {
+        "providerID": "[REDACTED_ACCOUNT_ID]",
+        "accountEmail": "[REDACTED_EMAIL]",
+        "accountOrganization": "[REDACTED_ORG]",
+        "loginMethod": "oauth"
+      },
+      "accountEmail": "[REDACTED_EMAIL]",
+      "accountOrganization": "[REDACTED_ORG]",
+      "loginMethod": "oauth"
+    }
+  }
+]

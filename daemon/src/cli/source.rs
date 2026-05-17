@@ -37,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_v0251_upstream_source_labels() {
+    fn maps_v0261_upstream_source_labels() {
         for label in ["codex-cli", "claude", "cli", "local"] {
             assert_eq!(
                 map_upstream_source(Some(label)),
@@ -52,7 +52,7 @@ mod tests {
                 "{label} should map to web semantic source"
             );
         }
-        for label in ["oauth", "api"] {
+        for label in ["oauth", "api", "oauth-api"] {
             assert_eq!(
                 map_upstream_source(Some(label)),
                 SemanticSource::Api,
