@@ -109,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_matrix_matches_v0261_strategy() {
+    fn command_matrix_matches_v0330_strategy() {
         assert_eq!(provider_inventory().args, ["--help"]);
         assert_eq!(
             usage_default("codex").args,

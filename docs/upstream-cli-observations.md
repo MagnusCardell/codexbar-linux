@@ -1,11 +1,14 @@
 # Upstream CLI Observations
 
 Task 02A recorded upstream `codexbar` CLI evidence without implementing the
-production adapter. Task 06A updates the compatibility target to upstream
-CodexBar CLI v0.26.1. The current committed corpus includes a safe baseline of
-doc-derived samples from upstream public docs, synthetic error samples,
-reviewed redacted live Linux captures from 2026-04-29, and doc-derived v0.25.1
-compatibility samples for cost, Claude CLI, and semantic source labels.
+production adapter. Task 06A updated the compatibility target to upstream
+CodexBar CLI v0.26.1. A 2026-06-12 upstream review retargeted this project to
+the latest published upstream release only: GitHub Releases `latest` redirected
+to v0.33.0, and the v0.33.0 tag has `version.env`
+`MARKETING_VERSION=0.33.0`. Upstream `main` already contains later unreleased
+source (`0.34.1` in `version.env`), but that is not the Linux toolbar target
+until it is published as a release. The committed corpus still includes older
+safe samples as historical evidence, not as a dual-version support promise.
 
 ## Sources Inspected
 
@@ -13,6 +16,12 @@ compatibility samples for cost, Claude CLI, and semantic source labels.
 - `steipete/CodexBar` `docs/cli.md`
 - `steipete/CodexBar` `docs/providers.md`
 - `steipete/CodexBar` `docs/provider.md`
+- `steipete/CodexBar` `CHANGELOG.md`
+- `steipete/CodexBar` `version.env` at tag `v0.33.0`
+- `steipete/CodexBar` `Sources/CodexBarCLI/CLIOptions.swift`
+- `steipete/CodexBar` `Sources/CodexBarCLI/CLIHelpers.swift`
+- `steipete/CodexBar` `Sources/CodexBarCore/Providers/Providers.swift` at tag
+  `v0.33.0`
 
 ## Version Observed
 
@@ -22,9 +31,56 @@ compatibility samples for cost, Claude CLI, and semantic source labels.
   semantic version string in the promoted live capture.
 - Documentation sample version fields include provider-level examples such as
   `0.6.0`; that is not a verified Linux binary version.
-- v0.26.1 is the current compatibility target. The committed v0.25.1 and
-  v0.26.1 compatibility samples are synthetic/doc-derived fixtures, not private
-  live terminal output.
+- v0.33.0 is the current supported upstream target. v0.26.1 observations remain
+  historical evidence only.
+- The 2026-06-12 source review did not promote private live terminal output and
+  did not replace the fixture corpus with unreviewed v0.33.0 samples.
+- Upstream v0.33.0 public docs describe Linux CLI tarballs, Homebrew formula
+  install, and an AUR package. The v0.33.0 provider enum contains 48 provider
+  IDs and a descriptor-driven provider registry.
+- Upstream `main` uses `version.env` `MARKETING_VERSION=0.34.1`, while the
+  latest release page opened during review redirected to v0.33.0. Treat later
+  `main` changes as out of scope until published.
+
+## 2026-06-12 Upstream Delta Summary
+
+The current upstream command surface still preserves the Linux-safe commands
+used by the daemon:
+
+- `codexbar --format json --json-only --provider <provider> --source cli`
+- `codexbar --format json --json-only --provider <provider> --source cli --status`
+- `codexbar cost --format json --json-only --provider both`
+- `codexbar config validate --format json --json-only`
+
+Notable v0.33.0 additions or clarified behaviors relative to the old local
+notes:
+
+- upstream docs now register 48 provider IDs;
+- `--provider` defaults to enabled providers in upstream config, with `all` for
+  every registered provider and `both` for the primary Codex/Claude set;
+- `--account`, `--account-index`, and `--all-accounts` select token accounts or
+  all visible Codex accounts for single-provider queries;
+- `codexbar cache clear` can clear browser-cookie caches and local cost caches;
+- `codexbar config set-api-key`, `config enable`, and `config disable` manage
+  upstream provider settings directly;
+- `codexbar serve` has a richer localhost cache model, request timeout, config
+  reloads, and loopback/Host restrictions, but remains outside this product's
+  D-Bus-only data plane;
+- upstream help text is descriptor-driven: `Provider to query:
+  codex|...|both|all`.
+
+Reflection decision:
+
+- Import: provider inventory parsing should target the v0.33.0
+  descriptor-driven help text and continue filtering pseudo-providers `all` and
+  `both`.
+- Adapt: docs should describe v0.33.0 release evidence while keeping live
+  fixture promotion opt-in and reviewed.
+- Defer: account-selection flags need a snapshot/settings contract before the
+  daemon can expose multi-account selection safely.
+- Reject: `serve`, browser cookie cache clearing, keyring/browser import,
+  provider web fetching, and upstream config writes remain outside the Linux
+  bar runtime.
 
 Task 02B implements the production daemon adapter from the reviewed live
 evidence for config validation, cost output, unsupported-source errors,
@@ -138,7 +194,8 @@ The v0.1 built-in defaults target `codex` first, then `claude`; all-provider
 usage/status remains an explicit requested probe or future optimization, not
 the default production path.
 
-Task 06A keeps the runtime cost command on the v0.26.1-compatible shape:
+The runtime cost command remains on the current upstream-supported local cost
+shape:
 
 - `codexbar cost --format json --json-only --provider both`
 
@@ -147,7 +204,7 @@ the reviewed 2026-04-29 live `cost_all` evidence. It exists to pin the current
 daemon command strategy and normalizer coverage without committing private
 output.
 
-## v0.26.1 Source Labels
+## Source Labels
 
 Task 06A treats source labels as provider semantic metadata reported by
 upstream CLI, not as local daemon implementation adapters:
@@ -155,16 +212,20 @@ upstream CLI, not as local daemon implementation adapters:
 - `codex-cli`, `claude`, `cli`, and `local` normalize to semantic `local`.
 - `openai-web` and `web` normalize to semantic `web`.
 - `oauth`, `oauth-api`, and `api` normalize to semantic `api`.
+- Current upstream docs also describe provider-specific CLI labels. The daemon
+  maps labels containing `cli`, labels beginning with `local-`, and labels
+  ending in `-cli` to semantic `local`; labels containing `web` or `browser` to
+  semantic `web`; and labels containing `api` or `oauth` to semantic `api`.
 
 The implementation adapter remains `sourceAdapter: "upstream_cli"` for payloads
 produced by upstream CLI. A semantic `web` source label does not mean this
 daemon read browser cookies, browser profiles, keyrings, provider dashboards,
 or web endpoints.
 
-Upstream v0.26.1 adds `codexbar serve`, a foreground localhost-only HTTP
-adapter for upstream usage and cost JSON. This project deliberately does not
-use it; D-Bus remains the daemon interface and no localhost/TCP provider data
-plane is added.
+The upstream CLI includes `codexbar serve`, a foreground localhost-only HTTP
+adapter for usage and cost JSON. This project deliberately does not use it;
+D-Bus remains the daemon interface and no localhost/TCP provider data plane is
+added.
 
 ## Usage JSON Shape Summary
 
@@ -265,9 +326,14 @@ Allowed normalized identity is limited to the frozen fields in
 - Which Linux `--json-only` failures emit single JSON, multiple JSON documents,
   or no output? Unsupported web/auto emitted single JSON arrays, invalid
   provider emitted multiple JSON documents, and timeouts emitted no output.
-- Which additional upstream `source` labels, beyond the v0.26.1 set covered by
-  fixtures, should map to semantic `api`, `local`, `web`, or `unknown`?
+- Which additional upstream `source` labels, beyond the labels already covered
+  by fixtures, should map to semantic `api`, `local`, `web`, or `unknown`?
 - Which provider-specific extras are safe and useful enough to normalize, and
   which must become diagnostics or be discarded?
 - Can cost output be absent or partial per provider while usage succeeds?
 - What stdout/stderr byte limits are appropriate for the production runner?
+- Which future published Linux release asset should become the next
+  live-capture target after manual review?
+- Should multi-account flags become a daemon setting, a manual refresh option,
+  or stay upstream-CLI-only until the snapshot identity contract grows an
+  account-selection model?

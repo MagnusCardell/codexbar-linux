@@ -784,36 +784,38 @@ fn parse_success_json(output: &CommandOutput) -> Result<Value, CliFailure> {
 }
 
 fn provider_inventory_from_help(text: &str) -> Vec<ProviderInventoryItem> {
-    let normalized = text.lines().collect::<Vec<_>>().join(" ");
     let mut providers = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut remaining = normalized.as_str();
-    let marker = "--provider ";
 
-    while let Some(index) = remaining.find(marker) {
-        let after_marker = &remaining[index + marker.len()..];
-        let Some(end_index) = after_marker.find(']') else {
-            break;
-        };
-        let candidate = &after_marker[..end_index];
-        for token in candidate.split('|') {
-            let provider_id = token
-                .trim()
-                .trim_matches(|ch: char| matches!(ch, '[' | ']' | ',' | ';'));
-            if is_safe_id(provider_id)
-                && !is_pseudo_provider(provider_id)
-                && seen.insert(provider_id.to_string())
-            {
-                providers.push(ProviderInventoryItem {
-                    id: provider_id.to_string(),
-                    title: display_name(provider_id),
-                });
-            }
+    for line in text.lines() {
+        if let Some(index) = line.find("Provider to query:") {
+            let candidate = &line[index + "Provider to query:".len()..];
+            push_provider_inventory_tokens(candidate, &mut seen, &mut providers);
         }
-        remaining = &after_marker[end_index + 1..];
     }
 
     providers
+}
+
+fn push_provider_inventory_tokens(
+    candidate: &str,
+    seen: &mut BTreeSet<String>,
+    providers: &mut Vec<ProviderInventoryItem>,
+) {
+    for token in candidate.split('|') {
+        let provider_id = token
+            .trim()
+            .trim_matches(|ch: char| matches!(ch, '<' | '>' | ',' | ';' | '.' | '`'));
+        if is_safe_id(provider_id)
+            && !is_pseudo_provider(provider_id)
+            && seen.insert(provider_id.to_string())
+        {
+            providers.push(ProviderInventoryItem {
+                id: provider_id.to_string(),
+                title: display_name(provider_id),
+            });
+        }
+    }
 }
 
 fn is_pseudo_provider(provider: &str) -> bool {

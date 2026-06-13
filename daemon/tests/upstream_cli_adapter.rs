@@ -443,7 +443,7 @@ esac
 }
 
 #[tokio::test]
-async fn app_refresh_with_upstream_cli_uses_v0261_command_strategy() {
+async fn app_refresh_with_upstream_cli_uses_v0330_command_strategy() {
     let (fake_tmp, binary, log_path) = fake_codexbar_recording();
     let (_app_tmp, mut paths) = common::temp_paths();
     paths.upstream_cli_path = Some(binary);
@@ -495,6 +495,9 @@ async fn app_refresh_with_upstream_cli_uses_v0261_command_strategy() {
     assert!(provider_inventory_ids.contains(&"moonshot"));
     assert!(provider_inventory_ids.contains(&"bedrock"));
     assert!(provider_inventory_ids.contains(&"windsurf"));
+    assert!(provider_inventory_ids.contains(&"grok"));
+    assert!(provider_inventory_ids.contains(&"llmproxy"));
+    assert!(provider_inventory_ids.contains(&"deepgram"));
     assert!(!provider_inventory_ids.contains(&"all"));
     assert!(!provider_inventory_ids.contains(&"both"));
     let diagnostics_json = app.get_diagnostics_json("global").expect("diagnostics");
@@ -1374,11 +1377,13 @@ case "$*" in
     ;;
   "--help")
     cat <<'HELP'
-CodexBar 0.26.1
+CodexBar 0.33.0
 Usage:
   codexbar [--format text|json]
-          [--provider codex|openai|claude|cursor|opencode|opencodego|alibaba-coding-plan|factory|gemini|antigravity|copilot|zai|minimax|manus|kimi|kilo|kiro|vertexai|augment|jetbrains|kimik2|moonshot|amp|ollama|synthetic|warp|openrouter|windsurf|perplexity|mimo|doubao|abacusai|mistral|deepseek|codebuff|crof|venice|commandcode|stepfun|bedrock|both|all]
+          [--provider <provider>]
           [--source <auto|web|cli|oauth|api>]
+Options:
+  --provider <provider>  Provider to query: codex|openai|azureopenai|claude|cursor|opencode|opencodego|alibaba-coding-plan|alibaba-token-plan|factory|gemini|antigravity|copilot|zai|minimax|manus|t3chat|kimi|kilo|kiro|vertexai|augment|jetbrains|kimik2|moonshot|amp|ollama|synthetic|warp|openrouter|elevenlabs|windsurf|perplexity|mimo|doubao|abacusai|mistral|deepseek|codebuff|crof|venice|commandcode|stepfun|bedrock|grok|groqcloud|llmproxy|deepgram|both|all
 HELP
     exit 0
     ;;

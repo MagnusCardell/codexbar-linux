@@ -37,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_v0261_upstream_source_labels() {
+    fn maps_v0330_upstream_source_labels() {
         for label in ["codex-cli", "claude", "cli", "local"] {
             assert_eq!(
                 map_upstream_source(Some(label)),

@@ -58,7 +58,7 @@ const FIXTURE_STATES = [
 function main() {
     assertManualRefreshOptions();
     assertSupportedProviderSettingsDefaultsAndPatches();
-    assertDisabledProvidersFromSettingsStayVisible();
+    assertDisabledProvidersFromSettingsAreHiddenWhenOthersAreEnabled();
     assertSnapshotFixturesRenderStates();
     assertProviderChangedReplacesCompleteProvider();
     assertPanelMetersPreservePrimarySecondarySemantics();
@@ -202,36 +202,40 @@ function assertSupportedProviderSettingsDefaultsAndPatches() {
     assertEqual(offPatch.providers.claude.preferredSourceAdapter, 'off');
 }
 
-function assertDisabledProvidersFromSettingsStayVisible() {
+function assertDisabledProvidersFromSettingsAreHiddenWhenOthersAreEnabled() {
     const ok = readJson('fixtures/snapshots/ok.json');
     const settings = providerSettings({
         codex: {enabled: true, preferredSourceAdapter: 'auto', allowCliFallback: true},
-        claude: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
+        openai: {enabled: false, preferredSourceAdapter: 'auto', allowCliFallback: true},
     });
+    const openai = cloneProvider(ok.providers[0], {
+        provider: 'openai',
+        displayName: 'OpenAI',
+        primaryUsed: 20,
+        primaryRemaining: 80,
+        secondaryUsed: 10,
+        secondaryRemaining: 90,
+    });
+    ok.providers.push(openai);
+    ok.selectedProvider = 'openai';
     let state = applyDaemonSettingsJson(createInitialState(0), JSON.stringify(settings));
     state = applySnapshotJson(state, JSON.stringify(ok), 0);
 
     const view = normalizeViewState(state, {panelMode: 'merged'});
-    const claude = view.providerSelectorRows.find(row => row.providerId === 'claude');
-    assertEqual(view.providerSelectorRows.length, 2);
-    assertEqual(claude.label, 'Claude');
-    assertEqual(claude.statusLabel, 'Disabled');
-    assertEqual(claude.disabled, true);
-    assertEqual(claude.dimmed, true);
-    assertEqual(claude.meter, null);
+    assertEqual(view.providerSelectorRows.length, 1);
+    assertEqual(view.providerSelectorRows[0].providerId, 'codex');
+    assertEqual(view.providerSelectorRows.some(row => row.providerId === 'openai'), false);
+    assertEqual(view.providerRows.some(row => row.providerId === 'openai'), false);
 
     const selectedDisabled = normalizeViewState(state, {
-        selectedProvider: 'claude',
+        selectedProvider: 'openai',
         panelMode: 'merged',
     });
-    assertEqual(selectedDisabled.selectedProviderId, 'claude');
-    assertEqual(selectedDisabled.selectedRow.disabled, true);
-    assertEqual(selectedDisabled.selectedRow.statusLabel, 'Disabled');
-    assertEqual(selectedDisabled.selectedRow.statusDescription, 'Provider disabled in settings.');
-    assertEqual(selectedDisabled.selectedRow.titleStatusText, 'Disabled');
-    assertEqual(selectedDisabled.selectedRow.planLabel, 'Off');
-    assertEqual(selectedDisabled.selectedRow.usageSections.length, 0);
-    assertArrayEqual(selectedDisabled.panel.meters, [null]);
+    assertEqual(selectedDisabled.selectedProviderId, 'codex');
+    assertEqual(selectedDisabled.selectedRow.disabled, false);
+    assertEqual(selectedDisabled.panel.label, 'COD');
+    assertEqual(selectedDisabled.panel.visibleProviders.length, 1);
+    assertEqual(selectedDisabled.panel.visibleProviders[0].providerId, 'codex');
 
     const providerPanel = normalizeViewState(state, {panelMode: 'provider'});
     assertEqual(providerPanel.panel.visibleProviders.length, 1);

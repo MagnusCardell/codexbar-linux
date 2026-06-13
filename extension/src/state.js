@@ -622,22 +622,30 @@ export function normalizeViewState(state, options = {}) {
 function providersForSettings(snapshot, daemonSettings = DEFAULT_DAEMON_SETTINGS) {
     const snapshotProviders = Array.isArray(snapshot?.providers) ? snapshot.providers : [];
     const effectiveProviders = effectiveProviderSettings(daemonSettings);
+    const providerInfos = settingsProviderInfos(daemonSettings);
+    const showDisabledProviders = !providerInfos.some(providerInfo => providerRefreshEnabled(
+        settingsForProvider(daemonSettings, effectiveProviders, providerInfo.id)
+    ));
     const rows = [];
     const seen = new Set();
 
-    for (const providerInfo of settingsProviderInfos(daemonSettings)) {
+    for (const providerInfo of providerInfos) {
         const configured = settingsForProvider(daemonSettings, effectiveProviders, providerInfo.id);
         const snapshotProvider = snapshotProviders.find(provider => provider?.provider === providerInfo.id);
+        const disabled = !providerRefreshEnabled(configured);
+        seen.add(providerInfo.id);
+        if (disabled && !showDisabledProviders)
+            continue;
+
         if (snapshotProvider) {
-            rows.push(!providerRefreshEnabled(configured)
+            rows.push(disabled
                 ? disabledSnapshotProvider(snapshotProvider)
                 : snapshotProvider);
         } else {
-            rows.push(!providerRefreshEnabled(configured)
+            rows.push(disabled
                 ? disabledProvider(providerInfo)
                 : pendingProvider(providerInfo));
         }
-        seen.add(providerInfo.id);
     }
 
     for (const provider of snapshotProviders) {
